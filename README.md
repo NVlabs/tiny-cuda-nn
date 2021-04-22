@@ -5,7 +5,7 @@ This is a small, self-contained framework for training and querying neural netwo
 This framework powers the following publication:
 
 > __Real-time Neural Radiance Caching for Path Tracing__  
-> Thomas Müller, Fabrice Rousselle, Jan Novák, Alexander Keller  
+> [Thomas Müller](https://tom94.net), [Fabrice Rousselle](https://research.nvidia.com/person/fabrice-rousselle), [Jan Novák](http://jannovak.info), [Alexander Keller](https://research.nvidia.com/person/alex-keller)  
 > _To appear: ACM Transactions on Graphics (SIGGRAPH) 2021_
 >
 > [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c)
@@ -34,7 +34,7 @@ If you use it in your research, we would appreciate a citation via
 }
 ```
 
-Special thanks go to Nikolaus Binder for providing part of the infrastructure of this framework, as well as for help with efficiently utilizing TensorCores.
+Special thanks go to [Nikolaus Binder](https://research.nvidia.com/person/nikolaus-binder) for providing part of the infrastructure of this framework, as well as for help with efficiently utilizing TensorCores.
 
 
 ## Usage
