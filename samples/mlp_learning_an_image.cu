@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (argc < 2) {
-		std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr" << std::endl;
+		std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr [path-to-optional-config.json]" << std::endl;
 		std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
 		return 0;
 	}
