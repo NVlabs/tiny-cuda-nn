@@ -149,9 +149,8 @@ class OneBlob:
 def get_args():
 	parser = argparse.ArgumentParser(description="Image benchmark using TensorFlow.")
 
-	parser.add_argument("-c", "--config", default="network.json", type=str, help="JSON config filename")
-	parser.add_argument("-i", "--image", default="jensen2", type=str, help="Image to match")
-	# parser.add_argument("-o", "--outfolder", type=str, help="Name of the folder containing results")
+	parser.add_argument("-c", "--config", default="config.json", type=str, help="JSON config filename")
+	parser.add_argument("-i", "--image", default="albert", type=str, help="Image to match")
 
 	args = parser.parse_args()
 	return args
@@ -327,7 +326,7 @@ if __name__ == "__main__":
 
 
 			img = np.reshape(sess.run(output_tensor, feed_dict={ input_tensor: xy, batch_size_tensor: xy.shape[0] }), img_shape)
-			filename = f"{batch_size}-after-{N_ITERS}-iters.exr"
+			filename = f"{batch_size}-after-{N_ITERS}-iters-tensorflow.exr"
 			print(f"Saving {filename}")
 			exr.write(filename, img)
 

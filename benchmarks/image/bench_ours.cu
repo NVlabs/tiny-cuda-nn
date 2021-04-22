@@ -38,11 +38,7 @@
 
 #include <tiny-cuda-nn/trainer.h>
 
-#include <tiny-cuda-nn/cuda_graph.h>
-
 #include <tinyexr/tinyexr.h>
-
-#include <cutlass/half.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -54,12 +50,8 @@
 #include <vector>
 #include <fstream>
 
-#include <curand.h>
-
 
 using namespace tcnn;
-
-// using precision_t = cutlass::half_t;
 using precision_t = network_precision_t;
 
 
@@ -96,8 +88,12 @@ bool SaveEXR(const float* data, int width, int height, int nChannels, int channe
 	header.channels = (EXRChannelInfo *)malloc(sizeof(EXRChannelInfo) * header.num_channels);
 	// Must be (A)BGR order, since most of EXR viewers expect this channel order.
 	strncpy(header.channels[0].name, "B", 255); header.channels[0].name[strlen("B")] = '\0';
-	strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
-	strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
+	if (nChannels > 1) {
+		strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
+	}
+	if (nChannels > 2) {
+		strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
+	}
 	if (nChannels > 3) {
 		strncpy(header.channels[3].name, "A", 255); header.channels[3].name[strlen("A")] = '\0';
 	}
@@ -205,9 +201,15 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 
+	if (argc < 3) {
+		std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr path-to-config.json" << std::endl;
+		std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
+		return 0;
+	}
+
 	// First step: load an image that we'd like to learn
 	int width, height;
-	GPUMemory<float> image = load_image("../data/images/jensen2.exr", width, height);
+	GPUMemory<float> image = load_image(argv[1], width, height);
 
 	// Second step: create a cuda texture out of this image. It'll be used to generate training data efficiently on the fly
 	cudaResourceDesc resDesc;
@@ -226,7 +228,6 @@ int main(int argc, char* argv[]) {
 	texDesc.addressMode[0] = cudaAddressModeClamp;
 	texDesc.addressMode[1] = cudaAddressModeClamp;
 	texDesc.addressMode[2] = cudaAddressModeClamp;
-	texDesc.addressMode[3] = cudaAddressModeClamp;
 
 	cudaResourceViewDesc viewDesc;
 	memset(&viewDesc, 0, sizeof(viewDesc));
@@ -297,7 +298,7 @@ int main(int argc, char* argv[]) {
 
 				CURAND_CHECK_THROW(curandSetStream(rng, training_stream));
 
-				std::ifstream f{"../data/network.json"};
+				std::ifstream f{argv[2]};
 				json config = json::parse(f, nullptr, true, /*skip_comments=*/true);
 
 				json encoding_opts = config.value("encoding", json::object());
@@ -332,29 +333,25 @@ int main(int argc, char* argv[]) {
 				uint32_t tmp_loss_counter = 0;
 
 				uint32_t print_interval = n_iterations / 10;
-				const uint32_t GRAPH_SIZE = 5;
+				const uint32_t STEPS_INCREMENT = 5;
 
 				double mean_training_throughput = 0;
 				size_t mean_counter = 0;
 
-				CudaGraph m_training_graph;
-
-				for (uint32_t i = 0; i < n_iterations; i += GRAPH_SIZE) {
+				for (uint32_t i = 0; i < n_iterations; i += STEPS_INCREMENT) {
 					bool print_loss = i % print_interval == 0;
 
 					float loss_value;
-					m_training_graph.capture_and_execute(training_stream, true, [&]() {
-						for (uint32_t j = 0; j < GRAPH_SIZE; ++j) {
-							// Compute reference values at random coordinates
-							CURAND_CHECK_THROW(curandGenerateUniform(rng, batch.data(), batch_size * num_dims_encoded));
-							linear_kernel(eval_image<num_output_dims>, 0, training_stream, batch_size, texture, filter, width, height, batch.data(), bench_target.data());
+					for (uint32_t j = 0; j < STEPS_INCREMENT; ++j) {
+						// Compute reference values at random coordinates
+						CURAND_CHECK_THROW(curandGenerateUniform(rng, batch.data(), batch_size * num_dims_encoded));
+						linear_kernel(eval_image<num_output_dims>, 0, training_stream, batch_size, texture, filter, width, height, batch.data(), bench_target.data());
 
-							// Training step
-							float* p_loss = j == (GRAPH_SIZE - 1) ? &loss_value : nullptr;
-							encoding->encode(batch_size, batch.data(), bench_obe_out.data(), training_stream);
-							trainer->training_step(training_stream, bench_obe_out, bench_target, p_loss);
-						}
-					});
+						// Training step
+						float* p_loss = j == (STEPS_INCREMENT - 1) ? &loss_value : nullptr;
+						encoding->encode(batch_size, batch.data(), bench_obe_out.data(), training_stream);
+						trainer->training_step(training_stream, bench_obe_out, bench_target, p_loss);
+					}
 
 					tmp_loss += loss_value;
 					++tmp_loss_counter;
@@ -384,7 +381,7 @@ int main(int argc, char* argv[]) {
 				encoding->encode(n_coords, xs_and_ys.data(), eval_obe_out.data(), inference_stream);
 				network->inference(inference_stream, eval_obe_out, prediction);
 
-				save_image(prediction_data, sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters.exr");
+				save_image(prediction_data, sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".exr");
 
 				std::cout << "Finished training benchmark. Mean throughput is " << mean_training_throughput << "/s. Waiting 10 seconds for GPU to cool down." << std::endl;
 				std::this_thread::sleep_for(std::chrono::seconds{10});
@@ -394,8 +391,6 @@ int main(int argc, char* argv[]) {
 
 				double mean_inference_throughput = 0;
 				mean_counter = 0;
-
-				CudaGraph m_inference_graph;
 
 				print_interval *= 5;
 				n_iterations *= 5;
