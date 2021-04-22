@@ -34,7 +34,7 @@ If you use it in your research, we would appreciate a citation via
 }
 ```
 
-Special thanks go to [Nikolaus Binder](https://research.nvidia.com/person/nikolaus-binder) for providing part of the infrastructure of this framework, as well as for help with efficiently utilizing TensorCores.
+Special thanks go to the NRC authors for helpful discussions and to [Nikolaus Binder](https://research.nvidia.com/person/nikolaus-binder) for providing part of the infrastructure of this framework, as well as for help with utilizing TensorCores from within CUDA.
 
 
 ## Usage
@@ -60,7 +60,7 @@ nlohmann::json config = {
 	{"network", {
 		{"otype", "FullyFusedMLP"},
 		{"n_neurons", 64},
-		{"n_layers", 4},
+		{"n_hidden_layers", 5},
 		{"activation", "ReLU"},
 		{"output_activation", "None"},
 	}},
