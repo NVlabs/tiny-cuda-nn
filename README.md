@@ -1,13 +1,15 @@
 # Tiny CUDA Neural Networks
 
-
 This is a small, self-contained framework for training and querying neural networks. Most notably, it contains a lightning fast "fully fused" multi-layer perceptron, powering
 
 > __Real-time Neural Radiance Caching for Path Tracing__  
 > Thomas Müller, Fabrice Rousselle, Jan Novák, Alexander Keller  
 > _To appear: ACM Transactions on Graphics (SIGGRAPH) 2021_
+>
+> [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c)
 
-as well as its [corresponding GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c).
+For business inquiries, please contact <researchinquiries@nvidia.com>.  
+For press and other inquiries, please contact Hector Marinez at <hmarinez@nvidia.com>.
 
 ## License and Citation
 
