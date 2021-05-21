@@ -573,7 +573,7 @@ void CutlassMLP<T>::allocate_backward_buffers(uint32_t batch_size) {
 }
 
 template <typename T>
-void CutlassMLP<T>::initialize_params(float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void CutlassMLP<T>::initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
 	std::cout << "CutlassMLP: initializing " << m_total_n_params << " params" << std::endl;
 
 	size_t current_pos = 0;
@@ -586,16 +586,15 @@ void CutlassMLP<T>::initialize_params(float* params_full_precision, T* params, T
 		current_pos += m_weight_matrices[i].n_elements();
 	}
 
-	// Initialize params
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
 		if (m_activation == Activation::Sine) {
 			if (i == 0) {
-				m_weight_matrices_full_precision[i].initialize_siren_uniform_first(scale);
+				m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
 			} else {
-				m_weight_matrices_full_precision[i].initialize_siren_uniform(scale);
+				m_weight_matrices_full_precision[i].initialize_siren_uniform(rnd, scale);
 			}
 		} else {
-			m_weight_matrices_full_precision[i].initialize_xavier_uniform(scale);
+			m_weight_matrices_full_precision[i].initialize_xavier_uniform(rnd, scale);
 		}
 	}
 }

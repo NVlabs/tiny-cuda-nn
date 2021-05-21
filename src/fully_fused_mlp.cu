@@ -968,7 +968,7 @@ void FullyFusedMLP<T, WIDTH>::allocate_backward_buffers(uint32_t batch_size) {
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::initialize_params(float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void FullyFusedMLP<T, WIDTH>::initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
 	std::cout << "FullyFusedMLP: initializing " << m_total_n_params << " params" << std::endl;
 
 	size_t current_pos = 0;
@@ -982,25 +982,24 @@ void FullyFusedMLP<T, WIDTH>::initialize_params(float* params_full_precision, T*
 		current_pos += m_weight_matrices[i].n_elements();
 	}
 
-	// Initialize params
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
 		if (m_activation == Activation::Sine) {
 			if (i == 0) {
-				m_weight_matrices_full_precision[i].initialize_siren_uniform_first(scale);
+				m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
 			} else {
-				m_weight_matrices_full_precision[i].initialize_siren_uniform(scale);
+				m_weight_matrices_full_precision[i].initialize_siren_uniform(rnd, scale);
 			}
 		} else if (m_use_feedback_alignment) {
-			m_weight_matrices_full_precision[i].initialize_fa_uniform_forward(scale);
+			m_weight_matrices_full_precision[i].initialize_fa_uniform_forward(rnd, scale);
 		} else {
-			m_weight_matrices_full_precision[i].initialize_xavier_uniform(scale);
+			m_weight_matrices_full_precision[i].initialize_xavier_uniform(rnd, scale);
 		}
 	}
 
 	// Initialize backward params for feedback alignment
 	if (m_use_feedback_alignment) {
 		for (size_t i = 0; i < m_weight_matrices_backward.size(); ++i) {
-			m_weight_matrices_backward[i].initialize_fa_uniform_backward(scale);
+			m_weight_matrices_backward[i].initialize_fa_uniform_backward(rnd, scale);
 		}
 	}
 }

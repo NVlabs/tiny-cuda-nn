@@ -65,7 +65,7 @@ public:
 	virtual uint32_t num_forward_gradient_dims() const = 0;
 
 	// By default, an encoding has no parameters
-	void initialize_params(float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
+	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
 	size_t n_params() const override { return 0; }
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override { return {}; }

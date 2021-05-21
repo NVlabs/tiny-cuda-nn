@@ -49,9 +49,9 @@ TCNN_NAMESPACE_BEGIN
 template <typename T, typename PARAMS_T, typename COMPUTE_T=T>
 class Trainer : public ObjectWithMutableHyperparams {
 public:
-	Trainer(std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> model, std::shared_ptr<Optimizer<PARAMS_T>> optimizer, std::shared_ptr<Loss<COMPUTE_T>> loss, float perturbation_sigma = 0)
+	Trainer(std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> model, std::shared_ptr<Optimizer<PARAMS_T>> optimizer, std::shared_ptr<Loss<COMPUTE_T>> loss, uint32_t seed = 1337, float perturbation_sigma = 0)
 	: m_model{model}, m_optimizer{optimizer}, m_loss{loss}, m_perturbation_sigma{perturbation_sigma} {
-		initialize_params();
+		initialize_params(seed);
 
 		CURAND_CHECK_THROW(curandCreateGenerator(&m_curand, CURAND_RNG_PSEUDO_DEFAULT));
 		CURAND_CHECK_THROW(curandSetPseudoRandomGeneratorSeed(m_curand, 1337ULL));
@@ -61,7 +61,7 @@ public:
 		curandDestroyGenerator(m_curand);
 	}
 
-	void initialize_params() {
+	void initialize_params(uint32_t seed) {
 		size_t n_params = m_model->n_params();
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
 
@@ -82,7 +82,13 @@ public:
 			params_inference = m_params;
 		}
 
+		std::seed_seq seq{seed};
+		std::vector<uint32_t> seeds(1);
+		seq.generate(std::begin(seeds), std::end(seeds));
+		std::mt19937 rnd(seeds.front());
+
 		m_model->initialize_params(
+			rnd,
 			m_params_full_precision,
 			m_params,
 			params_inference,

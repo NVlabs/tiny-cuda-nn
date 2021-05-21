@@ -71,7 +71,7 @@ public:
 		bool compute_param_gradients = true
 	) override;
 
-	void initialize_params(float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
+	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
 
 	GPUMatrix<T, MatrixLayout::RowMajor>& input_weight_matrix(WeightUsage usage) {
 		switch (usage) {

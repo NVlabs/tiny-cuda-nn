@@ -201,9 +201,10 @@ public:
 		m_encoding->backward(stream, input.n(), m_input_gradient_d_dnetwork_input.data(), m_input_gradient_encoding_forward_gradient.data(), d_dinput.data(), input.data());
 	}
 
-	void initialize_params(float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
+	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
 		size_t offset = 0;
 		m_network->initialize_params(
+			rnd,
 			params_full_precision + offset,
 			params + offset,
 			inference_params + offset,
@@ -214,6 +215,7 @@ public:
 		offset += m_network->n_params();
 
 		m_encoding->initialize_params(
+			rnd,
 			params_full_precision + offset,
 			params + offset,
 			inference_params + offset,

@@ -487,7 +487,7 @@ void CutlassResNet<T, input_activation, output_activation>::allocate_backward_bu
 }
 
 template <typename T, Activation input_activation, Activation output_activation>
-void CutlassResNet<T, input_activation, output_activation>::initialize_params(float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void CutlassResNet<T, input_activation, output_activation>::initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
 	std::cout << "CutlassResNet: initializing " << m_total_n_params << " params" << std::endl;
 
 	size_t current_pos = 0;
@@ -502,9 +502,9 @@ void CutlassResNet<T, input_activation, output_activation>::initialize_params(fl
 	// Initialize the params
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
 		if (i == 0 && input_activation_value == Activation::Sine) {
-			m_weight_matrices_full_precision[i].initialize_siren_uniform_first(scale);
+			m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
 		} else {
-			m_weight_matrices_full_precision[i].initialize_xavier_uniform(scale);
+			m_weight_matrices_full_precision[i].initialize_xavier_uniform(rnd, scale);
 		}
 	}
 }

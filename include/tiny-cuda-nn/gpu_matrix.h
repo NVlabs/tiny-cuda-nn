@@ -132,13 +132,12 @@ public:
 	}
 
 	// Various initializations
-	void initialize_xavier_uniform(float scale = 1) {
+	void initialize_xavier_uniform(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 		scale *= std::sqrt(6.0f / (float)(fan_in() + fan_out()));
 		std::uniform_real_distribution<float> distribution(-scale, scale);
 
@@ -146,19 +145,18 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_fa_uniform_forward(float scale = 1) {
+	void initialize_fa_uniform_forward(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 		scale *= std::sqrt(1.0f / (float)fan_in());
 		std::uniform_real_distribution<float> distribution(-scale, scale);
 
@@ -166,19 +164,18 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_fa_uniform_backward(float scale = 1) {
+	void initialize_fa_uniform_backward(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 		scale *= std::sqrt(1.0f / (float)fan_out());
 		std::uniform_real_distribution<float> distribution(-scale, scale);
 
@@ -186,19 +183,18 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_siren_uniform(float scale = 1) {
+	void initialize_siren_uniform(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 		scale *= std::sqrt(6.0f / (float)fan_in());
 		std::uniform_real_distribution<float> distribution(-scale, scale);
 
@@ -206,19 +202,18 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_siren_uniform_first(float scale = 1) {
+	void initialize_siren_uniform_first(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 
 		// The 30 in the first layer comes from https://vsitzmann.github.io/siren/
 		scale *= 30.0f / (float)fan_in();
@@ -228,19 +223,18 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_siren_normal_first(float scale = 1) {
+	void initialize_siren_normal_first(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 
 		// The 30 in the first layer comes from https://vsitzmann.github.io/siren/
 		scale *= 10.0f / (float)fan_in();
@@ -250,19 +244,18 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_xavier_normal(float scale = 1) {
+	void initialize_xavier_normal(std::mt19937& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
-		std::mt19937 generator(std::random_device{}());
 		scale *= std::sqrt(2.0f / (fan_out() + fan_in()));
 		std::normal_distribution<float> distribution(0, scale);
 
@@ -270,7 +263,7 @@ public:
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(generator);
+			new_data[i] = (T)distribution(rnd);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
