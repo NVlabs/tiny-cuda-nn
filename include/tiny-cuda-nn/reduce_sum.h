@@ -89,7 +89,7 @@ __global__ void block_reduce(
 	using T_DECAYED = std::decay_t<T>;
 
 	T_OUT val;
-	if (std::is_same_v<T_DECAYED, cutlass::half_t> || std::is_same_v<T_DECAYED, ::half>) {
+	if (std::is_same<T_DECAYED, cutlass::half_t>::value || std::is_same<T_DECAYED, ::half>::value) {
 		if (i < n_elements) {
 			::half vals[8];
 			*(int4*)&vals[0] = *((int4*)input + i + block_offset);
@@ -97,14 +97,14 @@ __global__ void block_reduce(
 		} else {
 			val = 0;
 		}
-	} else if (std::is_same_v<T_DECAYED, float>) {
+	} else if (std::is_same<T_DECAYED, float>::value) {
 		if (i < n_elements) {
 			float4 vals = *((float4*)input + i + block_offset);
 			val = fun((T)vals.x) + fun((T)vals.y) + fun((T)vals.z) + fun((T)vals.w);
 		} else {
 			val = 0;
 		}
-	} else if (std::is_same_v<T_DECAYED, double>) {
+	} else if (std::is_same<T_DECAYED, double>::value) {
 		if (i < n_elements) {
 			double2 vals = *((double2*)input + i + block_offset);
 			val = fun((T)vals.x) + fun((T)vals.y);
@@ -210,14 +210,14 @@ __global__ void block_reduce1(
 
 template <typename T, typename F>
 void reduce_sum_old(T* device_pointer, F fun, float* workspace, uint32_t n_elements, cudaStream_t stream) {
-	linear_kernel(block_reduce0<T, F>, sizeof(float) * threads, stream, n_elements, fun, device_pointer, workspace);
+	linear_kernel(block_reduce0<T, F>, sizeof(float) * n_threads_linear, stream, n_elements, fun, device_pointer, workspace);
 
-	n_elements = blocks;
+	n_elements = n_blocks_linear(n_elements);
 
 	// If the first block reduction wasn't sufficient, keep reducing
 	while (n_elements > 1) {
-		linear_kernel(block_reduce1, sizeof(float) * threads, stream, n_elements, workspace);
-		n_elements = blocks;
+		linear_kernel(block_reduce1, sizeof(float) * n_threads_linear, stream, n_elements, workspace);
+		n_elements = n_blocks_linear(n_elements);
 	}
 }
 

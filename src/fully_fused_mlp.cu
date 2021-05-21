@@ -252,7 +252,7 @@ __global__ void kernel_mlp_fused_backward(const half* __restrict__ dL_doutput, c
 			wmma::fill_fragment(result_frag[l], 0.0f);
 
 			// Load a chunk of output gradients from shared memory and multiply with previously loaded weights
-			if (std::is_same_v<OUTPUT_LAYOUT, wmma::row_major>) {
+			if (std::is_same<OUTPUT_LAYOUT, wmma::row_major>::value) {
 				wmma::load_matrix_sync(act_frag, dL_doutput + (elem_idx + 16 * (threadIdx.z + l * BLOCK_DIM_Z)) * 16, 16);
 			} else {
 				wmma::load_matrix_sync(act_frag, dL_doutput + (elem_idx + 16 * (threadIdx.z + l * BLOCK_DIM_Z)), batch_size);
@@ -311,7 +311,7 @@ void mlp_fused_backward(
 	const uint32_t n_hidden_matmuls,
 	const MatrixLayout output_layout
 ) {
-	if (!std::is_same_v<T, cutlass::half_t>) {
+	if (!std::is_same<T, cutlass::half_t>::value) {
 		throw std::runtime_error{"The fully fused backward pass only supports half precision."};
 	}
 
@@ -586,7 +586,7 @@ void mlp_fused_forward(
 	const uint32_t n_hidden_layers,
 	const MatrixLayout output_layout
 ) {
-	if (!std::is_same_v<T, cutlass::half_t>) {
+	if (!std::is_same<T, cutlass::half_t>::value) {
 		throw std::runtime_error{"The fully fused forward pass only supports half precision."};
 	}
 

@@ -429,7 +429,7 @@ public:
 		}
 
 		ROOT_TYPE* Xk;
-		if (std::is_same_v<ROOT_TYPE, float>) {
+		if (std::is_same<ROOT_TYPE, float>::value) {
 			Xk = (ROOT_TYPE*)data;
 		} else {
 			Xk = tmp.data() + n_elements * n_matrices * 5;
@@ -445,10 +445,10 @@ public:
 		cudaDataType_t dataType;
 		cublasComputeType_t computeType;
 
-		if (std::is_same_v<ROOT_TYPE, float>) {
+		if (std::is_same<ROOT_TYPE, float>::value) {
 			dataType = CUDA_R_32F;
 			computeType = CUBLAS_COMPUTE_32F;
-		} else if (std::is_same_v<ROOT_TYPE, double>) {
+		} else if (std::is_same<ROOT_TYPE, double>::value) {
 			dataType = CUDA_R_64F;
 			computeType = CUBLAS_COMPUTE_64F;
 		}
@@ -616,7 +616,7 @@ public:
 			}
 		}
 
-		if (!std::is_same_v<ROOT_TYPE, float>) {
+		if (!std::is_same<ROOT_TYPE, float>::value) {
 			linear_kernel(cast_from<ROOT_TYPE>, 0, stream, n_elements, Xk, data);
 		}
 	}
