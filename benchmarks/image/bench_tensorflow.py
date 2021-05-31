@@ -65,7 +65,7 @@ class Image(Function):
 		if not paths:
 			raise ValueError(f"Invalid image name '{filename}''")
 		path = paths[0] # Use first path that exists
-		self.data = exr.read(path, gamma=2.2)
+		self.data = exr.read(path)
 		if self.data.shape[-1] > 3:
 			self.data = self.data[:,:,0:3]
 		self.data_tf = tf.constant(self.data, dtype=tf.float32)
@@ -228,17 +228,13 @@ def make_graph():
 	input_tensor = uniform.sample((batch_size_tensor, target_fun.n_dims))
 	target_tensor = target_fun.eval_tf(input_tensor)
 
-	encoded_input_tensor = encoding(input_tensor, False, "encoding")
-	# encoded_input_tensor = input_tensor
+	current_tensor = encoding(input_tensor, False, "encoding")
 
-	current_tensor = linear_layer(encoded_input_tensor, config["network"]["n_neurons"], tf.float16, f"fc_in", config["network"]["use_biases"])
-	current_tensor = activation(current_tensor, config["network"]["activation"])
-
-	for i in range(config["network"]["n_layers"]):
-		current_tensor = linear_layer(current_tensor, config["network"]["n_neurons"], tf.float16, f"fc{i}", config["network"]["use_biases"])
+	for i in range(config["network"]["n_hidden_layers"]):
+		current_tensor = linear_layer(current_tensor, config["network"]["n_neurons"], tf.float16, f"fc{i}", False)
 		current_tensor = activation(current_tensor, config["network"]["activation"])
 
-	output_tensor = linear_layer(current_tensor, target_fun.n_channels, tf.float16, f"fc_out", config["network"]["use_biases"])
+	output_tensor = linear_layer(current_tensor, target_fun.n_channels, tf.float16, f"fc_out", False)
 	output_tensor = activation(output_tensor, config["network"]["output_activation"])
 
 	relative_l2_error = (target_tensor - output_tensor)**2 / (tf.stop_gradient(output_tensor)**2 + 0.01)
