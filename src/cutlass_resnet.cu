@@ -107,18 +107,17 @@ std::enable_if_t<std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<
 	const GPUMatrix<T, MatrixLayout::RowMajor>& weights2,
 	GPUMatrix<T, MatrixLayout::ColumnMajor>& output
 ) {
-	const auto transposed_input = input.transposed();
 	auto transposed_output = output.transposed();
 
 	switch (weights1.n()) {
 		case 64:
 			fc_multiply_b2b<Activation::None, FullLayerB2bPreReLU64, FullLayerB2bPreReLU64>(
 				stream,
-				transposed_input,
+				input.transposed(),
 				weights1.transposed(),
 				transposed_output,
 				weights2.transposed(),
-				transposed_input,
+				input.transposed(),
 				transposed_output,
 				(TypeCompute)0,
 				(TypeCompute)1
@@ -127,11 +126,11 @@ std::enable_if_t<std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<
 		case 128:
 			fc_multiply_b2b<Activation::None, FullLayerB2bPreReLU128, FullLayerB2bPreReLU128>(
 				stream,
-				transposed_input,
+				input.transposed(),
 				weights1.transposed(),
 				transposed_output,
 				weights2.transposed(),
-				transposed_input,
+				input.transposed(),
 				transposed_output,
 				(TypeCompute)0,
 				(TypeCompute)1
