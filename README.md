@@ -8,7 +8,7 @@ This framework powers the following publication:
 > [Thomas Müller](https://tom94.net), [Fabrice Rousselle](https://research.nvidia.com/person/fabrice-rousselle), [Jan Novák](http://jannovak.info), [Alexander Keller](https://research.nvidia.com/person/alex-keller)  
 > _To appear: ACM Transactions on Graphics (SIGGRAPH) 2021_
 >
-> [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c)
+> [ [Paper](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) ] [ [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c) ] [ [Video](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.mp4) ] [ [Interactive Results Viewer](https://tom94.net/data/publications/mueller21realtime/interactive-viewer/) ] [ [BibTex](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.bib) ]
 
 For business inquiries, please contact <researchinquiries@nvidia.com>.  
 For press and other inquiries, please contact Hector Marinez at <hmarinez@nvidia.com>.
