@@ -55,25 +55,24 @@ public:
 	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, bool use_feedback_alignment, Activation activation, Activation output_activation);
 	~FullyFusedMLP() override;
 
-	void inference(cudaStream_t stream, const GPUMatrix<T, MatrixLayout::ColumnMajor>& input, GPUMatrix<float, MatrixLayout::ColumnMajor>& output) override;
-	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T, MatrixLayout::ColumnMajor>& input, GPUMatrix<T, MatrixLayout::ColumnMajor>& output, MatrixLayout output_layout = MatrixLayout::ColumnMajor) override;
+	void inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) override;
+	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
 
-	void forward(cudaStream_t stream, const GPUMatrix<T, MatrixLayout::ColumnMajor>& input, GPUMatrix<T, MatrixLayout::ColumnMajor>& output, MatrixLayout output_layout = MatrixLayout::ColumnMajor, bool use_inference_matrices = false) override;
+	void forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
 
 	void backward(
 		cudaStream_t stream,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& input,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& output,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& dL_doutput,
-		GPUMatrix<T, MatrixLayout::ColumnMajor>* dL_dinput = nullptr,
-		MatrixLayout output_layout = MatrixLayout::ColumnMajor,
+		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& output,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrix<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) override;
 
 	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
 
-	GPUMatrix<T, MatrixLayout::RowMajor>& input_weight_matrix(WeightUsage usage) {
+	GPUMatrix<T, RM>& input_weight_matrix(WeightUsage usage) {
 		switch (usage) {
 			case WeightUsage::Inference: return m_weight_matrices_inference.front();
 			case WeightUsage::Forward: return m_weight_matrices.front();
@@ -83,7 +82,7 @@ public:
 		throw std::runtime_error{"Invalid weight usage."};
 	}
 
-	GPUMatrix<T, MatrixLayout::RowMajor>& weight_matrix_at(WeightUsage usage, uint32_t idx) {
+	GPUMatrix<T, RM>& weight_matrix_at(WeightUsage usage, uint32_t idx) {
 		switch (usage) {
 			case WeightUsage::Inference: return m_weight_matrices_inference.at(1 + idx);
 			case WeightUsage::Forward: return m_weight_matrices.at(1 + idx);
@@ -93,7 +92,7 @@ public:
 		throw std::runtime_error{"Invalid weight usage."};
 	}
 
-	GPUMatrix<T, MatrixLayout::RowMajor>& output_weight_matrix(WeightUsage usage) {
+	GPUMatrix<T, RM>& output_weight_matrix(WeightUsage usage) {
 		switch (usage) {
 			case WeightUsage::Inference: return m_weight_matrices_inference.back();
 			case WeightUsage::Forward: return m_weight_matrices.back();
@@ -103,15 +102,15 @@ public:
 		throw std::runtime_error{"Invalid weight usage."};
 	}
 
-	GPUMatrix<T, MatrixLayout::RowMajor>& input_gradient_matrix() {
+	GPUMatrix<T, RM>& input_gradient_matrix() {
 		return m_gradient_matrices.front();
 	}
 
-	GPUMatrix<T, MatrixLayout::RowMajor>& gradient_matrix_at(uint32_t idx) {
+	GPUMatrix<T, RM>& gradient_matrix_at(uint32_t idx) {
 		return m_gradient_matrices.at(1 + idx);
 	}
 
-	GPUMatrix<T, MatrixLayout::RowMajor>& output_gradient_matrix() {
+	GPUMatrix<T, RM>& output_gradient_matrix() {
 		return m_gradient_matrices.back();
 	}
 
@@ -143,12 +142,42 @@ public:
 		return result;
 	}
 
+	uint32_t width() const override {
+		return WIDTH;
+	}
+
+	uint32_t num_forward_activations() const override {
+		return (uint32_t)m_forward_tmp.size();
+	}
+
+	const T* forward_activations(uint32_t layer) const override {
+		return m_forward_tmp[layer].data();
+	}
+
 private:
 	void allocate_inference_buffers(uint32_t batch_size);
 
 	void allocate_forward_buffers(uint32_t batch_size);
 
 	void allocate_backward_buffers(uint32_t batch_size);
+
+	template <typename CutlassLayer, MatrixLayout input_layout, MatrixLayout output_layout>
+	void compute_inference_layer(
+		cudaStream_t stream,
+		Activation activation,
+		const GPUMatrix<T, RM>& weights,
+		const GPUMatrix<T, input_layout>& input,
+		GPUMatrix<T, output_layout>& output,
+		T activation_param = (T)0
+	) {
+		switch (activation) {
+			case Activation::None: fc_multiply<Activation::None, CutlassLayer>(stream, weights, input, output, activation_param); break;
+			case Activation::Exponential: fc_multiply<Activation::Exponential, CutlassLayer>(stream, weights, input, output, activation_param); break;
+			case Activation::ReLU: fc_multiply<Activation::ReLU, CutlassLayer>(stream, weights, input, output, activation_param); break;
+			case Activation::Sine: fc_multiply<Activation::Sine, CutlassLayer>(stream, weights, input, output, activation_param); break;
+			default: throw std::runtime_error{"Unsupported activation."};
+		}
+	}
 
 	uint32_t m_n_hidden_layers;
 	uint32_t m_n_hidden_matmuls;
@@ -171,27 +200,27 @@ private:
 
 	// Storage of inference temporary data
 	GPUMemory<char> m_inference_buffer;
-	std::array<GPUMatrix<T, MatrixLayout::ColumnMajor>, 2> m_inference_tmp;
-	GPUMatrix<T, MatrixLayout::ColumnMajor> m_inference_output_tmp;
+	GPUMatrix<T> m_inference_tmp;
+	GPUMatrix<T> m_inference_output_tmp;
 
 	// Storage of forward pass data
 	GPUMemory<char> m_forward_buffer = GPUMemory<char>(0);
-	std::vector<GPUMatrix<T, MatrixLayout::ColumnMajor>> m_forward_tmp;
+	std::vector<GPUMatrix<T>> m_forward_tmp;
 
 	// Storage of backward pass data
 	GPUMemory<char> m_backward_buffer = GPUMemory<char>(0);
-	std::vector<GPUMatrix<T, MatrixLayout::ColumnMajor>> m_backward_tmp;
-	GPUMatrix<T, MatrixLayout::ColumnMajor> m_backward_output_tmp;
+	std::vector<GPUMatrix<T>> m_backward_tmp;
+	GPUMatrixDynamic<T> m_backward_output_tmp;
 
 	// Storage of params
-	std::vector<GPUMatrix<T, MatrixLayout::RowMajor>> m_weight_matrices;
-	std::vector<GPUMatrix<T, MatrixLayout::RowMajor>> m_weight_matrices_inference;
-	std::vector<GPUMatrix<T, MatrixLayout::RowMajor>> m_weight_matrices_backward;
+	std::vector<GPUMatrix<T, RM>> m_weight_matrices;
+	std::vector<GPUMatrix<T, RM>> m_weight_matrices_inference;
+	std::vector<GPUMatrix<T, RM>> m_weight_matrices_backward;
 	size_t m_total_n_params;
 
-	std::vector<GPUMatrix<float, MatrixLayout::RowMajor>> m_weight_matrices_full_precision;
+	std::vector<GPUMatrix<float, RM>> m_weight_matrices_full_precision;
 
-	std::vector<GPUMatrix<T, MatrixLayout::RowMajor>> m_gradient_matrices;
+	std::vector<GPUMatrix<T, RM>> m_gradient_matrices;
 };
 
 TCNN_NAMESPACE_END

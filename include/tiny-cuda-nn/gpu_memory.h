@@ -33,21 +33,32 @@
 
 #include <tiny-cuda-nn/common.h>
 
-#include <stdint.h>
-#include <vector>
-#include <string>
-#include <stdexcept>
+#include <json/json.hpp>
+
+#include <atomic>
 #include <cuda.h>
+#include <stdexcept>
+#include <stdint.h>
+#include <string>
+#include <vector>
 
 
 TCNN_NAMESPACE_BEGIN
+
+#define DEBUG_GUARD_SIZE 0
+
+static std::atomic<size_t> s_total_n_bytes_allocated{0};
+
+inline size_t total_n_bytes_allocated() {
+	return s_total_n_bytes_allocated;
+}
 
 /// Managed memory on the Device
 template<class T> class GPUMemory {
 protected:
 	T*       m_data      = nullptr; ///< pointer to the actual data
 	size_t   m_size      = 0; ///< size of the array (number of elements)
-	size_t   m_allocation_size = 0;
+	size_t   m_allocation_n_bytes = 0;
 	bool m_compressed = false;
 	cudaStream_t m_stream = nullptr;
 
@@ -60,9 +71,21 @@ public:
 	/// Default constructor (does not allocate anything)
 	GPUMemory() {}
 
-	/// Move constructor
-	GPUMemory(GPUMemory<T> &&other) : m_size(other.m_size), m_allocation_size(other.m_allocation_size), m_data(other.m_data), m_compressed(other.m_compressed), m_stream(other.m_stream), m_alloc_handle(other.m_alloc_handle) {
+	GPUMemory<T>& operator=(GPUMemory<T>&& other) {
+		m_size = other.m_size;
+		m_allocation_n_bytes = other.m_allocation_n_bytes;
+		m_data = other.m_data;
+		m_compressed = other.m_compressed;
+		m_stream = other.m_stream;
+		m_alloc_handle = other.m_alloc_handle;
+
 		other.m_size = 0; other.m_data = nullptr; other.m_stream = nullptr;
+		return *this;
+	}
+
+	/// Move constructor
+	GPUMemory(GPUMemory<T>&& other) {
+		*this = std::move(other);
 	}
 
 	/// Copy constructor (data is actually being duplicated)
@@ -70,17 +93,54 @@ public:
 		copy_from_device(other);
 	}
 
-	void allocate_memory(size_t size) {
-		if (size == 0) {
+	void check_guards() const {
+#if DEBUG_GUARD_SIZE > 0
+		if (!m_data)
+			return;
+		if (m_compressed)
+			return;
+		uint8_t buf[DEBUG_GUARD_SIZE];
+		const uint8_t *rawptr=(const uint8_t *)m_data;
+		cudaMemcpy(buf, rawptr-DEBUG_GUARD_SIZE, DEBUG_GUARD_SIZE, cudaMemcpyDeviceToHost);
+		for (int i=0;i<DEBUG_GUARD_SIZE;++i) if (buf[i]!=0xff) {
+			printf("TRASH BEFORE BLOCK offset %d data %p, read 0x%02x expected 0xff!\n", i, m_data, buf[i] );
+			break;
+		}
+		cudaMemcpy(buf, rawptr+m_size*sizeof(T), DEBUG_GUARD_SIZE, cudaMemcpyDeviceToHost);
+		for (int i=0;i<DEBUG_GUARD_SIZE;++i) if (buf[i]!=0xfe) {
+			printf("TRASH AFTER BLOCK offset %d data %p, read 0x%02x expected 0xfe!\n", i, m_data, buf[i] );
+			break;
+		}
+#endif
+	}
+
+	void allocate_memory(size_t n_bytes) {
+		if (n_bytes == 0) {
 			return;
 		}
 
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
+		std::cout << "GPUMemory: Allocating " << bytes_to_string(n_bytes) << "." << std::endl;
+#endif
+
 		if (!m_compressed) {
+			uint8_t *rawptr = nullptr;
 			if (m_stream) {
-				CUDA_CHECK_THROW(cudaMallocAsync(&m_data, size * sizeof(T), m_stream));
+				CUDA_CHECK_THROW(cudaMallocAsync(&rawptr, n_bytes+DEBUG_GUARD_SIZE*2, m_stream));
+#if DEBUG_GUARD_SIZE > 0
+				CUDA_CHECK_THROW(cudaMemsetAsync(rawptr , 0xff, DEBUG_GUARD_SIZE, m_stream));
+				CUDA_CHECK_THROW(cudaMemsetAsync(rawptr+n_bytes+DEBUG_GUARD_SIZE , 0xfe, DEBUG_GUARD_SIZE, m_stream));
+#endif
 			} else {
-				CUDA_CHECK_THROW(cudaMalloc(&m_data, size * sizeof(T)));
+				CUDA_CHECK_THROW(cudaMalloc(&rawptr, n_bytes+DEBUG_GUARD_SIZE*2));
+#if DEBUG_GUARD_SIZE > 0
+				CUDA_CHECK_THROW(cudaMemset(rawptr , 0xff, DEBUG_GUARD_SIZE));
+				CUDA_CHECK_THROW(cudaMemset(rawptr+n_bytes+DEBUG_GUARD_SIZE , 0xfe, DEBUG_GUARD_SIZE));
+#endif
 			}
+			if (rawptr) rawptr+=DEBUG_GUARD_SIZE;
+			m_data=(T*)(rawptr);
+			s_total_n_bytes_allocated += n_bytes;
 			return;
 		}
 
@@ -100,23 +160,26 @@ public:
 		CU_CHECK_THROW(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
 
 		// Ensure size matches granularity requirements for the allocation
-		size_t padded_size = next_multiple(size, granularity);
+		size_t padded_n_bytes = next_multiple(n_bytes, granularity);
 
 		// Allocate physical memory
-		CU_CHECK_THROW(cuMemCreate(&m_alloc_handle, padded_size, &prop, 0));
+		CU_CHECK_THROW(cuMemCreate(&m_alloc_handle, padded_n_bytes, &prop, 0));
 
 		CUmemAllocationProp alloc_prop = {};
 		cuMemGetAllocationPropertiesFromHandle(&alloc_prop, m_alloc_handle);
 		if (alloc_prop.allocFlags.compressionType != CU_MEM_ALLOCATION_COMP_GENERIC) {
 			std::cout << "WARNING: requested compressed memory, but did not obtain it." << std::endl;
-		} else {
+		}
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
+		else {
 			std::cout << "SUCCESS: got compressed memory." << std::endl;
 		}
+#endif
 
 		CUdeviceptr ptr;
 		// `ptr` holds the returned start of virtual address range reserved.
-		CU_CHECK_THROW(cuMemAddressReserve(&ptr, padded_size, 0, 0, 0));
-		CU_CHECK_THROW(cuMemMap(ptr, padded_size, 0, m_alloc_handle, 0));
+		CU_CHECK_THROW(cuMemAddressReserve(&ptr, padded_n_bytes, 0, 0, 0));
+		CU_CHECK_THROW(cuMemMap(ptr, padded_n_bytes, 0, m_alloc_handle, 0));
 
 		CUmemAccessDesc accessDesc = {};
 		accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -124,10 +187,12 @@ public:
 		accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 
 		// Make the address accessible
-		CU_CHECK_THROW(cuMemSetAccess(ptr, padded_size, &accessDesc, 1));
+		CU_CHECK_THROW(cuMemSetAccess(ptr, padded_n_bytes, &accessDesc, 1));
 
 		m_data = (T*)ptr;
-		m_allocation_size = padded_size;
+		m_allocation_n_bytes = padded_n_bytes;
+
+		s_total_n_bytes_allocated += n_bytes;
 	}
 
 	void free_memory() {
@@ -136,19 +201,25 @@ public:
 		}
 
 		if (!m_compressed) {
+			uint8_t *rawptr = (uint8_t*)m_data;
+			if (rawptr) rawptr-=DEBUG_GUARD_SIZE;
 			if (m_stream) {
-				CUDA_CHECK_THROW(cudaFreeAsync(m_data, m_stream));
+				CUDA_CHECK_THROW(cudaFreeAsync(rawptr, m_stream));
 			} else {
-				CUDA_CHECK_THROW(cudaFree(m_data));
+				CUDA_CHECK_THROW(cudaFree(rawptr));
 			}
+
+			s_total_n_bytes_allocated -= get_bytes();
 		} else {
 			if (m_stream) {
 				throw std::runtime_error{"GPUMemory does not support async compressed memory."};
 			}
 
-			CU_CHECK_THROW(cuMemUnmap((CUdeviceptr)m_data, m_allocation_size));
+			CU_CHECK_THROW(cuMemUnmap((CUdeviceptr)m_data, m_allocation_n_bytes));
 			CU_CHECK_THROW(cuMemRelease(m_alloc_handle));
-			CU_CHECK_THROW(cuMemAddressFree((CUdeviceptr)m_data, m_allocation_size));
+			CU_CHECK_THROW(cuMemAddressFree((CUdeviceptr)m_data, m_allocation_n_bytes));
+
+			s_total_n_bytes_allocated -= get_bytes();
 		}
 
 		m_data = nullptr;
@@ -172,7 +243,10 @@ public:
 				m_size = 0;
 			}
 		} catch (std::runtime_error error) {
-			fprintf(stderr, "Could not free memory: %s\n", error.what());
+			// Don't need to report on memory-free problems when the driver is shutting down.
+			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
+				fprintf(stderr, "Could not free memory: %s\n", error.what());
+			}
 		}
 	}
 	/** @} */
@@ -245,6 +319,7 @@ public:
 		try {
 			if (m_stream) {
 				CUDA_CHECK_THROW(cudaMemcpyAsync(data(), host_data, num_elements * sizeof(T), cudaMemcpyHostToDevice, m_stream));
+				CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream));
 			} else {
 				CUDA_CHECK_THROW(cudaMemcpy(data(), host_data, num_elements * sizeof(T), cudaMemcpyHostToDevice));
 			}
@@ -314,6 +389,7 @@ public:
 		try {
 			if (m_stream) {
 				CUDA_CHECK_THROW(cudaMemcpyAsync(host_data, data(), num_elements * sizeof(T), cudaMemcpyDeviceToHost, m_stream));
+				CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream));
 			} else {
 				CUDA_CHECK_THROW(cudaMemcpy(host_data, data(), num_elements * sizeof(T), cudaMemcpyDeviceToHost));
 			}
@@ -389,6 +465,7 @@ public:
 	 */
 	/// Returns a raw pointer of the data on the device
 	inline T* data() const {
+		check_guards();
 		return m_data;
 	}
 
@@ -401,12 +478,31 @@ public:
 	size_t get_bytes() const {
 		return m_size * sizeof(T);
 	}
-
-	/// Returns the size of the array in megabytes
-	float get_memory_in_MB() const {
-		return 1e-6f * get_bytes();
-	}
 	/** @} */
 };
+
+using json = nlohmann::json;
+
+inline json::binary_t gpu_memory_to_json_binary(const void* gpu_data, size_t n_bytes) {
+	json::binary_t data_cpu;
+	data_cpu.resize(n_bytes);
+	CUDA_CHECK_THROW(cudaMemcpy(data_cpu.data(), gpu_data, n_bytes, cudaMemcpyDeviceToHost));
+	return data_cpu;
+}
+
+inline void json_binary_to_gpu_memory(const json::binary_t& cpu_data, void* gpu_data, size_t n_bytes) {
+	CUDA_CHECK_THROW(cudaMemcpy(gpu_data, cpu_data.data(), n_bytes, cudaMemcpyHostToDevice));
+}
+
+template <typename T>
+json::binary_t gpu_memory_to_json_binary(const GPUMemory<T>& gpu_data) {
+	return gpu_memory_to_json_binary(gpu_data.data(), gpu_data.get_bytes());
+}
+
+template <typename T>
+void json_binary_to_gpu_memory(const json::binary_t& cpu_data, GPUMemory<T>& gpu_data) {
+	gpu_data.resize(cpu_data.size()/sizeof(T));
+	json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
+}
 
 TCNN_NAMESPACE_END

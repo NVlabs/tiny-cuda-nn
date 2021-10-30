@@ -54,6 +54,9 @@ __global__ void adam_step(
 	const float loss_scale,
 	float base_learning_rate,
 	float learning_rate,
+	const float non_matrix_learning_rate_factor,
+	const bool optimize_matrix_params,
+	const bool optimize_non_matrix_params,
 	const float beta1,
 	const float beta2,
 	const float epsilon,
@@ -69,17 +72,33 @@ __global__ void adam_step(
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_elements) return;
 
-	const float weight_fp = weights_full_precision[i];
 	float gradient = (float)gradients[i] / loss_scale;
+	if (i >= n_matrix_weights) {
+		if (!optimize_non_matrix_params || gradient == 0) {
+			return;
+		}
+	} else {
+		if (!optimize_matrix_params) {
+			return;
+		}
+	}
 
+	const float weight_fp = weights_full_precision[i];
 
-	gradient += l2_reg * weight_fp;
+	if (i < n_matrix_weights) {
+		// No L2 reg for non-matrix params
+		gradient += l2_reg * weight_fp;
+	}
 
 	const float gradient_sq = gradient * gradient;
 
 	float first_moment = first_moments[i] = beta1 * first_moments[i] + (1 - beta1) * gradient;
 	const float second_moment = second_moments[i] = beta2 * second_moments[i] + (1 - beta2) * gradient_sq;
 
+	if (i >= n_matrix_weights) {
+		// Potentially different learning rate for non-matrix params
+		learning_rate *= non_matrix_learning_rate_factor;
+	}
 
 	// Follow AdaBound paradigm
 	const float effective_learning_rate = fminf(fmaxf(learning_rate / (sqrtf(second_moment) + epsilon), lower_lr_bound), upper_lr_bound);
@@ -94,7 +113,7 @@ __global__ void adam_step(
 template <typename T>
 class AdamOptimizer : public Optimizer<T> {
 public:
-	AdamOptimizer(json params) {
+	AdamOptimizer(const json& params) {
 		update_hyperparams(params);
 	}
 
@@ -135,14 +154,19 @@ public:
 			upper_lr_bound = 0.1f + 0.1f / ((1 - m_beta2) * (float)step());
 		}
 
+		uint32_t n_weights_to_optimize = n_weights();
+
 		linear_kernel(adam_step<T>, 0, stream,
-			n_weights(),
+			n_weights_to_optimize,
 			m_n_weights_covered_by_matrices,
 			m_relative_weight_decay,
 			m_absolute_weight_decay,
 			loss_scale,
 			m_base_learning_rate,
 			learning_rate,
+			m_non_matrix_learning_rate_factor,
+			m_optimize_matrix_params,
+			m_optimize_non_matrix_params,
 			m_beta1,
 			m_beta2,
 			m_epsilon,
@@ -173,7 +197,7 @@ public:
 		return nullptr;
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];
 		}
@@ -205,6 +229,34 @@ public:
 		if (params.contains("absolute_decay")) {
 			m_absolute_weight_decay = params["absolute_decay"];
 		}
+
+		if (params.contains("non_matrix_learning_rate_factor")) {
+			m_non_matrix_learning_rate_factor = params["non_matrix_learning_rate_factor"];
+		}
+
+		if (params.contains("optimize_matrix_params")) {
+			m_optimize_matrix_params = params["optimize_matrix_params"];
+		}
+
+		if (params.contains("optimize_non_matrix_params")) {
+			m_optimize_non_matrix_params = params["optimize_non_matrix_params"];
+		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["current_step"] = m_current_step;
+		data["base_learning_rate"] = m_base_learning_rate;
+		data["first_moments_binary"] = gpu_memory_to_json_binary(m_first_moments);
+		data["second_moments_binary"] = gpu_memory_to_json_binary(m_second_moments);
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		json_binary_to_gpu_memory(data["first_moments_binary"], m_first_moments);
+		json_binary_to_gpu_memory(data["second_moments_binary"], m_second_moments);
+		m_current_step = data["current_step"];
+		m_base_learning_rate = data["base_learning_rate"];
 	}
 
 private:
@@ -217,6 +269,7 @@ private:
 	uint32_t m_current_step = 0;
 
 	// Hyperparameters
+	float m_non_matrix_learning_rate_factor = 1.0f;
 	float m_base_learning_rate = 1e-3f;
 	float m_beta1 = 0.9f;
 	float m_beta2 = 0.999f;
@@ -227,6 +280,9 @@ private:
 	float m_absolute_weight_decay = 0.0f;
 
 	bool m_adabound = false;
+
+	bool m_optimize_matrix_params = true;
+	bool m_optimize_non_matrix_params = true;
 };
 
 TCNN_NAMESPACE_END

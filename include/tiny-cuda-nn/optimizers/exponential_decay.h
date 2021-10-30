@@ -47,7 +47,7 @@ TCNN_NAMESPACE_BEGIN
 template <typename T>
 class ExponentialDecayOptimizer : public Optimizer<T> {
 public:
-	ExponentialDecayOptimizer(json params) {
+	ExponentialDecayOptimizer(const json& params) {
 		m_nested.reset(create_optimizer<T>(params.value("nested", json::object())));
 		update_hyperparams(params);
 
@@ -82,7 +82,7 @@ public:
 		return m_nested->custom_weights();
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("decay_base")) {
 			m_decay_base = params["decay_base"];
 		}
@@ -98,6 +98,18 @@ public:
 		if (params.contains("nested")) {
 			m_nested->update_hyperparams(params["nested"]);
 		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["nested"] = m_nested->serialize();
+		data["learning_rate"] = m_learning_rate;
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		m_learning_rate = data["learning_rate"];
+		m_nested->deserialize(data["nested"]);
 	}
 
 private:

@@ -72,6 +72,6 @@ public:
 };
 
 template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, json params, uint32_t alignment = 8);
+Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& params, uint32_t alignment = 8);
 
 TCNN_NAMESPACE_END

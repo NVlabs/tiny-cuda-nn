@@ -42,7 +42,7 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, json encoding, uint32_t alignment) {
+Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& encoding, uint32_t alignment) {
 	std::string encoding_type = encoding.value("otype", "OneBlob");
 
 	if (equals_case_insensitive(encoding_type, "Identity")) {
@@ -61,7 +61,7 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_
 			alignment,
 		};
 	} else if (equals_case_insensitive(encoding_type, "OneBlob")) {
-		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode, n_dims_to_pass_through, alignment};
+		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode, n_dims_to_pass_through, alignment, encoding.value("n_trailing_dims_to_ignore", 0u)};
 	} else if (equals_case_insensitive(encoding_type, "OneBlobFrequency") || equals_case_insensitive(encoding_type, "NRC")) {
 		return new NrcEncoding<T>{
 			encoding.value("n_frequencies", 12u),
@@ -75,7 +75,7 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_
 	}
 }
 
-template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, json encoding, uint32_t alignment);
-template Encoding<cutlass::half_t>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, json encoding, uint32_t alignment);
+template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& encoding, uint32_t alignment);
+template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& encoding, uint32_t alignment);
 
 TCNN_NAMESPACE_END

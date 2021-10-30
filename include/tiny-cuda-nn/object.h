@@ -42,7 +42,10 @@ TCNN_NAMESPACE_BEGIN
 
 using json = nlohmann::json;
 
-template<typename T, MatrixLayout _layout>
+template<typename T>
+class GPUMatrixDynamic;
+
+template<typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
 class GPUMatrix;
 
 class Object {
@@ -54,7 +57,7 @@ class ObjectWithMutableHyperparams : public Object {
 public:
 	virtual ~ObjectWithMutableHyperparams() { }
 
-	virtual void update_hyperparams(json params) = 0;
+	virtual void update_hyperparams(const json& params) = 0;
 };
 
 template <typename PARAMS_T>
@@ -73,18 +76,46 @@ class DifferentiableObject : public ParametricObject<PARAMS_T> {
 public:
 	virtual ~DifferentiableObject() { }
 
-	virtual void inference(cudaStream_t stream, const GPUMatrix<T, MatrixLayout::ColumnMajor>& input, GPUMatrix<float, MatrixLayout::ColumnMajor>& output) = 0;
-	virtual void forward(cudaStream_t stream, const GPUMatrix<T, MatrixLayout::ColumnMajor>& input, GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor>& output, MatrixLayout output_layout = MatrixLayout::ColumnMajor, bool use_inference_matrices = false) = 0;
+	virtual void inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) = 0;
+	void inference(const GPUMatrix<T>& input, GPUMatrix<float>& output) {
+		inference(nullptr, input, output);
+	}
+
+	virtual void forward(
+		cudaStream_t stream,
+		const GPUMatrix<T>& input,
+		GPUMatrixDynamic<COMPUTE_T>& output,
+		bool use_inference_matrices = false,
+		bool prepare_input_gradients = false
+	) = 0;
+	void forward(
+		const GPUMatrix<T>& input,
+		GPUMatrixDynamic<COMPUTE_T>& output,
+		bool use_inference_matrices = false,
+		bool prepare_input_gradients = false
+	) {
+		forward(nullptr, input, output, use_inference_matrices, prepare_input_gradients);
+	}
+
 	virtual void backward(
 		cudaStream_t stream,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& input,
-		const GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor>& output,
-		const GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor>& dL_doutput,
-		GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor>* dL_dinput = nullptr,
-		MatrixLayout output_layout = MatrixLayout::ColumnMajor,
+		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<COMPUTE_T>& output,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrix<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) = 0;
+	void backward(
+		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<COMPUTE_T>& output,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrix<T>* dL_dinput = nullptr,
+		bool use_inference_matrices = false,
+		bool compute_param_gradients = true
+	) {
+		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_matrices, compute_param_gradients);
+	}
 
 	virtual uint32_t padded_output_width() const = 0;
 	virtual uint32_t output_width() const = 0;

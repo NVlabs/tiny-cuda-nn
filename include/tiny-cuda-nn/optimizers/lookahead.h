@@ -62,7 +62,7 @@ __global__ void lookahead_step(
 template <typename T>
 class LookaheadOptimizer : public Optimizer<T> {
 public:
-	LookaheadOptimizer(json params) {
+	LookaheadOptimizer(const json& params) {
 		m_nested.reset(create_optimizer<T>(params.value("nested", json::object())));
 		update_hyperparams(params);
 	}
@@ -115,7 +115,7 @@ public:
 		return m_weights_lookahead.data();
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("alpha")) {
 			m_alpha = params["alpha"];
 		}
@@ -127,6 +127,18 @@ public:
 		if (params.contains("nested")) {
 			m_nested->update_hyperparams(params["nested"]);
 		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["nested"] = m_nested->serialize();
+		data["weights_lookahead_binary"] = gpu_memory_to_json_binary(m_weights_lookahead);
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		json_binary_to_gpu_memory(data["weights_lookahead_binary"], m_weights_lookahead);
+		m_nested->deserialize(data["nested"]);
 	}
 
 private:

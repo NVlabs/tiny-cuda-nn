@@ -36,8 +36,9 @@
 #define TCNN_NAMESPACE_BEGIN namespace tcnn {
 #define TCNN_NAMESPACE_END }
 
-
+#include <array>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -45,13 +46,13 @@
 #include <cusolverDn.h>
 #include <curand.h>
 
-#include <cutlass/half.h>
-
 
 TCNN_NAMESPACE_BEGIN
 
 // using network_precision_t = float;
-using network_precision_t = cutlass::half_t;
+using network_precision_t = __half;
+
+// #define TCNN_VERBOSE_MEMORY_ALLOCS
 
 //////////////////
 // Misc helpers //
@@ -68,122 +69,117 @@ inline bool equals_case_insensitive(const std::string& str1, const std::string& 
 //////////////////////////////////////
 
 /// Checks the result of a cuXXXXXX call and throws an error on failure
-#define CU_CHECK_THROW(x)                                                                    \
-  do {                                                                                       \
-	CUresult result = x;                                                                     \
-	if (result != CUDA_SUCCESS) {                                                            \
-	  const char *msg;                                                                       \
-	  cuGetErrorName(result, &msg);                                                          \
-	  throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + msg);  \
-	}                                                                                        \
-  } while(0)
+#define CU_CHECK_THROW(x)                                                                          \
+	do {                                                                                           \
+		CUresult result = x;                                                                       \
+		if (result != CUDA_SUCCESS) {                                                              \
+			const char *msg;                                                                       \
+			cuGetErrorName(result, &msg);                                                          \
+			throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + msg);  \
+		}                                                                                          \
+	} while(0)
 
 /// Checks the result of a cudaXXXXXX call and throws an error on failure
-#define CUDA_CHECK_THROW(x)                                                                                         \
-  do {                                                                                                              \
-	cudaError_t result = x;                                                                                         \
-	if (result != cudaSuccess)                                                                                      \
-	  throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + cudaGetErrorString(result));  \
-  } while(0)
+#define CUDA_CHECK_THROW(x)                                                                                               \
+	do {                                                                                                                  \
+		cudaError_t result = x;                                                                                           \
+		if (result != cudaSuccess)                                                                                        \
+			throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + cudaGetErrorString(result));  \
+	} while(0)
 
 /// Checks the result of a cudaXXXXXX call and prints an error on failure
-#define CUDA_CHECK_PRINT(x)                                                                                         \
-  do {                                                                                                              \
-	cudaError_t result = x;                                                                                         \
-	if (result != cudaSuccess)                                                                                      \
-	  std::cout << "CUDA Error: " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
-  } while(0)
+#define CUDA_CHECK_PRINT(x)                                                                                   \
+	do {                                                                                                      \
+		cudaError_t result = x;                                                                               \
+		if (result != cudaSuccess)                                                                            \
+			std::cout << "CUDA Error: " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
+	} while(0)
 
 
-#define CURAND_CHECK_THROW(x)                                                                                         \
-  do {                                                                                                              \
-	curandStatus_t result = x;                                                                                         \
-	if (result != CURAND_STATUS_SUCCESS)                                                                                      \
-	  throw std::runtime_error(std::string("CURAND Error: " #x " failed"));  \
-  } while(0)
+#define CURAND_CHECK_THROW(x)                                                      \
+	do {                                                                           \
+		curandStatus_t result = x;                                                 \
+		if (result != CURAND_STATUS_SUCCESS)                                       \
+			throw std::runtime_error(std::string("CURAND Error: " #x " failed"));  \
+	} while(0)
 
 
-#define CUBLAS_CHECK_THROW(x)                                                                                         \
-  do {                                                                                                              \
-    cublasStatus_t result = x;                                                                                         \
-    if (result != CUBLAS_STATUS_SUCCESS)                                                                                      \
-      throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(result));  \
-  } while(0)
+#define CUBLAS_CHECK_THROW(x)                                                                                           \
+	do {                                                                                                                \
+		cublasStatus_t result = x;                                                                                      \
+		if (result != CUBLAS_STATUS_SUCCESS)                                                                            \
+			throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(result));  \
+	} while(0)
 
-#define CUSOLVER_CHECK_THROW(x)                                                                                         \
-  do {                                                                                                              \
-    cusolverStatus_t result = x;                                                                                         \
-    if (result != CUBLAS_STATUS_SUCCESS)                                                                                      \
-      throw std::runtime_error(std::string("CUSOLVER Error: " #x " failed with error ") + cusolverGetError(result));  \
-  } while(0)
+#define CUSOLVER_CHECK_THROW(x)                                                                                             \
+	do {                                                                                                                    \
+		cusolverStatus_t result = x;                                                                                        \
+		if (result != CUBLAS_STATUS_SUCCESS)                                                                                \
+			throw std::runtime_error(std::string("CUSOLVER Error: " #x " failed with error ") + cusolverGetError(result));  \
+	} while(0)
 
 
-inline std::string cusolverGetError(cusolverStatus_t error)
-{
-    switch (error)
-    {
-        case CUSOLVER_STATUS_SUCCESS:
-            return "CUSOLVER_SUCCESS";
+inline std::string cusolverGetError(cusolverStatus_t error) {
+	switch (error) {
+		case CUSOLVER_STATUS_SUCCESS:
+			return "CUSOLVER_SUCCESS";
 
-        case CUSOLVER_STATUS_NOT_INITIALIZED:
-            return "CUSOLVER_STATUS_NOT_INITIALIZED";
+		case CUSOLVER_STATUS_NOT_INITIALIZED:
+			return "CUSOLVER_STATUS_NOT_INITIALIZED";
 
-        case CUSOLVER_STATUS_ALLOC_FAILED:
-            return "CUSOLVER_STATUS_ALLOC_FAILED";
+		case CUSOLVER_STATUS_ALLOC_FAILED:
+			return "CUSOLVER_STATUS_ALLOC_FAILED";
 
-        case CUSOLVER_STATUS_INVALID_VALUE:
-            return "CUSOLVER_STATUS_INVALID_VALUE";
+		case CUSOLVER_STATUS_INVALID_VALUE:
+			return "CUSOLVER_STATUS_INVALID_VALUE";
 
-        case CUSOLVER_STATUS_ARCH_MISMATCH:
-            return "CUSOLVER_STATUS_ARCH_MISMATCH";
+		case CUSOLVER_STATUS_ARCH_MISMATCH:
+			return "CUSOLVER_STATUS_ARCH_MISMATCH";
 
-        case CUSOLVER_STATUS_EXECUTION_FAILED:
-            return "CUSOLVER_STATUS_EXECUTION_FAILED";
+		case CUSOLVER_STATUS_EXECUTION_FAILED:
+			return "CUSOLVER_STATUS_EXECUTION_FAILED";
 
-        case CUSOLVER_STATUS_INTERNAL_ERROR:
-            return "CUSOLVER_STATUS_INTERNAL_ERROR";
+		case CUSOLVER_STATUS_INTERNAL_ERROR:
+			return "CUSOLVER_STATUS_INTERNAL_ERROR";
 
-        case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
-            return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+		case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+			return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+	}
 
-    }
-
-    return "<unknown>";
+	return "<unknown>";
 }
 
-inline std::string cublasGetError(cublasStatus_t error)
-{
-    switch (error)
-    {
-        case CUBLAS_STATUS_SUCCESS:
-            return "CUBLAS_STATUS_SUCCESS";
+inline std::string cublasGetError(cublasStatus_t error) {
+	switch (error) {
+		case CUBLAS_STATUS_SUCCESS:
+			return "CUBLAS_STATUS_SUCCESS";
 
-        case CUBLAS_STATUS_NOT_INITIALIZED:
-            return "CUBLAS_STATUS_NOT_INITIALIZED";
+		case CUBLAS_STATUS_NOT_INITIALIZED:
+			return "CUBLAS_STATUS_NOT_INITIALIZED";
 
-        case CUBLAS_STATUS_ALLOC_FAILED:
-            return "CUBLAS_STATUS_ALLOC_FAILED";
+		case CUBLAS_STATUS_ALLOC_FAILED:
+			return "CUBLAS_STATUS_ALLOC_FAILED";
 
-        case CUBLAS_STATUS_INVALID_VALUE:
-            return "CUBLAS_STATUS_INVALID_VALUE";
+		case CUBLAS_STATUS_INVALID_VALUE:
+			return "CUBLAS_STATUS_INVALID_VALUE";
 
-        case CUBLAS_STATUS_ARCH_MISMATCH:
-            return "CUBLAS_STATUS_ARCH_MISMATCH";
+		case CUBLAS_STATUS_ARCH_MISMATCH:
+			return "CUBLAS_STATUS_ARCH_MISMATCH";
 
-        case CUBLAS_STATUS_MAPPING_ERROR:
-            return "CUBLAS_STATUS_MAPPING_ERROR";
+		case CUBLAS_STATUS_MAPPING_ERROR:
+			return "CUBLAS_STATUS_MAPPING_ERROR";
 
-        case CUBLAS_STATUS_EXECUTION_FAILED:
-            return "CUBLAS_STATUS_EXECUTION_FAILED";
+		case CUBLAS_STATUS_EXECUTION_FAILED:
+			return "CUBLAS_STATUS_EXECUTION_FAILED";
 
-        case CUBLAS_STATUS_INTERNAL_ERROR:
-            return "CUBLAS_STATUS_INTERNAL_ERROR";
+		case CUBLAS_STATUS_INTERNAL_ERROR:
+			return "CUBLAS_STATUS_INTERNAL_ERROR";
 
 		case CUBLAS_STATUS_NOT_SUPPORTED:
-            return "CUBLAS_STATUS_NOT_SUPPORTED";
-    }
+			return "CUBLAS_STATUS_NOT_SUPPORTED";
+	}
 
-    return "<unknown>";
+	return "<unknown>";
 }
 
 
@@ -191,13 +187,19 @@ inline std::string cublasGetError(cublasStatus_t error)
 // Kernel helpers //
 ////////////////////
 
+#ifdef __NVCC__
+#define TCNN_HOST_DEVICE __host__ __device__
+#else
+#define TCNN_HOST_DEVICE
+#endif
+
 template <typename T>
-T div_round_up(T val, T divisor) {
+TCNN_HOST_DEVICE T div_round_up(T val, T divisor) {
 	return (val + divisor - 1) / divisor;
 }
 
 template <typename T>
-T next_multiple(T val, T divisor) {
+TCNN_HOST_DEVICE T next_multiple(T val, T divisor) {
 	return div_round_up(val, divisor) * divisor;
 }
 
@@ -211,8 +213,35 @@ constexpr uint32_t n_blocks_linear(T n_elements) {
 #ifdef __NVCC__
 template <typename K, typename T, typename ... Types>
 inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T n_elements, Types ... args) {
+	if (n_elements <= 0) {
+		return;
+	}
 	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>((uint32_t)n_elements, args...);
 }
 #endif
+
+inline std::string bytes_to_string(size_t bytes) {
+	std::array<std::string, 7> suffixes = {{ "B", "KB", "MB", "GB", "TB", "PB", "EB" }};
+
+	double count = (double)bytes;
+	uint32_t i = 0;
+	for (; i < suffixes.size() && count >= 1024; ++i) {
+		count /= 1024;
+	}
+
+	std::ostringstream oss;
+	oss.precision(3);
+	oss << count << " " << suffixes[i];
+	return oss.str();
+}
+
+template <uint32_t N_FLOATS>
+using vector_fullp_t = std::array<float, N_FLOATS>;
+
+template <uint32_t N_HALFS>
+using vector_halfp_t = std::array<__half, N_HALFS>;
+
+template <typename T, uint32_t N_ELEMS>
+using vector_t = std::conditional_t<std::is_same_v<T, float>, vector_fullp_t<N_ELEMS>, vector_halfp_t<N_ELEMS>>;
 
 TCNN_NAMESPACE_END

@@ -44,7 +44,7 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-__global__ void ema_step(
+__global__ void ema_step_full_precision(
 	const uint32_t n_elements,
 	const float ema_decay,
 	const float ema_debias_old,
@@ -56,15 +56,31 @@ __global__ void ema_step(
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_elements) return;
 
-	float filtered_val = (((float)tmp[i] * ema_decay * ema_debias_old + (float)weights[i] * (1 - ema_decay)) / ema_debias_new);
+	float filtered_val = ((float)tmp[i] * ema_decay * ema_debias_old + (float)weights[i] * (1 - ema_decay)) * ema_debias_new;
 	tmp[i] = filtered_val;
+	weights_ema[i] = (T)filtered_val;
+}
+
+template <typename T>
+__global__ void ema_step_half_precision(
+	const uint32_t n_elements,
+	const float ema_decay,
+	const float ema_debias_old,
+	const float ema_debias_new,
+	const T* __restrict__ weights,
+	T* __restrict__ weights_ema
+) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= n_elements) return;
+
+	float filtered_val = ((float)weights_ema[i] * ema_decay * ema_debias_old + (float)weights[i] * (1 - ema_decay)) * ema_debias_new;
 	weights_ema[i] = (T)filtered_val;
 }
 
 template <typename T>
 class EmaOptimizer : public Optimizer<T> {
 public:
-	EmaOptimizer(json params) {
+	EmaOptimizer(const json& params) {
 		m_nested.reset(create_optimizer<T>(params.value("nested", json::object())));
 		update_hyperparams(params);
 	}
@@ -91,7 +107,7 @@ public:
 		uint32_t current_step = m_nested->step();
 
 		float ema_debias_old = 1 - (float)std::pow(m_ema_decay, current_step-1);
-		float ema_debias_new = 1 - (float)std::pow(m_ema_decay, current_step);
+		float ema_debias_new = 1.0f / (1 - (float)std::pow(m_ema_decay, current_step));
 
 		T* nested_custom_weights = m_nested->custom_weights();
 
@@ -99,15 +115,26 @@ public:
 			weights = nested_custom_weights;
 		}
 
-		linear_kernel(ema_step<T>, 0, stream,
-			n_weights(),
-			m_ema_decay,
-			ema_debias_old,
-			ema_debias_new,
-			weights,
-			m_weights_ema.data(),
-			m_tmp.data()
-		);
+		if (m_full_precision) {
+			linear_kernel(ema_step_full_precision<T>, 0, stream,
+				n_weights(),
+				m_ema_decay,
+				ema_debias_old,
+				ema_debias_new,
+				weights,
+				m_weights_ema.data(),
+				m_tmp.data()
+			);
+		} else {
+			linear_kernel(ema_step_half_precision<T>, 0, stream,
+				n_weights(),
+				m_ema_decay,
+				ema_debias_old,
+				ema_debias_new,
+				weights,
+				m_weights_ema.data()
+			);
+		}
 	}
 
 	float learning_rate() const {
@@ -126,9 +153,13 @@ public:
 		return m_weights_ema.data();
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("decay")) {
 			m_ema_decay = params["decay"];
+		}
+
+		if (params.contains("full_precision")) {
+			m_full_precision = params["full_precision"];
 		}
 
 		if (params.contains("nested")) {
@@ -136,8 +167,23 @@ public:
 		}
 	}
 
+	json serialize() const override {
+		json data;
+		data["nested"] = m_nested->serialize();
+		data["weights_ema_binary"] = gpu_memory_to_json_binary(m_weights_ema);
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		json_binary_to_gpu_memory(data["weights_ema_binary"], m_weights_ema);
+		m_tmp.resize(m_weights_ema.get_num_elements());
+		linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.get_num_elements(), m_weights_ema.data(), m_tmp.data());
+		m_nested->deserialize(data["nested"]);
+	}
+
 private:
 	float m_ema_decay = 0.99f;
+	bool m_full_precision = false;
 	std::unique_ptr<Optimizer<T>> m_nested;
 
 	GPUMemory<T> m_weights_ema;

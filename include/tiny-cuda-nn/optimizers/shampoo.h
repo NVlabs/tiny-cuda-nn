@@ -271,7 +271,7 @@ public:
 	// using ROOT_TYPE = double;
 	using ROOT_TYPE = float;
 
-	ShampooOptimizer(json params) {
+	ShampooOptimizer(const json& params) {
 		update_hyperparams(params);
 
 		CUBLAS_CHECK_THROW(cublasCreate(&m_cublas));
@@ -601,11 +601,12 @@ public:
 
 				linear_kernel(subtract<ROOT_TYPE>, 0, stream, n_elements*n_matrices, Xk, tmp2, tmp2, 1.0f);
 
-				cudaMemsetAsync(sum_tmp, 0, n_matrices * sizeof(ROOT_TYPE), stream);
+				CUDA_CHECK_THROW(cudaMemsetAsync(sum_tmp, 0, n_matrices * sizeof(ROOT_TYPE), stream));
 				reduce_sum(tmp2, [] __device__ (ROOT_TYPE val) { return val * val; }, sum_tmp, n_elements, stream, n_matrices);
 			});
 
-			cudaMemcpyAsync(delta.data(), sum_tmp, n_matrices * sizeof(ROOT_TYPE), cudaMemcpyDeviceToHost, stream);
+			CUDA_CHECK_THROW(cudaMemcpyAsync(delta.data(), sum_tmp, n_matrices * sizeof(ROOT_TYPE), cudaMemcpyDeviceToHost, stream));
+			CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 
 			if (std::any_of(std::begin(delta), std::end(delta), [](ROOT_TYPE v) { return !std::isfinite(v); })) {
 				std::cout << "Failed to converge! " << delta[0] << std::endl;
@@ -658,6 +659,8 @@ public:
 			);
 
 			CUDA_CHECK_THROW(cudaMemcpyAsync(m_coefficients.data(), coefs.data(), coefs.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+			CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
+
 			if (m_frobenius_normalization) {
 				cudaMemsetAsync(m_sqr1_tmp.data(), 0, m_sqr1_tmp.get_num_elements() * sizeof(float), stream);
 				cudaMemsetAsync(m_sqr2_tmp.data(), 0, m_sqr2_tmp.get_num_elements() * sizeof(float), stream);
@@ -688,7 +691,7 @@ public:
 				cudaStreamWaitEvent(L_stream, m_global_event, 0);
 				cudaStreamWaitEvent(R_stream, m_global_event, 0);
 
-				// const GPUMatrix<T, MatrixLayout::RowMajor> gradient_matrix(gradients + offset_MN, m_L[i].n(), m_R[i].n());
+				// const GPUMatrix<T, RM> gradient_matrix(gradients + offset_MN, m_L[i].n(), m_R[i].n());
 
 				uint32_t n_matrices = (uint32_t)(interval.second - interval.first);
 
@@ -888,7 +891,7 @@ public:
 		return nullptr;
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];
 		}
@@ -940,6 +943,14 @@ public:
 		// m_graph.reset();
 	}
 
+	json serialize() const override {
+		throw std::runtime_error{"The Shampoo optimizer does not yet support serialization."};
+	}
+
+	void deserialize(const json& data) override {
+		throw std::runtime_error{"The Shampoo optimizer does not yet support deserialization."};
+	}
+
 private:
 	uint32_t m_n_weights;
 	uint32_t m_n_weights_covered_by_matrices = 0;
@@ -973,13 +984,13 @@ private:
 
 	GPUMemory<char> m_L_buffer;
 	GPUMemory<char> m_R_buffer;
-	std::vector<GPUMatrix<float, MatrixLayout::ColumnMajor>> m_L;
-	std::vector<GPUMatrix<float, MatrixLayout::ColumnMajor>> m_R;
+	std::vector<GPUMatrix<float>> m_L;
+	std::vector<GPUMatrix<float>> m_R;
 
 	GPUMemory<char> m_L_root_buffer;
 	GPUMemory<char> m_R_root_buffer;
-	std::vector<GPUMatrix<float, MatrixLayout::ColumnMajor>> m_L_root;
-	std::vector<GPUMatrix<float, MatrixLayout::ColumnMajor>> m_R_root;
+	std::vector<GPUMatrix<float>> m_L_root;
+	std::vector<GPUMatrix<float>> m_R_root;
 
 	GPUMemory<float> m_gradient_tmp;
 	GPUMemory<float> m_sqr1_tmp;
@@ -992,7 +1003,7 @@ private:
 
 	std::vector<std::pair<size_t, size_t>> m_matrix_batches;
 
-	std::vector<GPUMatrix<T, MatrixLayout::RowMajor>> m_gradient_matrices;
+	std::vector<GPUMatrix<T, RM>> m_gradient_matrices;
 
 	uint32_t m_current_step = 0;
 

@@ -87,12 +87,11 @@ public:
 		const uint32_t stride,
 		const uint32_t dims,
 		const float loss_scale,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& prediction,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>& target,
-		GPUMatrix<float, MatrixLayout::ColumnMajor>& values,
-		GPUMatrix<T, MatrixLayout::ColumnMajor>& gradients,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_pdf = nullptr,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_factor = nullptr) const override {
+		const GPUMatrix<T>& prediction,
+		const GPUMatrix<float>& target,
+		GPUMatrix<float>& values,
+		GPUMatrix<T>& gradients,
+		const GPUMatrix<float>* data_pdf = nullptr) const override {
 		if (prediction.n() != target.n()) {
 			throw std::runtime_error(std::string("Prediction and target don't have matching batch size ") + std::to_string(prediction.n()) + "!=" + std::to_string(target.n()));
 		}
@@ -118,7 +117,7 @@ public:
 		);
 	}
 
-	void update_hyperparams(json params) override { }
+	void update_hyperparams(const json& params) override { }
 };
 
 TCNN_NAMESPACE_END

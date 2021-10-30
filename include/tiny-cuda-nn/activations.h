@@ -41,6 +41,8 @@ enum class Activation {
 	Exponential,
 	Sine,
 	Sigmoid,
+	Squareplus,
+	Softplus,
 	None,
 };
 

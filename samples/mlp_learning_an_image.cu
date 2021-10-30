@@ -242,12 +242,12 @@ int main(int argc, char* argv[]) {
 		CURAND_CHECK_THROW(curandSetStream(rng, training_stream));
 
 		// Auxiliary matrices for training
-		GPUMatrix<float, MatrixLayout::ColumnMajor> training_target(n_output_dims, batch_size);
-		GPUMatrix<float, MatrixLayout::ColumnMajor> training_batch(n_input_dims, batch_size);
+		GPUMatrix<float> training_target(n_output_dims, batch_size);
+		GPUMatrix<float> training_batch(n_input_dims, batch_size);
 
 		// Auxiliary matrices for evaluation
-		GPUMatrix<float, MatrixLayout::ColumnMajor> prediction(n_output_dims, n_coords_padded);
-		GPUMatrix<float, MatrixLayout::ColumnMajor> inference_batch(xs_and_ys.data(), n_input_dims, n_coords_padded);
+		GPUMatrix<float> prediction(n_output_dims, n_coords_padded);
+		GPUMatrix<float> inference_batch(xs_and_ys.data(), n_input_dims, n_coords_padded);
 
 		json encoding_opts = config.value("encoding", json::object());
 		json loss_opts = config.value("loss", json::object());
@@ -316,7 +316,6 @@ int main(int argc, char* argv[]) {
 	} catch (std::exception& e) {
 		std::cout << "Uncaught exception: " << e.what() << std::endl;
 	}
-
 
 	return EXIT_SUCCESS;
 }

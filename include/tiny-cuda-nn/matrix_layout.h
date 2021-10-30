@@ -40,4 +40,7 @@ enum class MatrixLayout {
 	ColumnMajor,
 };
 
+static constexpr MatrixLayout RM = MatrixLayout::RowMajor;
+static constexpr MatrixLayout CM = MatrixLayout::ColumnMajor;
+
 TCNN_NAMESPACE_END

@@ -22,18 +22,14 @@
 
 cmake_minimum_required(VERSION 3.17)
 
-if (MSVC)
-	set(CMAKE_GENERATOR_TOOLSET "cuda=11.2")
-endif()
-
 PROJECT(tiny-cuda-nn
-	VERSION 1.0
+	VERSION 1.1
 	DESCRIPTION "A tiny, fast neural network with a fixed structure in CUDA"
 	LANGUAGES CXX CUDA
 )
 
 # set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
-# find_package(CUDAToolkit 11.2 REQUIRED)
+# find_package(CUDAToolkit 11.3 REQUIRED)
 
 ###############################################################################
 # Build type and C++ compiler setup
@@ -55,17 +51,21 @@ if (MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 endif()
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 ###############################################################################
 # CUDA compiler setup
 ###############################################################################
 
-set(CMAKE_CUDA_STANDARD 14)
+set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
 
-set(CMAKE_CUDA_ARCHITECTURES 86)
+include(FindCUDA/select_compute_arch)
+cuda_select_nvcc_arch_flags(ARCH_FLAGS)
+list(APPEND CUDA_NVCC_FLAGS ${ARCH_FLAGS})
+
+set(CMAKE_CUDA_ARCHITECTURES off)
 
 if (MSVC)
 else()
@@ -74,6 +74,7 @@ else()
 	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-fno-strict-aliasing")
 endif()
 list(APPEND CUDA_NVCC_FLAGS "--extended-lambda")
+list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 
 ###############################################################################

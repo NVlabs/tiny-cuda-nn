@@ -41,7 +41,7 @@ void save_exr(const float* data, int width, int height, int nChannels, int chann
 	std::vector<std::vector<float>> images(nChannels);
 	std::vector<float*> image_ptr(nChannels);
 	for (int i = 0; i < nChannels; ++i) {
-		images[i].resize(width * height);
+		images[i].resize((size_t)width * (size_t)height);
 	}
 
 	for (int i = 0; i < nChannels; ++i) {

@@ -30,7 +30,11 @@
 
 #include <tiny-cuda-nn/loss.h>
 
+#include <tiny-cuda-nn/losses/mape.h>
+#include <tiny-cuda-nn/losses/smape.h>
+#include <tiny-cuda-nn/losses/l1.h>
 #include <tiny-cuda-nn/losses/l2.h>
+#include <tiny-cuda-nn/losses/relative_l1.h>
 #include <tiny-cuda-nn/losses/relative_l2.h>
 #include <tiny-cuda-nn/losses/relative_l2_luminance.h>
 #include <tiny-cuda-nn/losses/cross_entropy.h>
@@ -41,15 +45,23 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-Loss<T>* create_loss(json loss) {
+Loss<T>* create_loss(const json& loss) {
 	std::string loss_type = loss.value("otype", "RelativeL2");
 
-	if (equals_case_insensitive(loss_type, "RelativeL2")) {
+	if (equals_case_insensitive(loss_type, "L2")) {
+		return new L2Loss<T>{};
+	} else if (equals_case_insensitive(loss_type, "RelativeL2")) {
 		return new RelativeL2Loss<T>{};
 	} else if (equals_case_insensitive(loss_type, "RelativeL2Luminance")) {
 		return new RelativeL2LuminanceLoss<T>{};
-	} else if (equals_case_insensitive(loss_type, "L2")) {
-		return new L2Loss<T>{};
+	} else if (equals_case_insensitive(loss_type, "L1")) {
+		return new L1Loss<T>{};
+	} else if (equals_case_insensitive(loss_type, "RelativeL1")) {
+		return new RelativeL1Loss<T>{};
+	} else if (equals_case_insensitive(loss_type, "Mape")) {
+		return new MapeLoss<T>{};
+	} else if (equals_case_insensitive(loss_type, "Smape")) {
+		return new SmapeLoss<T>{};
 	} else if (equals_case_insensitive(loss_type, "CrossEntropy")) {
 		return new CrossEntropyLoss<T>{};
 	} else {
@@ -57,7 +69,7 @@ Loss<T>* create_loss(json loss) {
 	}
 }
 
-template Loss<float>* create_loss(json loss);
-template Loss<cutlass::half_t>* create_loss(json loss);
+template Loss<float>* create_loss(const json& loss);
+template Loss<__half>* create_loss(const json& loss);
 
 TCNN_NAMESPACE_END

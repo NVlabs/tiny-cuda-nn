@@ -75,7 +75,7 @@ __global__ void SGD_step(
 template <typename T>
 class SGDOptimizer : public Optimizer<T> {
 public:
-	SGDOptimizer(json params) {
+	SGDOptimizer(const json& params) {
 		update_hyperparams(params);
 	}
 
@@ -116,7 +116,7 @@ public:
 		return nullptr;
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("learning_rate")) {
 			m_learning_rate = params["learning_rate"];
 		}
@@ -124,6 +124,18 @@ public:
 		if (params.contains("l2_reg")) {
 			m_l2_reg = params["l2_reg"];
 		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["current_step"] = m_current_step;
+		data["learning_rate"] = m_learning_rate;
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		m_current_step = data["current_step"];
+		m_learning_rate = data["learning_rate"];
 	}
 
 private:

@@ -50,21 +50,34 @@ Activation string_to_activation(std::string activation_name) {
 		return Activation::Sigmoid;
 	} else if (equals_case_insensitive(activation_name, "Sine")) {
 		return Activation::Sine;
+	} else if (equals_case_insensitive(activation_name, "Squareplus")) {
+		return Activation::Squareplus;
+	} else if (equals_case_insensitive(activation_name, "Softplus")) {
+		return Activation::Softplus;
 	}
 
 	throw std::runtime_error{std::string{"Invalid activation name: "} + activation_name};
 }
 
 template <typename T>
-Network<T>* create_network(json network) {
+Network<T>* create_network(const json& network) {
 	std::string network_type = network.value("otype", "MLP");
 
 	if (equals_case_insensitive(network_type, "MegakernelMLP") || equals_case_insensitive(network_type, "FullyFusedMLP")) {
-		if (!std::is_same<network_precision_t, cutlass::half_t>::value) {
-			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to cutlass::half_t."};
+		if constexpr (!std::is_same<network_precision_t, __half>::value) {
+			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};
 		} else {
 			uint32_t n_neurons = network.value("n_neurons", 128u);
-			if (n_neurons == 128) {
+			if (n_neurons == 256) {
+				return new FullyFusedMLP<T, 256>{
+					network["n_input_dims"],
+					network["n_output_dims"],
+					network.value("n_hidden_layers", 5u),
+					network.value("feedback_alignment", false),
+					string_to_activation(network.value("activation", "ReLU")),
+					string_to_activation(network.value("output_activation", "None")),
+				};
+			} else if (n_neurons == 128) {
 				return new FullyFusedMLP<T, 128>{
 					network["n_input_dims"],
 					network["n_output_dims"],
@@ -92,7 +105,7 @@ Network<T>* create_network(json network) {
 					string_to_activation(network.value("output_activation", "None")),
 				};
 			} else {
-				throw std::runtime_error{std::string{"FullyFusedMLP only supports 32, 64, and 128 neurons, but got: "} + std::to_string(n_neurons)};
+				throw std::runtime_error{std::string{"FullyFusedMLP only supports 32, 64, 128, and 256 neurons, but got: "} + std::to_string(n_neurons)};
 			}
 		}
 	} else if (equals_case_insensitive(network_type, "MLP") || equals_case_insensitive(network_type, "CutlassMLP")) {
@@ -117,6 +130,6 @@ Network<T>* create_network(json network) {
 	throw std::runtime_error{std::string{"Invalid network type: "} + network_type};
 }
 
-template Network<network_precision_t>* create_network(json network);
+template Network<network_precision_t>* create_network(const json& network);
 
 TCNN_NAMESPACE_END

@@ -96,7 +96,7 @@ __global__ void novo_update_per_layer_second_moment(
 template <typename T>
 class NovogradOptimizer : public Optimizer<T> {
 public:
-	NovogradOptimizer(json params) {
+	NovogradOptimizer(const json& params) {
 		update_hyperparams(params);
 	}
 
@@ -185,7 +185,7 @@ public:
 		return nullptr;
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];
 		}
@@ -209,6 +209,22 @@ public:
 		if (params.contains("absolute_decay")) {
 			m_absolute_weight_decay = params["absolute_decay"];
 		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["current_step"] = m_current_step;
+		data["base_learning_rate"] = m_base_learning_rate;
+		data["first_moments_binary"] = gpu_memory_to_json_binary(m_first_moments);
+		data["per_layer_second_moments_binary"] = gpu_memory_to_json_binary(m_per_layer_second_moments);
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		json_binary_to_gpu_memory(data["first_moments_binary"], m_first_moments);
+		json_binary_to_gpu_memory(data["per_layer_second_moments_binary"], m_per_layer_second_moments);
+		m_current_step = data["current_step"];
+		m_base_learning_rate = data["base_learning_rate"];
 	}
 
 private:

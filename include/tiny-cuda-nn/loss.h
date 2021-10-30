@@ -45,16 +45,15 @@ public:
 		const uint32_t stride,
 		const uint32_t dims,
 		const float loss_scale,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& prediction,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>& target,
-		GPUMatrix<float, MatrixLayout::ColumnMajor>& values,
-		GPUMatrix<T, MatrixLayout::ColumnMajor>& gradients,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_pdf = nullptr,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_factor = nullptr
+		const GPUMatrix<T>& prediction,
+		const GPUMatrix<float>& target,
+		GPUMatrix<float>& values,
+		GPUMatrix<T>& gradients,
+		const GPUMatrix<float>* data_pdf = nullptr
 	) const = 0;
 };
 
 template <typename T>
-Loss<T>* create_loss(json params);
+Loss<T>* create_loss(const json& params);
 
 TCNN_NAMESPACE_END

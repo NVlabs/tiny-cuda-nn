@@ -43,7 +43,10 @@
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T, MatrixLayout _layout>
+template<typename T>
+class GPUMatrixDynamic;
+
+template<typename T, MatrixLayout _layout>
 class GPUMatrix;
 
 class GPUMatrixBase {
@@ -60,7 +63,9 @@ public:
 		}
 
 		if (memory.get_num_elements() < total_n_bytes) {
-			std::cout << "GPUMatrix: Allocating " << total_n_bytes << " bytes shared among " << matrices.size() << " matrices." << std::endl;
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
+			std::cout << "GPUMatrix: Allocating " << bytes_to_string(total_n_bytes) << " shared among " << matrices.size() << " matrices." << std::endl;
+#endif
 			memory.resize(total_n_bytes);
 		}
 
@@ -71,37 +76,38 @@ public:
 		}
 	}
 
+	template <typename T>
+	static void allocate_shared_memory(GPUMemory<char>& memory, std::vector<GPUMatrixDynamic<T>>& matrices);
+
 	template <typename T, MatrixLayout layout>
 	static void allocate_shared_memory(GPUMemory<char>& memory, std::vector<GPUMatrix<T, layout>>& matrices);
 };
 
-template <typename T, MatrixLayout _layout>
-class GPUMatrix : public GPUMatrixBase {
+template <typename T>
+class GPUMatrixDynamic : public GPUMatrixBase {
 public:
-	static const MatrixLayout layout = _layout;
-	static const MatrixLayout transposed_layout = _layout == MatrixLayout::RowMajor ? MatrixLayout::ColumnMajor : MatrixLayout::RowMajor;
 	using Type = T;
 
 	// Owning its memory (passing a stream uses async allocation)
-	GPUMatrix(uint32_t m, uint32_t n, cudaStream_t stream = nullptr)
-	: m_owned_data{m * n, stream}, m_rows{m}, m_cols{n} {
+	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM, cudaStream_t stream = nullptr)
+	: m_owned_data{m * n, stream}, m_rows{m}, m_cols{n}, m_layout{layout} {
 		m_data = m_owned_data.data();
 	}
 
 	// Pointing to external memory
-	explicit GPUMatrix(T* data = nullptr, uint32_t m = 0, uint32_t n = 0)
-	: m_data{data}, m_rows{m}, m_cols{n} {
+	explicit GPUMatrixDynamic(T* data = nullptr, uint32_t m = 0, uint32_t n = 0, MatrixLayout layout = CM)
+	: m_data{data}, m_rows{m}, m_cols{n}, m_layout{layout} {
 	}
 
-	GPUMatrix(GPUMatrix<T, _layout> &&other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_owned_data{std::move(other.m_owned_data)} { }
-	explicit GPUMatrix(const GPUMatrix<T, _layout> &other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_owned_data{other.m_owned_data} {
+	GPUMatrixDynamic(GPUMatrixDynamic<T>&& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{std::move(other.m_owned_data)} { }
+	explicit GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{other.m_owned_data} {
 		// If we just copied over some owned data, then we want to point to our copy
 		if (m_owned_data.data()) {
 			m_data = m_owned_data.data();
 		}
 	}
 
-	virtual ~GPUMatrix() {}
+	virtual ~GPUMatrixDynamic() {}
 
 	void set_data(void* data) override { m_data = (T*)data; }
 	void set_size(uint32_t rows, uint32_t cols) {
@@ -119,6 +125,9 @@ public:
 
 	uint32_t n_elements() const { return m_rows * m_cols; }
 	size_t n_bytes() const override { return n_elements() * sizeof(T); }
+
+	MatrixLayout layout() const { return m_layout; }
+	MatrixLayout transposed_layout() const { return m_layout == RM ? CM : RM; }
 
 	T* data() { return m_data; }
 	const T* data() const { return m_data; }
@@ -295,28 +304,93 @@ public:
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	const GPUMatrix<T, transposed_layout> transposed() const {
-		return std::move(GPUMatrix<T, transposed_layout>(m_data, n(), m()));
+	const GPUMatrixDynamic<T> transposed() const {
+		return std::move(GPUMatrixDynamic<T>(m_data, n(), m(), transposed_layout()));
 	}
 
-	GPUMatrix<T, transposed_layout> transposed() {
-		return std::move(GPUMatrix<T, transposed_layout>(m_data, n(), m()));
+	GPUMatrixDynamic<T> transposed() {
+		return std::move(GPUMatrixDynamic<T>(m_data, n(), m(), transposed_layout()));
 	}
 
-	const GPUMatrix<T, transposed_layout> with_opposite_layout() const {
-		return std::move(GPUMatrix<T, transposed_layout>(m_data, m(), n()));
+	const GPUMatrixDynamic<T> with_opposite_layout() const {
+		return std::move(GPUMatrixDynamic<T>(m_data, m(), n(), transposed_layout()));
 	}
 
-	GPUMatrix<T, transposed_layout> with_opposite_layout() {
-		return std::move(GPUMatrix<T, transposed_layout>(m_data, m(), n()));
+	GPUMatrixDynamic<T> with_opposite_layout() {
+		return std::move(GPUMatrixDynamic<T>(m_data, m(), n(), transposed_layout()));
+	}
+
+	virtual void set_layout(MatrixLayout layout) {
+		m_layout = layout;
 	}
 
 private:
 	T* m_data;
 	uint32_t m_rows, m_cols;
+	MatrixLayout m_layout;
 	GPUMemory<T> m_owned_data;
 };
 
+template <typename T, MatrixLayout _layout>
+class GPUMatrix : public GPUMatrixDynamic<T> {
+public:
+	static const MatrixLayout static_layout = _layout;
+	static const MatrixLayout static_transposed_layout = _layout == RM ? CM : RM;
+
+	// Owning its memory (passing a stream uses async allocation)
+	GPUMatrix(uint32_t m, uint32_t n, cudaStream_t stream = nullptr)
+	: GPUMatrixDynamic<T>{m, n, static_layout, stream} { }
+
+	// Pointing to external memory
+	explicit GPUMatrix(T* data = nullptr, uint32_t m = 0, uint32_t n = 0)
+	: GPUMatrixDynamic<T>{data, m, n, static_layout} { }
+
+	GPUMatrix(GPUMatrixDynamic<T>&& other)
+	: GPUMatrixDynamic<T>{other} {
+		if (static_layout != this->layout()) {
+			throw std::runtime_error{"GPUMatrix must be constructed from a GPUMatrixDynamic with matching layout."};
+		}
+	}
+
+	// Only copy by reference. This is to prevent accidental deep copies of owned data.
+	explicit GPUMatrix(const GPUMatrixDynamic<T>& other)
+	: GPUMatrixDynamic<T>{const_cast<T*>(other.data()), other.rows(), other.cols(), other.layout()} {
+		if (static_layout != this->layout()) {
+			throw std::runtime_error{"GPUMatrix must be constructed from a GPUMatrixDynamic with matching layout."};
+		}
+	}
+
+	virtual ~GPUMatrix() {}
+
+	void set_layout(MatrixLayout layout) override {
+		throw std::runtime_error{"Cannot set the layout of a GPUMatrix at runtime (it is determined by the type system). Use GPUMatrixDynamic instead."};
+	}
+
+	const GPUMatrix<T, static_transposed_layout> transposed() const {
+		return std::move(GPUMatrix<T, static_transposed_layout>(const_cast<T*>(this->data()), this->n(), this->m()));
+	}
+
+	GPUMatrix<T, static_transposed_layout> transposed() {
+		return std::move(GPUMatrix<T, static_transposed_layout>(this->data(), this->n(), this->m()));
+	}
+
+	const GPUMatrix<T, static_transposed_layout> with_opposite_layout() const {
+		return std::move(GPUMatrix<T, static_transposed_layout>(const_cast<T*>(this->data()), this->m(), this->n()));
+	}
+
+	GPUMatrix<T, static_transposed_layout> with_opposite_layout() {
+		return std::move(GPUMatrix<T, static_transposed_layout>(this->data(), this->m(), this->n()));
+	}
+};
+
+template <typename T>
+void GPUMatrixBase::allocate_shared_memory(GPUMemory<char>& memory, std::vector<GPUMatrixDynamic<T>>& matrices) {
+	std::vector<GPUMatrixBase*> matrix_pointers;
+	for (auto& matrix : matrices) {
+		matrix_pointers.emplace_back(&matrix);
+	}
+	allocate_shared_memory(memory, matrix_pointers);
+}
 
 template <typename T, MatrixLayout layout>
 void GPUMatrixBase::allocate_shared_memory(GPUMemory<char>& memory, std::vector<GPUMatrix<T, layout>>& matrices) {

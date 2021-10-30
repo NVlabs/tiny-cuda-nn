@@ -49,9 +49,12 @@ public:
 	virtual uint32_t step() const = 0;
 	virtual uint32_t n_weights() const = 0;
 	virtual T* custom_weights() const = 0;
+
+	virtual json serialize() const { return {}; }
+	virtual void deserialize(const json& data) { }
 };
 
 template <typename T>
-Optimizer<T>* create_optimizer(json params);
+Optimizer<T>* create_optimizer(const json& params);
 
 TCNN_NAMESPACE_END

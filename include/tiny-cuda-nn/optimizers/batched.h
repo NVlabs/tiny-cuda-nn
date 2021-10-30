@@ -65,7 +65,7 @@ __global__ void gradient_update(
 template <typename T>
 class BatchedOptimizer : public Optimizer<T> {
 public:
-	BatchedOptimizer(json params) {
+	BatchedOptimizer(const json& params) {
 		m_nested.reset(create_optimizer<T>(params.value("nested", json::object())));
 		update_hyperparams(params);
 	}
@@ -108,7 +108,7 @@ public:
 		return m_nested->custom_weights();
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("batch_size_multiplier")) {
 			m_batch_size_multiplier = params["batch_size_multiplier"];
 		}
@@ -116,6 +116,22 @@ public:
 		if (params.contains("nested")) {
 			m_nested->update_hyperparams(params["nested"]);
 		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["nested"] = m_nested->serialize();
+		data["averaged_gradients_binary"] = gpu_memory_to_json_binary(m_averaged_gradients);
+		data["averaged_gradients_half_binary"] = gpu_memory_to_json_binary(m_averaged_gradients_half);
+		data["current_step"] = m_current_step;
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		m_current_step = data["current_step"];
+		json_binary_to_gpu_memory(data["averaged_gradients_binary"], m_averaged_gradients);
+		json_binary_to_gpu_memory(data["averaged_gradients_half_binary"], m_averaged_gradients_half);
+		m_nested->deserialize(data["nested"]);
 	}
 
 private:

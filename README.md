@@ -6,7 +6,7 @@ This framework powers the following publication:
 
 > __Real-time Neural Radiance Caching for Path Tracing__  
 > [Thomas Müller](https://tom94.net), [Fabrice Rousselle](https://research.nvidia.com/person/fabrice-rousselle), [Jan Novák](http://jannovak.info), [Alexander Keller](https://research.nvidia.com/person/alex-keller)  
-> _To appear: ACM Transactions on Graphics (SIGGRAPH) 2021_
+> _ACM Transactions on Graphics (Proceedings of SIGGRAPH), vol. 40, no. 4, pp. 36:1–36:16, Aug 2021_
 >
 > [ [Paper](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) ] [ [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c) ] [ [Video](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.mp4) ] [ [Interactive Results Viewer](https://tom94.net/data/publications/mueller21realtime/interactive-viewer/) ] [ [BibTex](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.bib) ]
 
@@ -72,23 +72,23 @@ auto [loss, optimizer, network, trainer] =
 	create_from_config(n_input_dims_to_encode, n_input_dims_to_pass_through, n_output_dims, config);
 
 // Train the model
-GPUMatrix<float, MatrixLayout::ColumnMajor> training_batch_inputs(n_input_dims, batch_size);
-GPUMatrix<float, MatrixLayout::ColumnMajor> training_batch_targets(n_output_dims, batch_size);
+GPUMatrix<float> training_batch_inputs(n_input_dims, batch_size);
+GPUMatrix<float> training_batch_targets(n_output_dims, batch_size);
 
 for (int i = 0; i < n_training_steps; ++i) {
 	generate_training_batch(&training_batch_inputs, &training_batch_targets); // <-- your code
 
 	float loss;
-	trainer->training_step(nullptr, training_batch_inputs, training_batch_targets, &loss);
+	trainer->training_step(training_batch_inputs, training_batch_targets, &loss);
 	std::cout << "iteration=" << i << " loss=" << loss << std::endl;
 }
 
 // Use the model
-GPUMatrix<float, MatrixLayout::ColumnMajor> inference_inputs(n_input_dims, batch_size);
+GPUMatrix<float> inference_inputs(n_input_dims, batch_size);
 generate_inputs(&inference_inputs); // <-- your code
 
-GPUMatrix<float, MatrixLayout::ColumnMajor> inference_outputs(n_output_dims, batch_size);
-network->inference(nullptr, inference_inputs, inference_outputs);
+GPUMatrix<float> inference_outputs(n_output_dims, batch_size);
+network->inference(inference_inputs, inference_outputs);
 ```
 
 
@@ -110,12 +110,12 @@ producing an image every 1000 training steps. Each 1000 steps should take roughl
 
 - CUDA __v11.2 or higher__.
 - CMake __v3.17 or higher__.
-- A __C++14__ capable compiler.
+- A __C++17__ capable compiler.
 - A high-end NVIDIA GPU that supports TensorCores and has a large amount of shared memory. The framework was tested primarily with an RTX 3090.
 	- Ampere GeForce GPUs: compiles out of the box.
 	- Ampere A100: requires changing `CMAKE_CUDA_ARCHITECTURE` to 80 in `CMakeLists.txt`.
 	- Turing GPUs: requires changing `CMAKE_CUDA_ARCHITECTURE` to 75 in `CMakeLists.txt` as well as changing `SmArch` in `include/tiny-cuda-nn/cutlass_matmul.h` to `cutlass::arch::Sm75`.
-
+- The fully fused MLP component of this framework requires a __very large__ amount of shared memory in its default configuration. It will likely only work on an RTX 3090, an RTX 2080 Ti, or high-end enterprise GPUs. Lower end cards must reduce the `n_neurons` parameter or use the `CutlassMLP` (better compatibility but slower) instead.
 
 ## Compilation
 
@@ -157,11 +157,15 @@ The following is a summary of all components of this framework that are currentl
 | :--- | :---------- | :-----
 | Identity | `include/tiny-cuda-nn/encodings/identity.h` | Leaves values untouched.
 | Oneblob | `include/tiny-cuda-nn/encodings/oneblob.h` | From Neural Importance Sampling [[Müller et al. 2019]](https://tom94.net/data/publications/mueller18neural/mueller18neural-v4.pdf) and Neural Control Variates [[Müller et al. 2020]](https://tom94.net/data/publications/mueller20neural/mueller20neural.pdf).
-| Frequency | `include/tiny-cuda-nn/encodings/frequency.h` | From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf).
+| Frequency | `include/tiny-cuda-nn/encodings/frequency.h` | NeRF's [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf) positional encoding applied equally to all dimensions.
 | NRC | `include/tiny-cuda-nn/encodings/nrc.h` | Combined oneblob and frequency encoding used in Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/).
 
 | Losses | &nbsp; | &nbsp;
 | :--- | :---------- | :-----
+| L1 | `include/tiny-cuda-nn/losses/l1.h` | Standard L1 loss.
+| Relative L1 | `include/tiny-cuda-nn/losses/l1.h` | Relative L1 loss normalized by the network prediction.
+| MAPE | `include/tiny-cuda-nn/losses/mape.h` | Mean absolute percentage error (MAPE). The same as Relative L1, but normalized by the target.
+| SMAPE | `include/tiny-cuda-nn/losses/smape.h` | Symmetric mean absolute percentage error (SMAPE). The same as Relative L1, but normalized by the mean of the prediction and the target.
 | L2 | `include/tiny-cuda-nn/losses/l2.h` | Standard L2 loss.
 | Relative L2 | `include/tiny-cuda-nn/losses/relative_l2.h` | Relative L2 loss normalized by the network prediction [[Lehtinen et al. 2018]](https://github.com/NVlabs/noise2noise).
 | Relative L2 Luminance | `include/tiny-cuda-nn/losses/relative_l2_luminance.h` | Same as above, but normalized by the luminance of the network prediction. Only applicable when network prediction is RGB. Used in Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/).

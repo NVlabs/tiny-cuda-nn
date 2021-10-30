@@ -61,6 +61,13 @@ public:
 		curandDestroyGenerator(m_curand);
 	}
 
+	void set_loss(std::shared_ptr<Loss<COMPUTE_T>> loss) {
+		if (!loss) {
+			throw std::runtime_error{"Trainer: may not set loss to nullptr"};
+		}
+		m_loss = loss;
+	}
+
 	void initialize_params(uint32_t seed) {
 		size_t n_params = m_model->n_params();
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
@@ -77,9 +84,9 @@ public:
 		m_optimizer->allocate(m_model);
 
 		// Use the optimizer's custom params for inference, if they exist.
-		PARAMS_T* params_inference = m_optimizer->custom_weights();
-		if (params_inference == nullptr) {
-			params_inference = m_params;
+		m_params_inference = m_optimizer->custom_weights();
+		if (m_params_inference == nullptr) {
+			m_params_inference = m_params;
 		}
 
 		std::seed_seq seq{seed};
@@ -91,7 +98,7 @@ public:
 			rnd,
 			m_params_full_precision,
 			m_params,
-			params_inference,
+			m_params_inference,
 			m_params_backward,
 			m_param_gradients
 		);
@@ -122,11 +129,10 @@ public:
 
 	void training_step(
 		cudaStream_t stream,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& input,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>& target,
+		const GPUMatrix<T>& input,
+		const GPUMatrix<float>& target,
 		float* loss_value = nullptr,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_pdf = nullptr,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_factor = nullptr
+		const GPUMatrix<float>* data_pdf = nullptr
 	) {
 		if (input.n() != target.n()) {
 			throw std::runtime_error(std::string("Input and target don't have matching batch size ") + std::to_string(input.n()) + "!=" + std::to_string(target.n()));
@@ -171,8 +177,7 @@ public:
 				target,
 				m_training_loss_tmp,
 				m_training_loss_gradient_tmp,
-				data_pdf,
-				data_factor
+				data_pdf
 			);
 
 			m_model->backward(stream, input, m_training_prediction_tmp, m_training_loss_gradient_tmp);
@@ -185,9 +190,79 @@ public:
 		}
 	}
 
-	void update_hyperparams(json params) override {
+	void training_step(
+		const GPUMatrix<T>& input,
+		const GPUMatrix<float>& target,
+		float* loss_value = nullptr,
+		const GPUMatrix<float>* data_pdf = nullptr
+	) {
+		training_step(nullptr, input, target, loss_value, data_pdf);
+	}
+
+	void optimizer_step_with_precomputed_gradients(cudaStream_t stream, float loss_scale) {
+		m_optimizer->step(stream, loss_scale, m_optimizer->learning_rate(), m_params_full_precision, m_params, m_param_gradients);
+	}
+
+	void optimizer_step_with_precomputed_gradients(float loss_scale) {
+		optimizer_step_with_precomputed_gradients(nullptr, loss_scale);
+	}
+
+	void update_hyperparams(const json& params) override {
 		m_optimizer->update_hyperparams(params.value("optimizer", json::object()));
 		m_loss->update_hyperparams(params.value("loss", json::object()));
+	}
+
+	float* params() {
+		return m_params_full_precision;
+	}
+
+	void set_params_full_precision(const float* params_cpu, size_t n_params) {
+		if (n_params != m_model->n_params()) {
+			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
+		}
+		CUDA_CHECK_THROW(cudaMemcpy(m_params_full_precision, params_cpu, sizeof(float)*n_params, cudaMemcpyHostToDevice));
+		linear_kernel(cast<PARAMS_T>, 0, nullptr, n_params, m_params_full_precision, m_params_inference);
+		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+	}
+
+	void set_params(const PARAMS_T* params_cpu, size_t n_params) {
+		if (n_params != m_model->n_params()) {
+			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
+		}
+		CUDA_CHECK_THROW(cudaMemcpy(m_params_inference, params_cpu, sizeof(PARAMS_T)*n_params, cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
+		linear_kernel(cast_from<PARAMS_T>, 0, nullptr, n_params, m_params_inference, m_params_full_precision);
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+	}
+
+	std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> model() {
+		return m_model;
+	}
+
+	json serialize(bool serialize_optimizer = false) {
+		size_t n_params = m_model->n_params();
+
+		json data;
+		data["n_params"] = n_params;
+		data["params_binary"] = gpu_memory_to_json_binary(m_params_inference, sizeof(PARAMS_T)*n_params);
+
+		if (serialize_optimizer) {
+			data["optimizer"] = m_optimizer->serialize();
+		}
+
+		return data;
+	}
+
+	void deserialize(const json& data) {
+		json::binary_t params_binary = data["params_binary"];
+		set_params((PARAMS_T*)params_binary.data(), params_binary.size()/sizeof(PARAMS_T));
+
+		if (data.contains("optimizer")) {
+			m_optimizer->deserialize(data["optimizer"]);
+		}
+
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
 private:
@@ -199,21 +274,22 @@ private:
 
 	GPUMemory<char> m_params_buffer;
 
-	float* m_params_full_precision;
-	PARAMS_T* m_params;
-	PARAMS_T* m_params_backward; // Used for wonky things like feedback alignment
-	PARAMS_T* m_param_gradients;
+	float* m_params_full_precision = nullptr;
+	PARAMS_T* m_params_inference = nullptr;
+	PARAMS_T* m_params = nullptr;
+	PARAMS_T* m_params_backward = nullptr; // Used for wonky things like feedback alignment
+	PARAMS_T* m_param_gradients = nullptr;
 
 	float m_perturbation_sigma;
 	curandGenerator_t m_curand;
 
 	GPUMemory<char> m_training_buffer;
 
-	GPUMatrix<float, MatrixLayout::ColumnMajor> m_perturbation;
-	GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor> m_perturbed_training_prediction_tmp;
-	GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor> m_training_prediction_tmp;
-	GPUMatrix<COMPUTE_T, MatrixLayout::ColumnMajor> m_training_loss_gradient_tmp;
-	GPUMatrix<float, MatrixLayout::ColumnMajor> m_training_loss_tmp;
+	GPUMatrix<float> m_perturbation;
+	GPUMatrix<COMPUTE_T> m_perturbed_training_prediction_tmp;
+	GPUMatrix<COMPUTE_T> m_training_prediction_tmp;
+	GPUMatrix<COMPUTE_T> m_training_loss_gradient_tmp;
+	GPUMatrix<float> m_training_loss_tmp;
 };
 
 TCNN_NAMESPACE_END

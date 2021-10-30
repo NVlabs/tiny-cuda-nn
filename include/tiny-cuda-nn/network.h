@@ -49,10 +49,17 @@ class Network : public DifferentiableObject<T, T> {
 public:
 	virtual ~Network() { }
 
-	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T, MatrixLayout::ColumnMajor>& input, GPUMatrix<T, MatrixLayout::ColumnMajor>& output, MatrixLayout output_layout = MatrixLayout::ColumnMajor) = 0;
+	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) = 0;
+	void inference_mixed_precision(const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) {
+		inference_mixed_precision(nullptr, input, output, use_inference_matrices);
+	}
+
+	virtual uint32_t width() const = 0;
+	virtual uint32_t num_forward_activations() const = 0;
+	virtual const T* forward_activations(uint32_t layer) const = 0;
 };
 
 template <typename T>
-Network<T>* create_network(json network);
+Network<T>* create_network(const json& network);
 
 TCNN_NAMESPACE_END

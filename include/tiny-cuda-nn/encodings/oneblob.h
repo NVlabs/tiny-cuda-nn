@@ -96,8 +96,9 @@ __global__ void kernel_one_blob(
 	const uint32_t num_to_pad,
 	const float* __restrict__ data_in,
 	T* __restrict__ data_out,
-	float* __restrict__ dy_dx)
-{
+	float* __restrict__ dy_dx,
+	const uint32_t trailing_dims_to_ignore = 0
+) {
 	const uint32_t fan_in_encoded = num_to_encode;
 	const uint32_t fan_in = fan_in_encoded + num_passthrough;
 	const uint32_t fan_out_encoded = num_to_encode << num_bins_log2;
@@ -114,7 +115,8 @@ __global__ void kernel_one_blob(
 		// A value of 1 here allows the network to learn a bias-like thing.
 		data_out[output_index] = j >= (fan_out_encoded + num_passthrough) ? 1 : data_in[input_index + fan_in_encoded + j - fan_out_encoded];
 	} else {
-		data_out[output_index] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in, input_index, j, num_bins_log2);
+		const uint32_t input_idx = (j >> num_bins_log2);
+		data_out[output_index] = (input_idx >= num_to_encode-trailing_dims_to_ignore) ? (T)0.0f : (T)one_blob_subwarp_aligned(quartic_cdf, data_in, input_index, j, num_bins_log2);
 		if (dy_dx != nullptr) {
 			// Negative sign, because the kernels are translated with their input (i.e. the input has a negative sign)
 			dy_dx[i * fan_out_encoded + j] = -one_blob_subwarp_aligned(quartic_cdf_deriv, data_in, input_index, j, num_bins_log2);
@@ -160,8 +162,8 @@ __global__ void kernel_one_blob_backward(
 template <typename T>
 class OneBlobEncoding : public Encoding<T> {
 public:
-	OneBlobEncoding(uint32_t n_bins, uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, uint32_t alignment)
-	: m_n_bins{n_bins}, m_n_dims_to_encode{n_dims_to_encode}, m_n_dims_to_pass_through{n_dims_to_pass_through} {
+	OneBlobEncoding(uint32_t n_bins, uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, uint32_t alignment, uint32_t n_trailing_dims_to_ignore = 0)
+	: m_n_bins{n_bins}, m_n_dims_to_encode{n_dims_to_encode}, m_n_dims_to_pass_through{n_dims_to_pass_through}, m_n_trailing_dims_to_ignore{n_trailing_dims_to_ignore} {
 		m_n_output_dims = m_n_dims_to_encode * m_n_bins + m_n_dims_to_pass_through;
 		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
 		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
@@ -202,7 +204,8 @@ public:
 			m_n_to_pad,
 			inputs,
 			outputs,
-			dy_dx
+			dy_dx,
+			m_n_trailing_dims_to_ignore
 		);
 	}
 
@@ -243,6 +246,7 @@ private:
 	uint32_t m_n_bins;
 	uint32_t m_n_dims_to_encode;
 	uint32_t m_n_dims_to_pass_through;
+	uint32_t m_n_trailing_dims_to_ignore;
 
 	// derived sizes
 	uint32_t m_n_output_dims;

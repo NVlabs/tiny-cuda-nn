@@ -306,13 +306,13 @@ int main(int argc, char* argv[]) {
 				const uint32_t padded_num_input_dims = encoding->num_encoded_dims();
 
 				// Auxiliary matrices for training
-				GPUMatrix<precision_t, MatrixLayout::ColumnMajor> bench_obe_out(padded_num_input_dims, batch_size);
-				GPUMatrix<float, MatrixLayout::ColumnMajor> bench_target(num_output_dims, batch_size);
+				GPUMatrix<precision_t> bench_obe_out(padded_num_input_dims, batch_size);
+				GPUMatrix<float> bench_target(num_output_dims, batch_size);
 
 				// Auxiliary matrices for evaluation
-				GPUMatrix<precision_t, MatrixLayout::ColumnMajor> eval_obe_out(padded_num_input_dims, n_coords);
+				GPUMatrix<precision_t> eval_obe_out(padded_num_input_dims, n_coords);
 				GPUMemory<float> prediction_data(num_output_dims * n_coords);
-				GPUMatrix<float, MatrixLayout::ColumnMajor> prediction(prediction_data.data(), num_output_dims, n_coords);
+				GPUMatrix<float> prediction(prediction_data.data(), num_output_dims, n_coords);
 
 				json loss_opts = config.value("loss", json::object());
 				json optimizer_opts = config.value("optimizer", json::object());
@@ -361,8 +361,8 @@ int main(int argc, char* argv[]) {
 						cudaDeviceSynchronize();
 						std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 						auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-						double throughput = print_interval * batch_size / (microseconds / 1000000.0);
-						std::cout << "Iteration#" << i << ": " << "loss=" << tmp_loss/tmp_loss_counter << " time=" << microseconds << "[µs] thp=" << throughput << "/s" << std::endl;
+						double throughput = print_interval * batch_size / ((double)microseconds / 1000000.0);
+						std::cout << "Iteration#" << i << ": " << "loss=" << tmp_loss/(float)tmp_loss_counter << " time=" << microseconds << "[µs] thp=" << throughput << "/s" << std::endl;
 
 						begin = end;
 						tmp_loss = 0;
@@ -375,7 +375,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 
-				mean_training_throughput /= mean_counter;
+				mean_training_throughput /= (double)mean_counter;
 
 				// Dump learned image for sanity checking
 				encoding->encode(n_coords, xs_and_ys.data(), eval_obe_out.data(), inference_stream);
@@ -410,7 +410,7 @@ int main(int argc, char* argv[]) {
 						cudaDeviceSynchronize();
 						std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 						auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-						double throughput = print_interval * batch_size / (microseconds / 1000000.0);
+						double throughput = print_interval * batch_size / ((double)microseconds / 1000000.0);
 						std::cout << "Iteration#" << i << ": " << "time=" << microseconds << "[µs] thp=" << throughput << "/s" << std::endl;
 
 						begin = end;
@@ -422,7 +422,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 
-				mean_inference_throughput /= mean_counter;
+				mean_inference_throughput /= (double)mean_counter;
 
 				std::cout << "Finished inference benchmark. Mean throughput is " << mean_inference_throughput << "/s. Waiting 10 seconds for GPU to cool down." << std::endl;
 				std::this_thread::sleep_for(std::chrono::seconds{10});

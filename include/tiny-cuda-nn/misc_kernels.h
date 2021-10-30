@@ -50,63 +50,135 @@
 
 TCNN_NAMESPACE_BEGIN
 
-__device__ __forceinline__ float weight_decay(float relative_weight_decay, float absolute_weight_decay, float weight) {
+enum InterpolationType {
+	Linear,
+	Smoothstep,
+};
+
+// Expands a 10-bit integer into 30 bits
+// by inserting 2 zeros after each bit.
+__device__ inline uint32_t expand_bits(uint32_t v) {
+	v = (v * 0x00010001u) & 0xFF0000FFu;
+	v = (v * 0x00000101u) & 0x0F00F00Fu;
+	v = (v * 0x00000011u) & 0xC30C30C3u;
+	v = (v * 0x00000005u) & 0x49249249u;
+	return v;
+}
+
+// Calculates a 30-bit Morton code for the
+// given 3D point located within the unit cube [0,1].
+__device__ inline uint32_t morton3D(uint32_t x, uint32_t y, uint32_t z) {
+	uint32_t xx = expand_bits(x);
+	uint32_t yy = expand_bits(y);
+	uint32_t zz = expand_bits(z);
+	return xx * 4 + yy * 2 + zz;
+}
+
+__device__ inline uint32_t morton3D_invert(uint32_t x) {
+	x = x               & 0x49249249;
+	x = (x | (x >> 2))  & 0xc30c30c3;
+	x = (x | (x >> 4))  & 0x0f00f00f;
+	x = (x | (x >> 8))  & 0xff0000ff;
+	x = (x | (x >> 16)) & 0x0000ffff;
+	return x;
+}
+
+__device__ inline float smoothstep(float val) {
+	return val*val*(3.0f - 2.0f * val);
+}
+
+__device__ inline float smoothstep_derivative(float val) {
+	return 6*val*(1.0f - val);
+}
+
+__device__ inline float identity_fun(float val) {
+	return val;
+}
+
+__device__ inline float identity_derivative(float val) {
+	return 1;
+}
+
+template <typename F, typename FPRIME>
+__device__ inline void pos_fract(const float input, float* pos, float* pos_derivative, uint32_t* pos_grid, float scale, F interpolation_fun, FPRIME interpolation_fun_derivative) {
+	*pos = input * scale + 0.5f;
+	int tmp = __float2int_rd(*pos);
+	*pos_grid = (uint32_t)tmp;
+	*pos -= __int2float_rd(tmp);
+	*pos_derivative = interpolation_fun_derivative(*pos);
+	*pos = interpolation_fun(*pos);
+}
+
+template <typename F>
+__device__ inline void pos_fract(const float input, float* pos, uint32_t* pos_grid, float scale, F interpolation_fun) {
+	*pos = input * scale + 0.5f;
+	int tmp = __float2int_rd(*pos);
+	*pos_grid = (uint32_t)tmp;
+	*pos -= __int2float_rd(tmp);
+	*pos = interpolation_fun(*pos);
+}
+
+__device__ inline float weight_decay(float relative_weight_decay, float absolute_weight_decay, float weight) {
 	// Relative weight decay is closely related to l2 regularization, whereas absolute weight decay corresponds to l1 regularization
 	return (1 - relative_weight_decay) * weight - copysignf(absolute_weight_decay, weight);
 }
 
-__device__ __forceinline__ float logistic(const float x) {
+__device__ inline float logistic(const float x) {
 	return __frcp_rn(1.0f + __expf(-x));
 }
 
-__device__ __forceinline__ float gaussian_cdf(const float x, const float inv_radius) {
+__device__ inline float logit(const float x) {
+	return -__logf(__frcp_rn(fminf(fmaxf(x, 1e-8f), 1.0f - 1e-8f)) - 1.0f);
+}
+
+__device__ inline float gaussian_cdf(const float x, const float inv_radius) {
 	return normcdff(x * inv_radius);
 }
 
-__device__ __forceinline__ float gaussian_cdf_approx(const float x, const float inv_radius) {
+__device__ inline float gaussian_cdf_approx(const float x, const float inv_radius) {
 	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / M_SQRT2;
 	return logistic(MAGIC_SIGMOID_FACTOR * x * inv_radius);
 }
 
-__device__ __forceinline__ float gaussian_cdf_approx_derivative(const float result, const float inv_radius) {
+__device__ inline float gaussian_cdf_approx_derivative(const float result, const float inv_radius) {
 	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / M_SQRT2;
 	return result * (1 - result) * MAGIC_SIGMOID_FACTOR * inv_radius;
 }
 
-__device__ __forceinline__ float gaussian_pdf(const float x, const float inv_radius) {
+__device__ inline float gaussian_pdf(const float x, const float inv_radius) {
 	return inv_radius * rsqrtf(2.0f * M_PI) * expf(-0.5f * (x * x * inv_radius * inv_radius));
 }
 
-__device__ __forceinline__ float gaussian_pdf_max_1(const float x, const float inv_radius) {
+__device__ inline float gaussian_pdf_max_1(const float x, const float inv_radius) {
 	return expf(-0.5f * (x * x * inv_radius * inv_radius));
 }
 
-__device__ __forceinline__ float tent(const float x, const float inv_radius) {
+__device__ inline float tent(const float x, const float inv_radius) {
 	return fmaxf(1.0f - fabsf(x * inv_radius), 0.0f);
 }
 
-__device__ __forceinline__ float tent_cdf(const float x, const float inv_radius) {
+__device__ inline float tent_cdf(const float x, const float inv_radius) {
 	return fmaxf(0.0f, fminf(1.0f, x * inv_radius + 0.5f));
 }
 
-__device__ __forceinline__ float quartic(const float x, const float inv_radius) {
+__device__ inline float quartic(const float x, const float inv_radius) {
 	const float u = x * inv_radius;
 	const float tmp = fmaxf(1 - u*u, 0.0f);
 	return ((float)15 / 16) * tmp * tmp;
 }
 
-__device__ __forceinline__ float quartic_cdf_deriv(const float x, const float inv_radius) {
+__device__ inline float quartic_cdf_deriv(const float x, const float inv_radius) {
 	return quartic(x, inv_radius) * inv_radius;
 }
 
-__device__ __forceinline__ float quartic_cdf(const float x, const float inv_radius) {
+__device__ inline float quartic_cdf(const float x, const float inv_radius) {
 	const float u = x * inv_radius;
 	const float u2 = u * u;
 	const float u4 = u2 * u2;
 	return fmaxf(0.0f, fminf(1.0f, ((float)15 / 16) * u * (1 - ((float)2 / 3) * u2 + ((float)1 / 5) * u4) + 0.5f));
 }
 
-__device__ __forceinline__ uint32_t permute(uint32_t num, uint32_t size) {
+__device__ inline uint32_t permute(uint32_t num, uint32_t size) {
     const uint32_t A = 10002659; // Large prime number
     const uint32_t B = 4234151;
     return (num * A + B) % size;
@@ -121,6 +193,16 @@ __global__ void shuffle(const uint32_t n_elements, const uint32_t stride, const 
     const uint32_t member_id = i % stride;
 
     out[i] = in[permute(elem_id ^ seed, n_elements) * stride + member_id];
+}
+
+template <typename T>
+__global__ void fill_rollover(const uint32_t n_elements, const uint32_t stride, const uint32_t* n_input_elements_ptr, T* inout) {
+    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	const uint32_t n_input_elements = *n_input_elements_ptr;
+
+    if (i < (n_input_elements * stride) || i >= (n_elements * stride) || n_input_elements == 0) return;
+
+    inout[i] = inout[i % (n_input_elements * stride)];
 }
 
 template <typename T>

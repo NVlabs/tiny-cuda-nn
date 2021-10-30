@@ -48,9 +48,7 @@ __global__ void relative_l2_luminance_loss(
 	const float* __restrict__ targets,
 	float* __restrict__ values,
 	T* __restrict__ gradients,
-	const float* __restrict__ data_pdf = nullptr,
-	const float* __restrict__ data_factor = nullptr,
-	const uint32_t data_factor_stride = 1
+	const float* __restrict__ data_pdf = nullptr
 ) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_elements) return;
@@ -67,8 +65,7 @@ __global__ void relative_l2_luminance_loss(
 
 	const uint32_t n_total = n_elements / stride * dims;
 
-	const float factor = data_factor == nullptr ? 1.0f : (data_factor[(inter_elem_idx + 1) * data_factor_stride + intra_elem_idx - 6] + data_factor[(inter_elem_idx + 1) * data_factor_stride + intra_elem_idx - 3]);
-	const float prediction = (float)predictions[i] * factor;
+	const float prediction = (float)predictions[i];
 
 	float r = (float)predictions[i - intra_elem_idx + 0];
 	float g = (float)predictions[i - intra_elem_idx + 1];
@@ -78,7 +75,7 @@ __global__ void relative_l2_luminance_loss(
 		g += (float)predictions[i - intra_elem_idx + 4];
 		b += (float)predictions[i - intra_elem_idx + 5];
 	}
-	const float luminance = (0.299f * r + 0.587f * g + 0.114f * b) * factor;
+	const float luminance = (0.299f * r + 0.587f * g + 0.114f * b);
 
 	const float prediction_sq_plus_epsilon = luminance * luminance + 0.01f;
 
@@ -87,7 +84,7 @@ __global__ void relative_l2_luminance_loss(
 
 	values[i] = difference * difference / prediction_sq_plus_epsilon / n_total;
 
-	float gradient = 2 * factor * difference / prediction_sq_plus_epsilon;
+	float gradient = 2 * difference / prediction_sq_plus_epsilon;
 	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
 
@@ -100,12 +97,11 @@ public:
 		const uint32_t stride,
 		const uint32_t dims,
 		const float loss_scale,
-		const GPUMatrix<T, MatrixLayout::ColumnMajor>& prediction,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>& target,
-		GPUMatrix<float, MatrixLayout::ColumnMajor>& values,
-		GPUMatrix<T, MatrixLayout::ColumnMajor>& gradients,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_pdf = nullptr,
-		const GPUMatrix<float, MatrixLayout::ColumnMajor>* data_factor = nullptr) const override {
+		const GPUMatrix<T>& prediction,
+		const GPUMatrix<float>& target,
+		GPUMatrix<float>& values,
+		GPUMatrix<T>& gradients,
+		const GPUMatrix<float>* data_pdf = nullptr) const override {
 		if (prediction.n() != target.n()) {
 			throw std::runtime_error(std::string("Prediction and target don't have matching batch size ") + std::to_string(prediction.n()) + "!=" + std::to_string(target.n()));
 		}
@@ -127,13 +123,11 @@ public:
 			target.data(),
 			values.data(),
 			gradients.data(),
-			data_pdf ? data_pdf->data() : nullptr,
-			data_factor ? data_factor->data() : nullptr,
-			data_factor ? data_factor->m() : 1
+			data_pdf ? data_pdf->data() : nullptr
 		);
 	}
 
-	void update_hyperparams(json params) override { }
+	void update_hyperparams(const json& params) override { }
 };
 
 TCNN_NAMESPACE_END

@@ -41,7 +41,14 @@ TCNN_NAMESPACE_BEGIN
 class CudaGraph {
 public:
 	~CudaGraph() {
-		reset();
+		try {
+			reset();
+		} catch (std::runtime_error error) {
+			// Don't need to report on destruction problems when the driver is shutting down.
+			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
+				fprintf(stderr, "Could not destroy cuda graph: %s\n", error.what());
+			}
+		}
 	}
 
 	template <typename F>
@@ -81,12 +88,12 @@ public:
 
 	void reset() {
 		if (m_graph) {
-			CUDA_CHECK_PRINT(cudaGraphDestroy(m_graph));
+			CUDA_CHECK_THROW(cudaGraphDestroy(m_graph));
 			m_graph = nullptr;
 		}
 
 		if (m_graph_instance) {
-			CUDA_CHECK_PRINT(cudaGraphExecDestroy(m_graph_instance));
+			CUDA_CHECK_THROW(cudaGraphExecDestroy(m_graph_instance));
 			m_graph_instance = nullptr;
 		}
 	}

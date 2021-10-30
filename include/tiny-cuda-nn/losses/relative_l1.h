@@ -23,9 +23,9 @@
  *//*
  */
 
-/** @file   variance_is.h
+/** @file   relative_l1.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  Implementation of the importance-sampling variance loss following Neural Importance Sampling [Müller et al. 2019]
+ *  @brief  Implementation of the relative l1 loss (relative to the prediction) and its gradient
  */
 
 #pragma once
@@ -39,7 +39,7 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-__global__ void variance_is_loss(
+__global__ void relative_l1_loss(
 	const uint32_t n_elements,
 	const uint32_t stride,
 	const uint32_t dims,
@@ -53,34 +53,34 @@ __global__ void variance_is_loss(
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_elements) return;
 
-	const uint32_t dim_idx = i % stride;
-	const uint32_t elem_idx = i / stride;
-	if (dim_idx >= dims) {
+	const uint32_t intra_elem_idx = i % stride;
+	const uint32_t inter_elem_idx = i / stride;
+	if (intra_elem_idx >= dims) {
 		values[i] = 0;
 		gradients[i] = 0;
 		return;
 	}
 
-	const uint32_t target_idx = elem_idx * dims + dim_idx;
+	const uint32_t target_idx = inter_elem_idx * dims + intra_elem_idx;
 
 	const uint32_t n_total = n_elements / stride * dims;
 
 	const float prediction = (float)predictions[i];
-	const float target = (float)targets[target_idx];
 
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
-	const float factor = target * target / pdf / n_total;
+	const float difference = prediction - targets[target_idx] / pdf;
 
-	const float value = factor / prediction - factor / pdf;
-	const float gradient = -factor / (prediction * prediction);
+	const float one_over_prediction_plus_epsilon = 1.0f / (fabsf(prediction) + 1e-2f);
 
-	values[i] = (T)value;
-	gradients[i] = (T)gradient;
+	values[i] = fabsf(difference) * one_over_prediction_plus_epsilon / n_total;
+
+	float gradient = copysignf(one_over_prediction_plus_epsilon, difference);
+	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
 
 
 template <typename T>
-class VarianceIsLoss : public Loss<T> {
+class RelativeL1Loss : public Loss<T> {
 public:
 	void evaluate(
 		cudaStream_t stream,
@@ -104,7 +104,7 @@ public:
 			throw std::runtime_error(std::string("Target does not have appropriate dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(dims));
 		}
 
-		linear_kernel(variance_is_loss<T>, 0, stream,
+		linear_kernel(relative_l1_loss<T>, 0, stream,
 			prediction.n_elements(),
 			stride,
 			dims,

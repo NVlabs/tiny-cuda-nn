@@ -47,7 +47,7 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-Optimizer<T>* create_optimizer(json optimizer) {
+Optimizer<T>* create_optimizer(const json& optimizer) {
 	std::string optimizer_type = optimizer.value("otype", "Adam");
 
 	if (equals_case_insensitive(optimizer_type, "Adam")) {
@@ -73,7 +73,7 @@ Optimizer<T>* create_optimizer(json optimizer) {
 	}
 }
 
-template Optimizer<float>* create_optimizer(json optimizer);
-template Optimizer<cutlass::half_t>* create_optimizer(json optimizer);
+template Optimizer<float>* create_optimizer(const json& optimizer);
+template Optimizer<__half>* create_optimizer(const json& optimizer);
 
 TCNN_NAMESPACE_END

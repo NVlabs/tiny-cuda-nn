@@ -62,7 +62,7 @@ __global__ void average_step(
 template <typename T>
 class AverageOptimizer : public Optimizer<T> {
 public:
-	AverageOptimizer(json params) {
+	AverageOptimizer(const json& params) {
 		m_nested.reset(create_optimizer<T>(params.value("nested", json::object())));
 		update_hyperparams(params);
 	}
@@ -118,7 +118,7 @@ public:
 		return m_weights_samples.data() + current_sample_idx() * m_n_weights;
 	}
 
-	void update_hyperparams(json params) override {
+	void update_hyperparams(const json& params) override {
 		if (params.contains("n_samples")) {
 			m_n_samples = params["n_samples"];
 			if (m_target) {
@@ -129,6 +129,20 @@ public:
 		if (params.contains("nested")) {
 			m_nested->update_hyperparams(params["nested"]);
 		}
+	}
+
+	json serialize() const override {
+		json data;
+		data["nested"] = m_nested->serialize();
+		data["weights_samples_binary"] = gpu_memory_to_json_binary(m_weights_samples);
+		data["weights_average_binary"] = gpu_memory_to_json_binary(m_weights_average);
+		return data;
+	}
+
+	void deserialize(const json& data) override {
+		json_binary_to_gpu_memory(data["weights_samples_binary"], m_weights_samples);
+		json_binary_to_gpu_memory(data["weights_average_binary"], m_weights_average);
+		m_nested->deserialize(data["nested"]);
 	}
 
 private:
