@@ -14,10 +14,12 @@ Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricte
 {
 	"otype": "FullyFusedMLP",    // Component type.
 	"activation": "ReLU",        // Activation of hidden layers.
-	                             // Can be "ReLU" or "Sigmoid".
+	                             // Can be "ReLU", "Sigmoid",
+	                             // "Squareplus" or "Softplus".
 	"output_activation": "None", // Activation of the output layer.
 	                             // Can be "None", "ReLU", "Sigmoid",
-	                             // or "Exponential".
+	                             // "Exponential", "Squareplus" or
+	                             // "Softplus".
 	"n_neurons": 128,            // Neurons in each hidden layer.
 	                             // May only be 32, 64 or 128.
 	"n_hidden_layers": 5,        // Number of hidden layers.
@@ -111,6 +113,46 @@ The encoding used in Neural Radiance Caching [Müller et al. 2021] (to appear). 
 
 
 ## Losses
+
+### L1
+
+Standard L1 loss.
+
+```json5
+{
+	"otype": "L1" // Component type.
+}
+```
+
+### Relative L1
+
+Relative L1 loss normalized by the network prediction.
+
+```json5
+{
+	"otype": "RelativeL1" // Component type.
+}
+```
+
+### MAPE
+
+Mean absolute percentage error (MAPE). The same as Relative L1, but normalized by the target.
+
+```json5
+{
+	"otype": "MAPE" // Component type.
+}
+```
+
+### SMAPE
+
+Symmetric mean absolute percentage error (SMAPE). The same as Relative L1, but normalized by the mean of the prediction and the target.
+
+```json5
+{
+	"otype": "SMAPE" // Component type.
+}
+```
 
 ### L2
 
