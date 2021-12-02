@@ -52,6 +52,8 @@ if (MSVC)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 ###############################################################################
 # CUDA compiler setup
@@ -59,6 +61,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_EXTENSIONS OFF)
 set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
 
 if (DEFINED ENV{TCNN_CUDA_ARCHITECTURES})
