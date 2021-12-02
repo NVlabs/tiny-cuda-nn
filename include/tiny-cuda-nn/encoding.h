@@ -38,40 +38,52 @@
 
 TCNN_NAMESPACE_BEGIN
 
+enum InterpolationType {
+	Linear,
+	Smoothstep,
+};
+
+InterpolationType string_to_interpolation_type(std::string interpolation_type);
+
 template <typename T>
 class Encoding : public ParametricObject<T> {
 public:
 	virtual ~Encoding() { }
 
 	virtual void encode(
-		const uint32_t num_elements,
-		const float* inputs,
-		T* outputs,
 		cudaStream_t stream,
-		float* dy_dx = nullptr, // Gradient of output w.r.t. the generating input variable. Same size as the output portion that was encoded
+		const uint32_t num_elements,
+		PitchedPtr<const float> inputs,
+		PitchedPtr<T> outputs,
+		float* dy_dx = nullptr, // Gradient of output w.r.t. the generating input variable. num_forward_gradient_dims() x num_elements
 		bool is_inference = false
 	) const = 0;
 
 	virtual void backward(
 		cudaStream_t stream,
 		const uint32_t num_elements,
-		const T* dL_dy, // num_encoded_dims() x num_elements
+		PitchedPtr<const T> dL_dy, // Same shape as outputs
 		const float* dy_dx, // encoded output dims x num_elements
-		float* dL_dx, // input dims x num_elements
-		const float* inputs = nullptr
+		PitchedPtr<float> dL_dx, // Same shape as inputs
+		PitchedPtr<const float> inputs = {},
+		bool accumulate_param_gradients = false // whether to accumulate parameter gradients on top of the last backward() call
 	) = 0;
 
+	virtual uint32_t num_dims_to_encode() const = 0;
 	virtual uint32_t num_encoded_dims() const = 0;
 	virtual uint32_t num_forward_gradient_dims() const = 0;
 
+	virtual void set_alignment(uint32_t alignment) = 0;
+	virtual uint32_t min_alignment() const = 0;
+
 	// By default, an encoding has no parameters
-	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
+	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
 	size_t n_params() const override { return 0; }
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override { return {}; }
 };
 
 template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& params, uint32_t alignment = 8);
+Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& params, uint32_t alignment = 8);
 
 TCNN_NAMESPACE_END

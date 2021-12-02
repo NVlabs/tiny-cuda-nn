@@ -33,8 +33,6 @@
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/gpu_memory.h>
 
-#include <cutlass/half.h>
-
 #include <cassert>
 #include <iostream>
 #include <map>

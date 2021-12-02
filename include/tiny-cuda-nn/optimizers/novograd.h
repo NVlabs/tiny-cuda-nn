@@ -36,7 +36,6 @@
 #include <tiny-cuda-nn/reduce_sum.h>
 
 #include <iostream>
-#include <random>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -123,10 +122,8 @@ public:
 		m_per_layer_second_moments.memset(0);
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
 		++m_current_step;
-
-		m_base_learning_rate = learning_rate;
 
 		uint32_t offset = 0;
 		for (size_t i = 0; i < m_layers.size(); ++i) {
@@ -155,7 +152,7 @@ public:
 				m_relative_weight_decay,
 				m_absolute_weight_decay,
 				loss_scale,
-				learning_rate,
+				m_base_learning_rate,
 				m_current_step == 1 ? 0.0f : m_beta1, // Set exact value on first step
 				m_epsilon,
 				weights_full_precision + offset,
@@ -169,19 +166,23 @@ public:
 		}
 	}
 
-	float learning_rate() const {
+	float learning_rate() const override {
 		return m_base_learning_rate;
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_base_learning_rate = val;
+	}
+
+	uint32_t step() const override {
 		return m_current_step;
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_n_weights;
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return nullptr;
 	}
 
@@ -215,14 +216,14 @@ public:
 		json data;
 		data["current_step"] = m_current_step;
 		data["base_learning_rate"] = m_base_learning_rate;
-		data["first_moments_binary"] = gpu_memory_to_json_binary(m_first_moments);
-		data["per_layer_second_moments_binary"] = gpu_memory_to_json_binary(m_per_layer_second_moments);
+		data["first_moments_binary"] = m_first_moments;
+		data["per_layer_second_moments_binary"] = m_per_layer_second_moments;
 		return data;
 	}
 
 	void deserialize(const json& data) override {
-		json_binary_to_gpu_memory(data["first_moments_binary"], m_first_moments);
-		json_binary_to_gpu_memory(data["per_layer_second_moments_binary"], m_per_layer_second_moments);
+		m_first_moments = data["first_moments_binary"];
+		m_per_layer_second_moments = data["per_layer_second_moments_binary"];
 		m_current_step = data["current_step"];
 		m_base_learning_rate = data["base_learning_rate"];
 	}

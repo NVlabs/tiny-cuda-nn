@@ -34,7 +34,6 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/optimizer.h>
 
-#include <random>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -44,7 +43,7 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-__global__ void SGD_step(
+__global__ void sgd_step(
 	const uint32_t n_elements,
 	const float loss_scale,
 	const float learning_rate,
@@ -71,7 +70,6 @@ __global__ void SGD_step(
 	weights[i] = (T)new_weight;
 }
 
-
 template <typename T>
 class SGDOptimizer : public Optimizer<T> {
 public:
@@ -84,12 +82,10 @@ public:
 		m_n_weights = size;
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
 		++m_current_step;
 
-		m_learning_rate = learning_rate;
-
-		linear_kernel(SGD_step<T>, 0, stream,
+		linear_kernel(sgd_step<T>, 0, stream,
 			n_weights(),
 			loss_scale,
 			m_learning_rate,
@@ -100,19 +96,23 @@ public:
 		);
 	}
 
-	float learning_rate() const {
+	float learning_rate() const override {
 		return m_learning_rate;
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_learning_rate = val;
+	}
+
+	uint32_t step() const override {
 		return m_current_step;
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_n_weights;
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return nullptr;
 	}
 

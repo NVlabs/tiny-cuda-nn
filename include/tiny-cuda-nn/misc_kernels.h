@@ -42,18 +42,300 @@
 #include <cstdio>
 
 #include <tiny-cuda-nn/activations.h>
-
-#ifndef M_PI
-#include <corecrt_math_defines.h>
-#endif
+#include <tiny-cuda-nn/gpu_matrix.h>
 
 
 TCNN_NAMESPACE_BEGIN
 
-enum InterpolationType {
-	Linear,
-	Smoothstep,
+static constexpr float PI = 3.14159265358979323846f;
+static constexpr float SQRT2 = 1.41421356237309504880f;
+
+__host__ __device__ inline float logistic(const float x) {
+	return 1.0f / (1.0f + expf(-x));
+}
+
+__host__ __device__ inline float logit(const float x) {
+	return -logf(1.0f / (fminf(fmaxf(x, 1e-9f), 1.0f - 1e-9f)) - 1.0f);
+}
+
+template <typename V>
+struct VectorFragment {
+	static const uint32_t num_elements = V::N;
+	V x;
 };
+
+static constexpr float K_ACT = 10.0f;
+
+template <typename T, typename fragment_t>
+__host__ __device__ void warp_activation(Activation activation, const fragment_t& frag, fragment_t& result) {
+	switch (activation) {
+		case Activation::ReLU:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)((T)frag.x[t] > (T)0.0f);
+			}
+			return;
+		case Activation::Exponential:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = (T)(expf((float)frag.x[t]));
+			}
+			return;
+		case Activation::Sine:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = (T)(sinf((float)frag.x[t]));
+			}
+			return;
+		case Activation::Sigmoid:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = (T)(logistic((float)frag.x[t]));
+			}
+			return;
+		case Activation::Squareplus:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				float x = (float)frag.x[t] * K_ACT;
+				result.x[t] = (T)(0.5f * (x + sqrtf(x * x + 4)) / K_ACT);
+			}
+			return;
+		case Activation::Softplus:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = (T)(logf(expf((float)frag.x[t] * K_ACT) + 1.0f) / K_ACT);
+			}
+			return;
+		case Activation::None: result = frag; return;
+		default:
+			// Unsupported activation
+			// assert(false); // Commented out due to isolated strange side-effects on Windows
+			return;
+	}
+}
+
+template <typename T, typename fragment_t>
+__host__ __device__ fragment_t warp_activation(Activation activation, const fragment_t& frag) {
+	fragment_t result;
+	warp_activation<T>(activation, frag, result);
+	return result;
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t>
+__host__ __device__ void warp_activation_backward_in(Activation activation, const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	switch (activation) {
+		case Activation::ReLU:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f);
+			}
+			return;
+		case Activation::Exponential:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)(expf(forward_frag_in.x[t]));
+			}
+			return;
+		case Activation::Sine:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)(cosf(forward_frag_in.x[t]));
+			}
+			return;
+		case Activation::Sigmoid:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				float x = logistic(forward_frag_in.x[t]);
+				result.x[t] = frag.x[t] * (T)(x * (1.0f - x));
+			}
+			return;
+		case Activation::Squareplus:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				float x = (float)forward_frag_in.x[t] * K_ACT;
+				float y = 0.5f * (x + sqrtf(x * x + 4));
+				result.x[t] = frag.x[t] * (T)(y * y / (y * y + 1));
+			}
+			return;
+		case Activation::Softplus:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				float tmp = expf((float)frag.x[t] * K_ACT);
+				result.x[t] = frag.x[t] * (T)(tmp / (tmp + 1));
+			}
+			return;
+		case Activation::None: result = frag; return;
+		default:
+			// Unsupported activation
+			// assert(false); // Commented out due to isolated strange side-effects on Windows
+			return;
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t>
+__host__ __device__ fragment_t warp_activation_backward_in(Activation activation, const fragment_t& frag, const forward_fragment_t& forward_frag_in) {
+	fragment_t result;
+	warp_activation_backward_in<T>(activation, frag, forward_frag_in, result);
+	return result;
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t>
+__host__ __device__ void warp_activation_backward(Activation activation, const fragment_t& frag, const forward_fragment_t& forward_frag, fragment_t& result) {
+	switch (activation) {
+		case Activation::ReLU:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)(forward_frag.x[t] > (T)0.0f);
+			}
+			return;
+		case Activation::Exponential:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * forward_frag.x[t];
+			}
+			return;
+		case Activation::Sine:
+			// Sine requires stored pre-activations, which we don't have. We only
+			// write out the post-activations.
+			// assert(false); // Commented out due to isolated strange side-effects on Windows
+			return;
+		case Activation::Sigmoid:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)(forward_frag.x[t] * ((T)1.0f - forward_frag.x[t]));
+			}
+			return;
+		case Activation::Squareplus:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				float y = (float)forward_frag.x[t] * K_ACT;
+				result.x[t] = frag.x[t] * (T)(y * y / (y * y + 1));
+			}
+			return;
+		case Activation::Softplus:
+			TCNN_PRAGMA_UNROLL
+			for (int t=0; t < result.num_elements; t++) {
+				result.x[t] = frag.x[t] * (T)(1.0f - expf(-(float)forward_frag.x[t] * K_ACT));
+			}
+			return;
+		case Activation::None: result = frag; return;
+		default:
+			// Unsupported activation
+			// assert(false); // Commented out due to isolated strange side-effects on Windows
+			return;
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t>
+__host__ __device__ fragment_t warp_activation_backward(Activation activation, const fragment_t& frag, const forward_fragment_t& forward_frag) {
+	fragment_t result;
+	warp_activation_backward<T>(activation, frag, forward_frag, result);
+	return result;
+}
+
+template <typename T, uint32_t N>
+using vector_fragment_t = VectorFragment<vector_t<T, N>>;
+
+template <typename T, uint32_t N=1>
+__global__ void kernel_activation(const uint32_t num_elements, const Activation act, const T* in, T* out) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	auto frag = ((vector_fragment_t<T, N>*)in)[i];
+	warp_activation<T>(act, frag, frag);
+	((vector_fragment_t<T, N>*)out)[i] = frag;
+}
+
+// Transfer functions corresponding to activations; version without biases
+template <typename T, uint32_t N=1>
+__global__ void kernel_activation_backward(const uint32_t num_elements, const Activation act, const T* __restrict__ values, const T* gradients_out, T* gradients_in) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	auto frag_forward_in = ((vector_fragment_t<T, N>*)values)[i];
+	auto frag = ((vector_fragment_t<T, N>*)gradients_out)[i];
+	warp_activation_backward_in<T>(act, frag, frag_forward_in, frag);
+
+	((vector_fragment_t<T, N>*)gradients_in)[i] = frag;
+}
+
+// Transfer functions corresponding to activations, given _output_ values. Only works if the activation is invertible
+template <typename T, uint32_t N=1>
+__global__ void kernel_activation_backward_output(const uint32_t num_elements, const Activation act, const T* __restrict__ output_values, const T* gradients_out, T* gradients_in) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	auto frag_forward_out = ((vector_fragment_t<T, N>*)output_values)[i];
+	auto frag = ((vector_fragment_t<T, N>*)gradients_out)[i];
+	warp_activation_backward<T>(act, frag, frag_forward_out, frag);
+
+	((vector_fragment_t<T, N>*)gradients_in)[i] = frag;
+}
+
+template <typename T>
+void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* in, T* out) {
+	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
+	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
+		throw std::runtime_error{"activation_gpu: number of elements must be a multiple of "s + std::to_string(ACTIVATION_VECTOR_SIZE)};
+	}
+
+	// Activation::None is a noop
+	if (act == Activation::None && in == out) {
+		return;
+	}
+
+	linear_kernel(kernel_activation<T, ACTIVATION_VECTOR_SIZE>, 0, stream, div_round_up(num_elements, ACTIVATION_VECTOR_SIZE), act, in, out);
+}
+
+template <typename T>
+void activation_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output) {
+	if (input.n() != output.n() || input.m() != output.m()) {
+		throw std::runtime_error("Input and output don't have matching size: "s + std::to_string(input.n()) + "!="s + std::to_string(output.n()));
+	}
+
+	activation_gpu(stream, input.n_elements(), activation, input.data(), output.data());
+}
+
+template <typename T>
+void activation_backward_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ values, const T* gradients_out, T* gradients_in) {
+	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
+	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
+		throw std::runtime_error{"activation_backward_gpu: number of elements must be a multiple of "s + std::to_string(ACTIVATION_VECTOR_SIZE)};
+	}
+
+	// Activation transfer is a noop for Activation::None
+	if (act == Activation::None && gradients_out == gradients_in) {
+		return;
+	}
+
+	linear_kernel(kernel_activation_backward<T, ACTIVATION_VECTOR_SIZE>, 0, stream, div_round_up(num_elements, ACTIVATION_VECTOR_SIZE), act, values, gradients_out, gradients_in);
+}
+
+template <typename T>
+void activation_backward_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& values, GPUMatrixDynamic<T>& gradients) {
+	if (values.n() != gradients.n() || values.m() != gradients.m()) {
+		throw std::runtime_error(std::string("Values and gradients don't have matching size: ") + std::to_string(values.n()) + "!=" + std::to_string(gradients.n()));
+	}
+
+	activation_backward_gpu(stream, values.n_elements(), activation, values.data(), gradients.data(), gradients.data());
+}
+
+template <typename T>
+void activation_backward_output_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ output_values, const T* gradients_out, T* gradients_in) {
+	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
+	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
+		throw std::runtime_error{"activation_backward_output_gpu: number of elements must be a multiple of "s + std::to_string(ACTIVATION_VECTOR_SIZE)};
+	}
+
+	// Activation transfer is a noop for Activation::None
+	if (act == Activation::None && gradients_out == gradients_in) {
+		return;
+	}
+
+	linear_kernel(kernel_activation_backward_output<T, ACTIVATION_VECTOR_SIZE>, 0, stream, div_round_up(num_elements, ACTIVATION_VECTOR_SIZE), act, output_values, gradients_out, gradients_in);
+}
+
+
 
 // Expands a 10-bit integer into 30 bits
 // by inserting 2 zeros after each bit.
@@ -71,7 +353,7 @@ __device__ inline uint32_t morton3D(uint32_t x, uint32_t y, uint32_t z) {
 	uint32_t xx = expand_bits(x);
 	uint32_t yy = expand_bits(y);
 	uint32_t zz = expand_bits(z);
-	return xx * 4 + yy * 2 + zz;
+	return xx | (yy << 1) | (zz << 2);
 }
 
 __device__ inline uint32_t morton3D_invert(uint32_t x) {
@@ -81,6 +363,20 @@ __device__ inline uint32_t morton3D_invert(uint32_t x) {
 	x = (x | (x >> 8))  & 0xff0000ff;
 	x = (x | (x >> 16)) & 0x0000ffff;
 	return x;
+}
+
+__device__ inline uint64_t expand_bits(uint64_t w)  {
+	w &=                0x00000000001fffff;
+	w = (w | w << 32) & 0x001f00000000ffff;
+	w = (w | w << 16) & 0x001f0000ff0000ff;
+	w = (w | w <<  8) & 0x010f00f00f00f00f;
+	w = (w | w <<  4) & 0x10c30c30c30c30c3;
+	w = (w | w <<  2) & 0x1249249249249249;
+	return w;
+}
+
+__device__ inline uint64_t morton3D_64bit(uint32_t x, uint32_t y, uint32_t z)  {
+	return ((expand_bits((uint64_t)x)) | (expand_bits((uint64_t)y) << 1) | (expand_bits((uint64_t)z) << 2));
 }
 
 __device__ inline float smoothstep(float val) {
@@ -102,9 +398,9 @@ __device__ inline float identity_derivative(float val) {
 template <typename F, typename FPRIME>
 __device__ inline void pos_fract(const float input, float* pos, float* pos_derivative, uint32_t* pos_grid, float scale, F interpolation_fun, FPRIME interpolation_fun_derivative) {
 	*pos = input * scale + 0.5f;
-	int tmp = __float2int_rd(*pos);
+	int tmp = floorf(*pos);
 	*pos_grid = (uint32_t)tmp;
-	*pos -= __int2float_rd(tmp);
+	*pos -= (float)tmp;
 	*pos_derivative = interpolation_fun_derivative(*pos);
 	*pos = interpolation_fun(*pos);
 }
@@ -112,9 +408,9 @@ __device__ inline void pos_fract(const float input, float* pos, float* pos_deriv
 template <typename F>
 __device__ inline void pos_fract(const float input, float* pos, uint32_t* pos_grid, float scale, F interpolation_fun) {
 	*pos = input * scale + 0.5f;
-	int tmp = __float2int_rd(*pos);
+	int tmp = floorf(*pos);
 	*pos_grid = (uint32_t)tmp;
-	*pos -= __int2float_rd(tmp);
+	*pos -= (float)tmp;
 	*pos = interpolation_fun(*pos);
 }
 
@@ -123,30 +419,22 @@ __device__ inline float weight_decay(float relative_weight_decay, float absolute
 	return (1 - relative_weight_decay) * weight - copysignf(absolute_weight_decay, weight);
 }
 
-__device__ inline float logistic(const float x) {
-	return __frcp_rn(1.0f + __expf(-x));
-}
-
-__device__ inline float logit(const float x) {
-	return -__logf(__frcp_rn(fminf(fmaxf(x, 1e-8f), 1.0f - 1e-8f)) - 1.0f);
-}
-
 __device__ inline float gaussian_cdf(const float x, const float inv_radius) {
 	return normcdff(x * inv_radius);
 }
 
 __device__ inline float gaussian_cdf_approx(const float x, const float inv_radius) {
-	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / M_SQRT2;
+	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / SQRT2;
 	return logistic(MAGIC_SIGMOID_FACTOR * x * inv_radius);
 }
 
 __device__ inline float gaussian_cdf_approx_derivative(const float result, const float inv_radius) {
-	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / M_SQRT2;
+	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / SQRT2;
 	return result * (1 - result) * MAGIC_SIGMOID_FACTOR * inv_radius;
 }
 
 __device__ inline float gaussian_pdf(const float x, const float inv_radius) {
-	return inv_radius * rsqrtf(2.0f * M_PI) * expf(-0.5f * (x * x * inv_radius * inv_radius));
+	return inv_radius * rsqrtf(2.0f * PI) * expf(-0.5f * (x * x * inv_radius * inv_radius));
 }
 
 __device__ inline float gaussian_pdf_max_1(const float x, const float inv_radius) {
@@ -179,86 +467,34 @@ __device__ inline float quartic_cdf(const float x, const float inv_radius) {
 }
 
 __device__ inline uint32_t permute(uint32_t num, uint32_t size) {
-    const uint32_t A = 10002659; // Large prime number
-    const uint32_t B = 4234151;
-    return (num * A + B) % size;
+	const uint32_t A = 10002659; // Large prime number
+	const uint32_t B = 4234151;
+	return (num * A + B) % size;
 }
 
 template <typename T>
 __global__ void shuffle(const uint32_t n_elements, const uint32_t stride, const uint32_t seed, const T* __restrict__ in, T* __restrict__ out) {
-    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-    if (i >= n_elements * stride) return;
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= n_elements * stride) return;
 
-    const uint32_t elem_id = i / stride;
-    const uint32_t member_id = i % stride;
+	const uint32_t elem_id = i / stride;
+	const uint32_t member_id = i % stride;
 
-    out[i] = in[permute(elem_id ^ seed, n_elements) * stride + member_id];
+	out[i] = in[permute(elem_id ^ seed, n_elements) * stride + member_id];
 }
 
-template <typename T>
+template <typename T, bool RESCALE = false>
 __global__ void fill_rollover(const uint32_t n_elements, const uint32_t stride, const uint32_t* n_input_elements_ptr, T* inout) {
-    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	const uint32_t n_input_elements = *n_input_elements_ptr;
 
-    if (i < (n_input_elements * stride) || i >= (n_elements * stride) || n_input_elements == 0) return;
+	if (i < (n_input_elements * stride) || i >= (n_elements * stride) || n_input_elements == 0) return;
 
-    inout[i] = inout[i % (n_input_elements * stride)];
-}
-
-template <typename T>
-__global__ void relu(const uint32_t num_elements, const uint32_t width, const T* data_in, T* data_out, const T* biases) {
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	const uint32_t bias_idx = i % width;
-
-	data_out[i] = fmaxf(0.0f, data_in[i] + biases[bias_idx]);
-}
-
-template <typename T>
-__global__ void exp(const uint32_t num_elements, const uint32_t width, const T* data_in, T* data_out, const T* biases) {
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	const uint32_t bias_idx = i % width;
-
-	data_out[i] = expf(data_in[i] + biases[bias_idx]);
-}
-
-template <typename T>
-__global__ void sin(const uint32_t num_elements, const uint32_t width, const T* data_in, T* data_out, const T* biases)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	const uint32_t bias_idx = i % width;
-
-	data_out[i] = __sinf(data_in[i] + biases[bias_idx]);
-}
-
-template <typename T>
-__global__ void relu(const uint32_t num_elements, const T* data_in, T* data_out) {
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	data_out[i] = fmaxf(0.0f, data_in[i]);
-}
-
-template <typename T>
-__global__ void exp(const uint32_t num_elements, const T* data_in, T* data_out) {
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	data_out[i] = expf(data_in[i]);
-}
-
-template <typename T>
-__global__ void sin(const uint32_t num_elements, const T* data_in, T* data_out)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	data_out[i] = __sinf(data_in[i]);
+	T result = inout[i % (n_input_elements * stride)];
+	if constexpr (RESCALE) {
+		result = (T)((float)result * n_input_elements / n_elements);
+	}
+	inout[i] = result;
 }
 
 template <typename T1, typename T2, typename T3>
@@ -276,132 +512,6 @@ __global__ void add(const uint32_t num_elements, const T* __restrict__ data_in, 
 	if (i >= num_elements) return;
 
 	data_in_out[i] = data_in[i] + data_in_out[i];
-}
-
-template <typename T>
-__global__ void relu(const uint32_t num_elements, T* __restrict__ data_in_out)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	data_in_out[i] = fmaxf(0.0f, data_in_out[i]);
-}
-
-template <typename T>
-__global__ void exp(const uint32_t num_elements, T* __restrict__ data_in_out)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	data_in_out[i] = expf(data_in_out[i]);
-}
-
-template <typename T>
-__global__ void sin(const uint32_t num_elements, T* __restrict__ data_in_out)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	data_in_out[i] = sinf(data_in_out[i]);
-}
-
-// Transfer functions corresponding to activations; version without biases
-template <typename T>
-__global__ void relu_transfer(const uint32_t num_elements, const T* __restrict__ values, T* __restrict__ gradients)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	gradients[i] = values[i] > (T)0 ? gradients[i] : (T)0;
-}
-
-template <typename T>
-__global__ void exp_transfer(const uint32_t num_elements, const T* __restrict__ values, T* __restrict__ gradients)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	gradients[i] = (T)((float)gradients[i] * expf((float)values[i]));
-}
-
-template <typename T>
-__global__ void sin_transfer(const uint32_t num_elements, const T* __restrict__ values, T* __restrict__ gradients)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	gradients[i] = (T)((float)gradients[i] * cosf((float)values[i]));
-}
-
-// Transfer functions corresponding to activations; version with biases
-template <typename T>
-__global__ void relu_transfer(const uint32_t num_elements, const uint32_t width, const T* __restrict__ values, T* __restrict__ gradients, const T* biases)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	const uint32_t bias_idx = i % width;
-	const float bias = biases[bias_idx];
-
-	gradients[i] = ((float)values[i] + bias) > 0.0f ? gradients[i] : (T)0;
-}
-
-template <typename T>
-__global__ void exp_transfer(const uint32_t num_elements, const uint32_t width, const T* __restrict__ values, T* __restrict__ gradients, const T* biases)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	const uint32_t bias_idx = i % width;
-	const float bias = biases[bias_idx];
-
-	gradients[i] = (T)((float)gradients[i] * expf((float)values[i] + bias));
-}
-
-template <typename T>
-__global__ void sin_transfer(const uint32_t num_elements, const uint32_t width, const T* __restrict__ values, T* __restrict__ gradients, const T* biases)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	const uint32_t bias_idx = i % width;
-	const float bias = biases[bias_idx];
-
-	gradients[i] = (T)((float)gradients[i] * cosf((float)values[i] + bias));
-}
-
-// Transfer functions corresponding to activations, given _output_ values. Only works if the activation is invertible
-template <typename T>
-__global__ void relu_transfer_output(const uint32_t num_elements, const T* __restrict__ output_values, const T* __restrict__ gradients_out, T* __restrict__ gradients_in)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	gradients_in[i] = output_values[i] > (T)0 ? gradients_out[i] : (T)0;
-}
-
-template <typename T>
-__global__ void exp_transfer_output(const uint32_t num_elements, const T* __restrict__ output_values, const T* __restrict__ gradients_out, T* __restrict__ gradients_in)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	gradients_in[i] = (T)((float)gradients_out[i] * (float)output_values[i]);
-
-	// L2 regularization for too small values to prevent vanishing gradients
-	// gradients_in[i] += fminf(logf(output_values[i] + 1e-8f) + 4.0f, 0.0f);
-}
-
-template <typename T>
-__global__ void logistic_transfer_output(const uint32_t num_elements, const T* __restrict__ output_values, const T* __restrict__ gradients_out, T* __restrict__ gradients_in)
-{
-	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= num_elements) return;
-
-	gradients_in[i] = (T)((float)gradients_out[i] * (float)output_values[i] * (1.0f - (float)output_values[i]));
-
-	// L2 regularization for too small values to prevent vanishing gradients
-	// gradients_in[i] += fminf(logf(output_values[i] + 1e-8f) + 4.0f, 0.0f);
 }
 
 template <typename T>
@@ -444,6 +554,41 @@ __global__ void cast_from(const uint32_t num_elements, const T* __restrict__ pre
 	if (i >= num_elements) return;
 
 	full_precision[i] = (float)precision[i];
+}
+
+template <typename T>
+__global__ void extract_dimension_pos_neg_kernel(const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* __restrict__ encoded, float* __restrict__ output) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	const uint32_t elem_idx = i / fan_out;
+	const uint32_t dim_idx = i % fan_out;
+
+	if (dim_idx == 0) {
+		output[i] = fmaxf(-(float)encoded[elem_idx * fan_in + dim], 0.0f);
+	} else if (dim_idx == 1) {
+		output[i] = fmaxf((float)encoded[elem_idx * fan_in + dim], 0.0f);
+	} else if (dim_idx == 2) {
+		output[i] = 0;
+	} else {
+		output[i] = 1;
+	}
+}
+
+template <typename T>
+__global__ void mult_scalar_kernel(const uint32_t num_elements, T* __restrict__ inout, float factor) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	inout[i] *= factor;
+}
+
+template <typename T>
+__global__ void mult_kernel(const uint32_t num_elements, const T* factor1, const T* factor2, T* result) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	result[i] = factor1[i] * factor2[i];
 }
 
 TCNN_NAMESPACE_END

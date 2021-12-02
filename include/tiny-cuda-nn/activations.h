@@ -37,7 +37,6 @@ TCNN_NAMESPACE_BEGIN
 
 enum class Activation {
 	ReLU,
-	ReLUTransfer,
 	Exponential,
 	Sine,
 	Sigmoid,

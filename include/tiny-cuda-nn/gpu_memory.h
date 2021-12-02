@@ -32,9 +32,6 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
-
-#include <json/json.hpp>
-
 #include <atomic>
 #include <cuda.h>
 #include <stdexcept>
@@ -167,7 +164,7 @@ public:
 
 		CUmemAllocationProp alloc_prop = {};
 		cuMemGetAllocationPropertiesFromHandle(&alloc_prop, m_alloc_handle);
-		if (alloc_prop.allocFlags.compressionType != CU_MEM_ALLOCATION_COMP_GENERIC) {
+		if (alloc_prop.allocFlags.compressionType != (unsigned char)CU_MEM_ALLOCATION_COMP_GENERIC) {
 			std::cout << "WARNING: requested compressed memory, but did not obtain it." << std::endl;
 		}
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
@@ -480,29 +477,5 @@ public:
 	}
 	/** @} */
 };
-
-using json = nlohmann::json;
-
-inline json::binary_t gpu_memory_to_json_binary(const void* gpu_data, size_t n_bytes) {
-	json::binary_t data_cpu;
-	data_cpu.resize(n_bytes);
-	CUDA_CHECK_THROW(cudaMemcpy(data_cpu.data(), gpu_data, n_bytes, cudaMemcpyDeviceToHost));
-	return data_cpu;
-}
-
-inline void json_binary_to_gpu_memory(const json::binary_t& cpu_data, void* gpu_data, size_t n_bytes) {
-	CUDA_CHECK_THROW(cudaMemcpy(gpu_data, cpu_data.data(), n_bytes, cudaMemcpyHostToDevice));
-}
-
-template <typename T>
-json::binary_t gpu_memory_to_json_binary(const GPUMemory<T>& gpu_data) {
-	return gpu_memory_to_json_binary(gpu_data.data(), gpu_data.get_bytes());
-}
-
-template <typename T>
-void json_binary_to_gpu_memory(const json::binary_t& cpu_data, GPUMemory<T>& gpu_data) {
-	gpu_data.resize(cpu_data.size()/sizeof(T));
-	json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
-}
 
 TCNN_NAMESPACE_END

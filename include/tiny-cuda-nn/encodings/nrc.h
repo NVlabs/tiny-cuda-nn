@@ -39,8 +39,7 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/misc_kernels.h>
 
-
-#include <random>
+#include <numeric>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -57,19 +56,16 @@ __global__ void nrc_encoding_kernel(
 	const uint32_t num_to_oneblob_encode,
 	const uint32_t num_passthrough,
 	const uint32_t num_to_pad,
-	const float* __restrict__ data_in,
-	T* __restrict__ data_out)
+	PitchedPtr<const float> data_in,
+	PitchedPtr<T> data_out)
 {
 	const uint32_t fan_in_encoded = num_to_oneblob_encode + 3;
-	const uint32_t fan_in = fan_in_encoded + num_passthrough;
 	const uint32_t fan_out = 3 * num_frequencies + (num_to_oneblob_encode << log2_num_oneblob_bins) + num_passthrough + num_to_pad;
 
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	uint32_t j = threadIdx.x;
-	const uint32_t output_index = j + i * blockDim.x;
-	if (output_index >= num_elements * fan_out) return;
-
-	const uint32_t input_index = i * fan_in;
+	const uint32_t encoded_index = j + i * blockDim.x;
+	if (encoded_index >= num_elements * fan_out) return;
 
 	const uint32_t encoded_offset = num_to_oneblob_encode << log2_num_oneblob_bins;
 	const uint32_t passthrough_offset = encoded_offset + 3 * num_frequencies;
@@ -77,32 +73,30 @@ __global__ void nrc_encoding_kernel(
 
 	if (j >= passthrough_offset) {
 		// A value of 1 here allows the network to learn a bias-like thing.
-		data_out[output_index] = j >= padding_offset ? 1 : data_in[input_index + fan_in_encoded + j - passthrough_offset];
+		data_out(i)[j] = j >= padding_offset ? 1 : data_in(i)[fan_in_encoded + j - passthrough_offset];
 	} else if (j >= encoded_offset) {
 		j -= encoded_offset;
 		const uint32_t log2_frequency = j / 3;
 		const uint32_t pos_dim = j % 3;
 
-		const float x = scalbnf(data_in[input_index + pos_dim], log2_frequency);
+		const float x = scalbnf(data_in(i)[pos_dim], log2_frequency);
 
 		// Small log2_frequency-based phase shift to help disambiguate locations
 		const float val = x / 2 + log2_frequency * 0.25f;
-		const float result = fabsf(val - truncf(val) - 0.5f) * 4 - 1;
+		const float result = fabsf(val - floorf(val) - 0.5f) * 4 - 1;
 
-		data_out[output_index] = (T)result;
+		data_out(i)[j] = (T)result;
 	} else {
-		data_out[output_index] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in, input_index + 3, j, log2_num_oneblob_bins);
+		data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i) + 3, j, log2_num_oneblob_bins);
 	}
 }
 
 template <typename T>
 class NrcEncoding : public Encoding<T> {
 public:
-	NrcEncoding(uint32_t n_frequencies, uint32_t n_oneblob_bins, uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, uint32_t alignment)
+	NrcEncoding(uint32_t n_frequencies, uint32_t n_oneblob_bins, uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through)
 	: m_n_frequencies{n_frequencies}, m_n_oneblob_bins{n_oneblob_bins}, m_n_dims_to_oneblob_encode{n_dims_to_encode - 3}, m_n_dims_to_pass_through{n_dims_to_pass_through} {
-		m_n_output_dims = 3 * m_n_frequencies + m_n_dims_to_oneblob_encode * m_n_oneblob_bins + m_n_dims_to_pass_through;
-		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
-		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+		m_n_padded_output_dims = m_n_output_dims = 3 * m_n_frequencies + m_n_dims_to_oneblob_encode * m_n_oneblob_bins + m_n_dims_to_pass_through;
 
 		if (n_dims_to_encode < 3) {
 			throw std::runtime_error{"NrcEncoding only supports 3 or more encoded dimensions."};
@@ -116,10 +110,10 @@ public:
 	}
 
 	void encode(
-		const uint32_t n_elements,
-		const float* inputs,
-		T* outputs,
 		cudaStream_t stream,
+		const uint32_t n_elements,
+		PitchedPtr<const float> inputs,
+		PitchedPtr<T> outputs,
 		float* dy_dx = nullptr,
 		bool is_inference = false
 	) const override {
@@ -145,16 +139,26 @@ public:
 	void backward(
 		cudaStream_t stream,
 		const uint32_t n_elements,
-		const T* dL_dy, // num_encoded_dims() x n_elements
+		PitchedPtr<const T> dL_dy, // Same shape as outputs
 		const float* dy_dx, // encoded output dims x n_elements
-		float* dL_dx, // input dims x n_elements
-		const float* inputs
+		PitchedPtr<float> dL_dx, // Same shape as inputs
+		PitchedPtr<const float> inputs,
+		bool accumulate_param_gradients
 	) override {
 		if (m_n_padded_output_dims == 0) {
 			return;
 		}
 
+		// Can't compute input gradients if insufficient info is available
+		if (!dy_dx || !dL_dx) {
+			return;
+		}
+
 		throw std::runtime_error{"NrcEncoding does not support the backward pass."};
+	}
+
+	uint32_t num_dims_to_encode() const override {
+		return m_n_dims_to_oneblob_encode + 3;
 	}
 
 	uint32_t num_encoded_dims() const override {
@@ -163,6 +167,16 @@ public:
 
 	uint32_t num_forward_gradient_dims() const override {
 		return 0; // Unsupported for now
+	}
+
+	void set_alignment(uint32_t alignment) override {
+		alignment = std::lcm(alignment, min_alignment());
+		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
+		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	}
+
+	uint32_t min_alignment() const override {
+		return m_n_oneblob_bins;
 	}
 
 private:
@@ -175,7 +189,7 @@ private:
 	// derived sizes
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
-	uint32_t m_n_to_pad;
+	uint32_t m_n_to_pad = 0;
 };
 
 TCNN_NAMESPACE_END

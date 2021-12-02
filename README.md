@@ -69,7 +69,7 @@ nlohmann::json config = {
 using namespace tcnn;
 
 auto [loss, optimizer, network, trainer] =
-	create_from_config(n_input_dims_to_encode, n_input_dims_to_pass_through, n_output_dims, config);
+	create_from_config(n_input_dims, n_output_dims, config);
 
 // Train the model
 GPUMatrix<float> training_batch_inputs(n_input_dims, batch_size);
@@ -157,7 +157,9 @@ The following is a summary of all components of this framework that are currentl
 | Identity | `include/tiny-cuda-nn/encodings/identity.h` | Leaves values untouched.
 | Oneblob | `include/tiny-cuda-nn/encodings/oneblob.h` | From Neural Importance Sampling [[Müller et al. 2019]](https://tom94.net/data/publications/mueller18neural/mueller18neural-v4.pdf) and Neural Control Variates [[Müller et al. 2020]](https://tom94.net/data/publications/mueller20neural/mueller20neural.pdf).
 | Frequency | `include/tiny-cuda-nn/encodings/frequency.h` | NeRF's [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf) positional encoding applied equally to all dimensions.
-| NRC | `include/tiny-cuda-nn/encodings/nrc.h` | Combined oneblob and frequency encoding used in Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/).
+| TriangleWave | `include/tiny-cuda-nn/encodings/triangle_wave.h` | Low-cost alternative to the NeRF's encoding. Used in Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/).
+| SphericalHarmonics | `include/tiny-cuda-nn/encodings/spherical_harmonics.h` | A frequency-space encoding that is more suitable to direction vectors than component-wise ones.
+| Composite | `include/tiny-cuda-nn/encodings/composite.h` | Allows composing multiple encodings. Can be, for example, used to assemble the Neural Radiance Caching encoding [[Müller et al. 2021]](https://tom94.net/).
 
 | Losses | &nbsp; | &nbsp;
 | :--- | :---------- | :-----

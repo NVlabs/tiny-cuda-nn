@@ -36,8 +36,7 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/misc_kernels.h>
 
-
-#include <random>
+#include <numeric>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -48,10 +47,10 @@ TCNN_NAMESPACE_BEGIN
 
 
 template <typename F>
-__device__ inline float one_blob_subwarp_aligned(F kernel, const float* __restrict__ data_in, const uint32_t base_input_index, const uint32_t encoded_index, const uint32_t num_bins_log2) {
+__device__ inline float one_blob_subwarp_aligned(F kernel, const float* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
 	const uint32_t n_bins = 1 << num_bins_log2;
 	const uint32_t bin_index = encoded_index & (n_bins - 1);
-	const float x = data_in[base_input_index + (encoded_index >> num_bins_log2)];
+	const float x = data_in[encoded_index >> num_bins_log2];
 
 	const float left_boundary = scalbnf(bin_index, -num_bins_log2);
 	float left_cdf = kernel(left_boundary - x, n_bins) + kernel(left_boundary - x - 1.0f, n_bins) + kernel(left_boundary - x + 1.0f, n_bins);
@@ -72,10 +71,10 @@ __device__ inline float one_blob_subwarp_aligned(F kernel, const float* __restri
 
 
 template <typename F>
-__device__ inline float one_blob(F kernel, const float* __restrict__ data_in, const uint32_t base_input_index, const uint32_t encoded_index, const uint32_t num_bins_log2) {
+__device__ inline float one_blob(F kernel, const float* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
 	const uint32_t n_bins = 1 << num_bins_log2;
 	const uint32_t bin_index = encoded_index & (n_bins - 1);
-	const float x = data_in[base_input_index + (encoded_index >> num_bins_log2)];
+	const float x = data_in[encoded_index >> num_bins_log2];
 
 	const float left_boundary = scalbnf(bin_index, -num_bins_log2);
 	const float left_cdf = kernel(left_boundary - x, n_bins);
@@ -92,34 +91,29 @@ __global__ void kernel_one_blob(
 	const uint32_t num_elements,
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
-	const uint32_t num_passthrough,
 	const uint32_t num_to_pad,
-	const float* __restrict__ data_in,
-	T* __restrict__ data_out,
+	PitchedPtr<const float> data_in,
+	PitchedPtr<T> data_out,
 	float* __restrict__ dy_dx,
 	const uint32_t trailing_dims_to_ignore = 0
 ) {
-	const uint32_t fan_in_encoded = num_to_encode;
-	const uint32_t fan_in = fan_in_encoded + num_passthrough;
 	const uint32_t fan_out_encoded = num_to_encode << num_bins_log2;
-	const uint32_t fan_out = fan_out_encoded + num_passthrough + num_to_pad;
+	const uint32_t fan_out = fan_out_encoded + num_to_pad;
 
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
-	const uint32_t output_index = j + i * blockDim.x;
-	if (output_index >= num_elements * fan_out) return;
-
-	const uint32_t input_index = i * fan_in;
+	const uint32_t encoded_index = j + i * blockDim.x;
+	if (encoded_index >= num_elements * fan_out) return;
 
 	if (j >= fan_out_encoded) {
 		// A value of 1 here allows the network to learn a bias-like thing.
-		data_out[output_index] = j >= (fan_out_encoded + num_passthrough) ? 1 : data_in[input_index + fan_in_encoded + j - fan_out_encoded];
+		data_out(i)[j] = 1;
 	} else {
 		const uint32_t input_idx = (j >> num_bins_log2);
-		data_out[output_index] = (input_idx >= num_to_encode-trailing_dims_to_ignore) ? (T)0.0f : (T)one_blob_subwarp_aligned(quartic_cdf, data_in, input_index, j, num_bins_log2);
+		data_out(i)[j] = (input_idx >= num_to_encode-trailing_dims_to_ignore) ? (T)0.0f : (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i), j, num_bins_log2);
 		if (dy_dx != nullptr) {
 			// Negative sign, because the kernels are translated with their input (i.e. the input has a negative sign)
-			dy_dx[i * fan_out_encoded + j] = -one_blob_subwarp_aligned(quartic_cdf_deriv, data_in, input_index, j, num_bins_log2);
+			dy_dx[i * fan_out_encoded + j] = -one_blob_subwarp_aligned(quartic_cdf_deriv, data_in(i), j, num_bins_log2);
 		}
 	}
 }
@@ -128,45 +122,30 @@ template <typename T>
 __global__ void kernel_one_blob_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
-	const uint32_t n_dims_to_pass_through,
-	const uint32_t n_padded_output_dims,
 	const uint32_t n_bins,
-	const T* dL_dy,
+	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
-	float* dL_dx)
+	PitchedPtr<float> dL_dx)
 {
-	const uint32_t fan_out = n_dims_to_encode + n_dims_to_pass_through;
-	const uint32_t stride = n_padded_output_dims;
+	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
+	if (encoded_index >= num_elements) return;
 
-	const uint32_t outputs_per_input = n_bins;
-	const uint32_t passthrough_offset = n_dims_to_encode * outputs_per_input;
+	const uint32_t i = encoded_index / n_dims_to_encode;
+	const uint32_t j = encoded_index - i * n_dims_to_encode;
 
-	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (output_index >= num_elements) return;
-
-	const uint32_t i = output_index / fan_out;
-	const uint32_t j = output_index % fan_out;
-
-	if (j >= n_dims_to_encode) {
-		// Passthrough dimensions act as a passthrough in the backward pass, too.
-		dL_dx[output_index] = dL_dy[i * stride + j - n_dims_to_encode + passthrough_offset];
-	} else {
-		float result = 0;
-		for (int k = 0; k < outputs_per_input; ++k) {
-			result += (float)dL_dy[i * stride + j * outputs_per_input + k] * dy_dx[i * passthrough_offset + j * outputs_per_input + k];
-		}
-		dL_dx[output_index] = result;
+	float result = 0;
+	for (int k = 0; k < n_bins; ++k) {
+		result += (float)dL_dy(i)[j * n_bins + k] * dy_dx[i * n_dims_to_encode * n_bins + j * n_bins + k];
 	}
+	dL_dx(i)[j] = result;
 }
 
 template <typename T>
 class OneBlobEncoding : public Encoding<T> {
 public:
-	OneBlobEncoding(uint32_t n_bins, uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, uint32_t alignment, uint32_t n_trailing_dims_to_ignore = 0)
-	: m_n_bins{n_bins}, m_n_dims_to_encode{n_dims_to_encode}, m_n_dims_to_pass_through{n_dims_to_pass_through}, m_n_trailing_dims_to_ignore{n_trailing_dims_to_ignore} {
-		m_n_output_dims = m_n_dims_to_encode * m_n_bins + m_n_dims_to_pass_through;
-		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
-		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	OneBlobEncoding(uint32_t n_bins, uint32_t n_dims_to_encode)
+	: m_n_bins{n_bins}, m_n_dims_to_encode{n_dims_to_encode} {
+		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode * m_n_bins;
 
 		// Make sure the number of bins is a power of 2---this is required for certain optimizations
 		// in our compute kernel.
@@ -176,10 +155,10 @@ public:
 	}
 
 	void encode(
-		const uint32_t num_elements,
-		const float* inputs,
-		T* outputs,
 		cudaStream_t stream,
+		const uint32_t num_elements,
+		PitchedPtr<const float> inputs,
+		PitchedPtr<T> outputs,
 		float* dy_dx = nullptr,
 		bool is_inference = false
 	) const override {
@@ -200,7 +179,6 @@ public:
 			num_elements,
 			num_bins_log2,
 			m_n_dims_to_encode,
-			m_n_dims_to_pass_through,
 			m_n_to_pad,
 			inputs,
 			outputs,
@@ -212,26 +190,33 @@ public:
 	void backward(
 		cudaStream_t stream,
 		const uint32_t num_elements,
-		const T* dL_dy, // num_encoded_dims() x num_elements
+		PitchedPtr<const T> dL_dy, // Same shape as outputs
 		const float* dy_dx, // encoded output dims x num_elements
-		float* dL_dx, // input dims x num_elements
-		const float* inputs
+		PitchedPtr<float> dL_dx, // Same shape as inputs
+		PitchedPtr<const float> inputs,
+		bool accumulate_param_gradients
 	) override {
 		if (m_n_padded_output_dims == 0) {
 			return;
 		}
 
-		const uint32_t n_input_dims = m_n_dims_to_encode + m_n_dims_to_pass_through;
+		// Can't compute input gradients if insufficient info is available
+		if (!dy_dx || !dL_dx) {
+			return;
+		}
+
 		linear_kernel(kernel_one_blob_backward<T>, 0, stream,
-			num_elements * n_input_dims,
+			num_elements * m_n_dims_to_encode,
 			m_n_dims_to_encode,
-			m_n_dims_to_pass_through,
-			m_n_padded_output_dims,
 			m_n_bins,
 			dL_dy,
 			dy_dx,
 			dL_dx
 		);
+	}
+
+	uint32_t num_dims_to_encode() const override {
+		return m_n_dims_to_encode;
 	}
 
 	uint32_t num_encoded_dims() const override {
@@ -242,16 +227,25 @@ public:
 		return m_n_dims_to_encode * m_n_bins;
 	}
 
+	void set_alignment(uint32_t alignment) override {
+		alignment = std::lcm(alignment, min_alignment());
+		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
+		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	}
+
+	uint32_t min_alignment() const override {
+		return m_n_bins;
+	}
+
 private:
 	uint32_t m_n_bins;
 	uint32_t m_n_dims_to_encode;
-	uint32_t m_n_dims_to_pass_through;
 	uint32_t m_n_trailing_dims_to_ignore;
 
 	// derived sizes
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
-	uint32_t m_n_to_pad;
+	uint32_t m_n_to_pad = 0;
 };
 
 TCNN_NAMESPACE_END

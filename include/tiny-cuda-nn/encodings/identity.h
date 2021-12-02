@@ -35,8 +35,7 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/misc_kernels.h>
 
-
-#include <random>
+#include <numeric>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -49,34 +48,26 @@ template <typename T>
 __global__ void identity(
 	const uint32_t num_elements,
 	const uint32_t num_to_encode,
-	const uint32_t num_passthrough,
 	const uint32_t num_to_pad,
 	const float scale,
 	const float offset,
-	const float* __restrict__ data_in,
-	T* __restrict__ data_out,
+	PitchedPtr<const float> data_in,
+	PitchedPtr<T> data_out,
 	float* __restrict__ dy_dx)
 {
-	const uint32_t fan_in_encoded = num_to_encode;
-	const uint32_t fan_in = fan_in_encoded + num_passthrough;
-	const uint32_t fan_out_encoded = num_to_encode;
-	const uint32_t fan_out = num_to_encode + num_passthrough + num_to_pad;
+	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
+	if (encoded_index >= num_elements) return;
 
-	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (output_index >= num_elements) return;
+	const uint32_t fan_out = num_to_encode + num_to_pad;
+	const uint32_t i = encoded_index / fan_out;
+	const uint32_t j = encoded_index - i * fan_out;
 
-	const uint32_t i = output_index / fan_out;
-	const uint32_t j = output_index % fan_out;
-	const uint32_t input_index = i * fan_in;
-
-	if (j >= fan_out_encoded + num_passthrough) {
-		data_out[output_index] = 1;
-	} else if (j >= fan_out_encoded) {
-		data_out[output_index] = data_in[input_index + fan_in_encoded + j - fan_out_encoded] * scale + offset;
+	if (j >= num_to_encode) {
+		data_out(i)[j] = 1;
 	} else {
-		data_out[output_index] = data_in[input_index + j] * scale + offset;
+		data_out(i)[j] = data_in(i)[j] * scale + offset;
 		if (dy_dx != nullptr) {
-			dy_dx[i * fan_out_encoded + j] = 1.0f;
+			dy_dx[i * num_to_encode + j] = scale;
 		}
 	}
 }
@@ -85,40 +76,34 @@ template <typename T>
 __global__ void identity_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
-	const uint32_t n_dims_to_pass_through,
-	const uint32_t n_padded_output_dims,
-	const T* dL_dy,
+	const float scale,
+	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
-	float* dL_dx)
+	PitchedPtr<float> dL_dx)
 {
-	const uint32_t fan_out = n_dims_to_encode + n_dims_to_pass_through;
-	const uint32_t stride = n_padded_output_dims;
-
 	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (output_index >= num_elements) return;
 
-	const uint32_t i = output_index / fan_out;
-	const uint32_t j = output_index % fan_out;
+	const uint32_t i = output_index / n_dims_to_encode;
+	const uint32_t j = output_index - i * n_dims_to_encode;
 
 	// The identity encoding can simply pass through the derivative.
-	dL_dx[output_index] = dL_dy[i * stride + j];
+	dL_dx(i)[j] = (T)((float)dL_dy(i)[j] * scale);
 }
 
 template <typename T>
 class IdentityEncoding : public Encoding<T> {
 public:
-	IdentityEncoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, float scale = 1.0f, float offset = 0.0f, uint32_t alignment = 8)
-	: m_n_dims_to_encode{n_dims_to_encode}, m_n_dims_to_pass_through{n_dims_to_pass_through}, m_scale{scale}, m_offset{offset} {
-		m_n_output_dims = m_n_dims_to_encode + m_n_dims_to_pass_through;
-		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
-		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	IdentityEncoding(uint32_t n_dims_to_encode, float scale = 1.0f, float offset = 0.0f)
+	: m_n_dims_to_encode{n_dims_to_encode}, m_scale{scale}, m_offset{offset} {
+		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode;
 	}
 
 	void encode(
-		const uint32_t num_elements,
-		const float* inputs,
-		T* outputs,
 		cudaStream_t stream,
+		const uint32_t num_elements,
+		PitchedPtr<const float> inputs,
+		PitchedPtr<T> outputs,
 		float* dy_dx = nullptr,
 		bool is_inference = false
 	) const override {
@@ -129,7 +114,6 @@ public:
 		linear_kernel(identity<T>, 0, stream,
 			num_elements * num_encoded_dims(),
 			m_n_dims_to_encode,
-			m_n_dims_to_pass_through,
 			m_n_to_pad,
 			m_scale,
 			m_offset,
@@ -142,25 +126,33 @@ public:
 	void backward(
 		cudaStream_t stream,
 		const uint32_t num_elements,
-		const T* dL_dy, // num_encoded_dims() x num_elements
+		PitchedPtr<const T> dL_dy, // Same shape as outputs
 		const float* dy_dx, // encoded output dims x num_elements
-		float* dL_dx, // input dims x num_elements
-		const float* inputs
+		PitchedPtr<float> dL_dx, // Same shape as inputs
+		PitchedPtr<const float> inputs,
+		bool accumulate_param_gradients
 	) override {
 		if (m_n_padded_output_dims == 0) {
 			return;
 		}
 
-		const uint32_t n_input_dims = m_n_dims_to_encode + m_n_dims_to_pass_through;
+		// Can't compute input gradients if insufficient info is available
+		if (!dy_dx || !dL_dx) {
+			return;
+		}
+
 		linear_kernel(identity_backward<T>, 0, stream,
-			num_elements * n_input_dims,
+			num_elements * m_n_dims_to_encode,
 			m_n_dims_to_encode,
-			m_n_dims_to_pass_through,
-			m_n_padded_output_dims,
+			m_scale,
 			dL_dy,
 			dy_dx,
 			dL_dx
 		);
+	}
+
+	uint32_t num_dims_to_encode() const override {
+		return m_n_dims_to_encode;
 	}
 
 	uint32_t num_encoded_dims() const override {
@@ -171,9 +163,18 @@ public:
 		return m_n_dims_to_encode;
 	}
 
+	void set_alignment(uint32_t alignment) override {
+		alignment = std::lcm(alignment, min_alignment());
+		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
+		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	}
+
+	uint32_t min_alignment() const override {
+		return 1;
+	}
+
 private:
 	uint32_t m_n_dims_to_encode;
-	uint32_t m_n_dims_to_pass_through;
 
 	float m_scale;
 	float m_offset;
@@ -181,7 +182,7 @@ private:
 	// derived sizes
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
-	uint32_t m_n_to_pad;
+	uint32_t m_n_to_pad = 0;
 };
 
 TCNN_NAMESPACE_END

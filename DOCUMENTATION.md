@@ -6,6 +6,25 @@ For each component, we provide a sample configuration with each parameter's defa
 
 ## Networks
 
+### Activation Functions
+
+Activation functions are specified by string, e.g. as follows:
+```json5
+{
+	"activation": "ReLU",
+}
+```
+
+The following activation functions are supported:
+- `"None"` (identity)
+- `"ReLU"`
+- `"Exponential"`
+- `"Sine"`
+- `"Sigmoid"` (the logistic function)
+- `"Squareplus"` (defined as `0.5 * (x + sqrt(x*x + 4))`)
+- `"Softplus"` (defined as `log(exp(x) + 1)`)
+
+
 ### Fully Fused MLP
 
 Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 32, 64, or 128 and outputs of 16 or fewer dimensions.
@@ -14,12 +33,7 @@ Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricte
 {
 	"otype": "FullyFusedMLP",    // Component type.
 	"activation": "ReLU",        // Activation of hidden layers.
-	                             // Can be "ReLU", "Sigmoid",
-	                             // "Squareplus" or "Softplus".
 	"output_activation": "None", // Activation of the output layer.
-	                             // Can be "None", "ReLU", "Sigmoid",
-	                             // "Exponential", "Squareplus" or
-	                             // "Softplus".
 	"n_neurons": 128,            // Neurons in each hidden layer.
 	                             // May only be 32, 64 or 128.
 	"n_hidden_layers": 5,        // Number of hidden layers.
@@ -36,10 +50,7 @@ Multi-layer perceptron (MLP) based on [CUTLASS](https://github.com/NVIDIA/cutlas
 {
 	"otype": "CutlassMLP",       // Component type.
 	"activation": "ReLU",        // Activation of hidden layers.
-	                             // Can be "None", "ReLU", or "Sine",
-	                             // or "Exponential".
 	"output_activation": "None", // Activation of the output layer.
-	                             // Can be "None", "ReLU", "Exponential".
 	"n_neurons": 128,            // Neurons in each hidden layer.
 	"n_hidden_layers": 5         // Number of hidden layers.
 }
@@ -47,16 +58,18 @@ Multi-layer perceptron (MLP) based on [CUTLASS](https://github.com/NVIDIA/cutlas
 
 ### CUTLASS ResNet
 
-Fully connected residual network based on [CUTLASS](https://github.com/NVIDIA/cutlass)' GEMM routines. Only ReLU activations in the hidden layers and no activations on the output.
+Fully connected residual network based on [CUTLASS](https://github.com/NVIDIA/cutlass)' GEMM routines.
+The hidden layers always use ReLU activations for performance reasons.
 
 ```json5
 {
-	"otype": "CutlassResNet", // Component type.
-	"n_neurons": 128,         // Neurons in each hidden layer.
-	"n_blocks": 2,            // Number of residual blocks
-	                          // with one skip link each.
-	"n_matrices_per_block": 2 // Number of ReLU->MatMul operations
-	                          // per residual block.
+	"otype": "CutlassResNet",    // Component type.
+	"output_activation": "None", // Activation of the output layer.
+	"n_neurons": 128,            // Neurons in each hidden layer.
+	"n_blocks": 2,               // Number of residual blocks
+	                             // with one skip link each.
+	"n_matrices_per_block": 2    // Number of ReLU->MatMul operations
+	                             // per residual block.
 }
 ```
 
@@ -78,6 +91,8 @@ Leaves values untouched. Optionally, multiplies each dimension by a scalar and a
 
 From Neural Importance Sampling [[Müller et al. 2019]](https://tom94.net/data/publications/mueller18neural/mueller18neural-v4.pdf) and Neural Control Variates [[Müller et al. 2020]](https://tom94.net/data/publications/mueller20neural/mueller20neural.pdf). When the dynamic range of the encoded dimension is limited, it results in a more accurate fit than the identity encoding while not suffering from stripe artifacts like the Frequency encoding.
 
+For performance reasons, the encoding uses a quartic kernel rather than a Gaussian kernel to compute blob integrals. We measured no loss of reconstruction quality.
+
 ```json5
 {
 	"otype": "OneBlob", // Component type.
@@ -89,6 +104,8 @@ From Neural Importance Sampling [[Müller et al. 2019]](https://tom94.net/data/p
 
 From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
 
+The number of encoded dimensions is twice the specified number of frequencies for each input dimension.
+
 ```json5
 {
 	"otype": "Frequency", // Component type.
@@ -97,17 +114,60 @@ From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works 
 }
 ```
 
-### NRC Encoding
+### TriangleWave
 
-The encoding used in Neural Radiance Caching [Müller et al. 2021] (to appear). Uses an optimized Frequency encoding with triangle waves for the first 3 dimensions (assumed to be 3D position) and OneBlob encoding with quartic kernels for the remaining dimensions.
+Similar to the `Frequency` encoding, but replaces the sine function with a cheaper-to-compute triangle wave. Also omits the cosine function. Proposed in [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
+
+The number of encoded dimensions is the specified number of frequencies for each input dimension.
 
 ```json5
 {
-	"otype": "NRC",      // Component type.
-	"n_frequencies": 12, // Number of frequencies (tri wave)
-	                     // per encoded 3D dimension.
-	"n_bins": 4          // Number of bins per oneblob-encoded
-	                     // remaining dimension.
+	"otype": "TriangleWave", // Component type.
+	"n_frequencies": 12      // Number of frequencies (triwave)
+	                         // per encoded dimension.
+}
+```
+
+### Spherical Harmonics
+
+A frequency-space encoding that is more suitable to direction vectors than component-wise `Frequency` or `TriangleWave` encodings.
+Expects 3D inputs that represent normalized vectors `v` transformed into the unit cube as `(v+1)/2`.
+
+The number of encoded dimensions is the degree squared.
+
+```json5
+{
+	"otype": "SphericalHarmonics", // Component type.
+	"degree": 4                    // The SH degree up to which
+	                               // to evaluate the encoding.
+	                               // Produces degree^2 encoded
+	                               // dimensions.
+}
+```
+
+### Composite
+
+Allows composing multiple encodings. The following example replicates the Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) encoding by composing the `TriangleWave` encoding for the first 3 (spatial) dimensions, the `OneBlob` encoding for the following 5 non-linear appearance dimensions, and the `Identity` for all remaining dimensions.
+
+```json5
+{
+	"otype": "Composite",
+	"nested": [
+		{
+			"n_dims_to_encode": 3, // Spatial dims
+			"otype": "TriangleWave",
+			"n_frequencies": 12
+		},
+		{
+			"n_dims_to_encode": 5, // Non-linear appearance dims.
+			"otype": "OneBlob",
+			"n_bins": 4
+		},
+		{
+			// Number of remaining linear dims is automatically derived
+			"otype": "Identity"
+		}
+	]
 }
 ```
 
@@ -342,6 +402,8 @@ Wraps another optimizer and performs piecewise-constant exponential learning-rat
 	"decay_base": 0.1,           // The amount per decay step.
 	"decay_start": 10000,        // The training step at which
 	                             // to start the decay.
+	"decay_end": 10000000,       // The training step at which
+	                             // to end the decay.
 	"decay_interval": 10000,     // Training steps inbetween decay.
 	"nested": {                  // The nested optimizer.
 		"otype": "Adam"

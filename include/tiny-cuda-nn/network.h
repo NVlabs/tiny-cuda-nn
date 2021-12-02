@@ -45,21 +45,32 @@ enum class WeightUsage {
 };
 
 template <typename T>
-class Network : public DifferentiableObject<T, T> {
+void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, float* output);
+
+template <typename T, typename PARAMS_T=T>
+class Network : public DifferentiableObject<T, PARAMS_T, PARAMS_T> {
 public:
 	virtual ~Network() { }
 
-	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) = 0;
-	void inference_mixed_precision(const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) {
+	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) = 0;
+	void inference_mixed_precision(const GPUMatrix<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) {
 		inference_mixed_precision(nullptr, input, output, use_inference_matrices);
 	}
 
-	virtual uint32_t width() const = 0;
+	void visualize_activation(cudaStream_t stream, uint32_t layer, uint32_t dimension, const GPUMatrix<T>& input, GPUMatrix<float>& output) {
+		layer = std::min(layer, num_forward_activations()-1);
+		dimension = std::min(dimension, width(layer)-1);
+
+		this->forward(stream, input);
+		extract_dimension_pos_neg<PARAMS_T>(stream, output.n_elements(), dimension, width(layer), output.rows(), forward_activations(layer), output.data());
+	}
+
+	virtual uint32_t width(uint32_t layer) const = 0;
 	virtual uint32_t num_forward_activations() const = 0;
-	virtual const T* forward_activations(uint32_t layer) const = 0;
+	virtual const PARAMS_T* forward_activations(uint32_t layer) const = 0;
 };
 
 template <typename T>
-Network<T>* create_network(const json& network);
+Network<T, T>* create_network(const json& network);
 
 TCNN_NAMESPACE_END

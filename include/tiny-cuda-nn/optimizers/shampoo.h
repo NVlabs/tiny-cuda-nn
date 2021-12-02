@@ -42,7 +42,6 @@
 #include <cublas_v2.h>
 
 #include <iostream>
-#include <random>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -50,6 +49,48 @@
 
 
 TCNN_NAMESPACE_BEGIN
+
+
+#define CUBLAS_CHECK_THROW(x)                                                                                           \
+	do {                                                                                                                \
+		cublasStatus_t result = x;                                                                                      \
+		if (result != CUBLAS_STATUS_SUCCESS)                                                                            \
+			throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(result));  \
+	} while(0)
+
+inline std::string cublasGetError(cublasStatus_t error) {
+	switch (error) {
+		case CUBLAS_STATUS_SUCCESS:
+			return "CUBLAS_STATUS_SUCCESS";
+
+		case CUBLAS_STATUS_NOT_INITIALIZED:
+			return "CUBLAS_STATUS_NOT_INITIALIZED";
+
+		case CUBLAS_STATUS_ALLOC_FAILED:
+			return "CUBLAS_STATUS_ALLOC_FAILED";
+
+		case CUBLAS_STATUS_INVALID_VALUE:
+			return "CUBLAS_STATUS_INVALID_VALUE";
+
+		case CUBLAS_STATUS_ARCH_MISMATCH:
+			return "CUBLAS_STATUS_ARCH_MISMATCH";
+
+		case CUBLAS_STATUS_MAPPING_ERROR:
+			return "CUBLAS_STATUS_MAPPING_ERROR";
+
+		case CUBLAS_STATUS_EXECUTION_FAILED:
+			return "CUBLAS_STATUS_EXECUTION_FAILED";
+
+		case CUBLAS_STATUS_INTERNAL_ERROR:
+			return "CUBLAS_STATUS_INTERNAL_ERROR";
+
+		case CUBLAS_STATUS_NOT_SUPPORTED:
+			return "CUBLAS_STATUS_NOT_SUPPORTED";
+	}
+
+	return "<unknown>";
+}
+
 
 template <typename T>
 __global__ void subtract(
@@ -622,7 +663,7 @@ public:
 		}
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
 		auto alpha_beta_1 = debiased_alpha_beta(m_beta1);
 		auto alpha_beta_2 = debiased_alpha_beta(m_beta2);
 		auto alpha_beta_3 = debiased_alpha_beta(m_beta3);
@@ -633,7 +674,6 @@ public:
 		}
 
 		++m_current_step;
-		m_base_learning_rate = learning_rate;
 
 		std::vector<float> coefs;
 		coefs.push_back(1.0f);
@@ -788,28 +828,13 @@ public:
 					if (m_frobenius_normalization) {
 						reduce_sum(m_shampoo_momentum.data() + offset_MN, [] __device__ (float val) { return val * val; }, m_sqr1_tmp.data() + interval.first, M*N, update_stream, n_matrices);
 						reduce_sum(m_momentum.data() + offset_MN, [] __device__ (float val) { return val * val; }, m_sqr2_tmp.data() + interval.first, M*N, update_stream, n_matrices);
-
-						// Uncomment the following code to verify that the sums are correct
-						// std::vector<float> sums(n_matrices);
-						// cudaMemcpyAsync(sums.data(), m_sqr1_tmp.data() + interval.first, n_matrices * sizeof(float), cudaMemcpyDeviceToHost, update_stream);
-
-						// uint32_t local_offset_MN = offset_MN;
-						// for (uint32_t i = 0; i < n_matrices; ++i) {
-						// 	float reference_sum = reduce_sum(m_shampoo_momentum.data() + local_offset_MN, [] __device__ (float val) { return val * val; }, M*N, update_stream);
-
-						// 	if (std::abs(reference_sum - sums[i]) > 1) {
-						// 		std::cout << reference_sum << " != " << sums[i] << std::endl;
-						// 	}
-
-						// 	local_offset_MN += M*N;
-						// }
 					}
 
 					shampoo_step_batched<T><<<n_blocks_linear(M*N*n_matrices), n_threads_linear, 0, update_stream>>>(
 						M, N, n_matrices,
 						m_relative_weight_decay,
 						m_absolute_weight_decay,
-						learning_rate,
+						m_base_learning_rate,
 						m_sqr1_tmp.data() + interval.first,
 						m_sqr2_tmp.data() + interval.first,
 						m_shampoo_momentum.data() + offset_MN,
@@ -867,7 +892,7 @@ public:
 				n_remaining_weights,
 				m_relative_weight_decay,
 				m_absolute_weight_decay,
-				learning_rate,
+				m_base_learning_rate,
 				m_momentum.data() + m_n_weights_covered_by_matrices,
 				weights_full_precision + m_n_weights_covered_by_matrices,
 				weights + m_n_weights_covered_by_matrices
@@ -875,19 +900,23 @@ public:
 		}
 	}
 
-	float learning_rate() const {
+	float learning_rate() const override {
 		return m_base_learning_rate;
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_base_learning_rate = val;
+	}
+
+	uint32_t step() const override {
 		return m_current_step;
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_n_weights;
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return nullptr;
 	}
 

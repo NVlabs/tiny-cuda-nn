@@ -39,8 +39,6 @@
 #include <tiny-cuda-nn/losses/relative_l2_luminance.h>
 #include <tiny-cuda-nn/losses/cross_entropy.h>
 
-#include <cutlass/half.h>
-
 
 TCNN_NAMESPACE_BEGIN
 

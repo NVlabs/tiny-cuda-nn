@@ -33,19 +33,18 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
-#include <tiny-cuda-nn/cutlass_matmul_interface.h>
-
-#include <tiny-cuda-nn/cutlass_epilogues/exponential_epilogue.h>
-#include <tiny-cuda-nn/cutlass_epilogues/relu_transfer_epilogue.h>
-#include <tiny-cuda-nn/cutlass_epilogues/sine_epilogue.h>
 
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/misc_kernels.h>
 
 #include <cutlass/cutlass.h>
-#include <cutlass/epilogue/thread/linear_combination_relu.h>
+
+#include <cutlass/array.h>
+#include <cutlass/functional.h>
 #include <cutlass/gemm/device/gemm.h>
 #include <cutlass/gemm/device/gemm_splitk_parallel.h>
+#include <cutlass/numeric_conversion.h>
+#include <cutlass/numeric_types.h>
 
 #include <cutlass_b2b/device/b2b_gemm.h>
 
@@ -106,7 +105,6 @@ struct LayerConfig {
 };
 
 using FullLayerK = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>;
-using FullLayerKPreReLU = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32, true>, cutlass::gemm::GemmShape<32, 32, 32, true>>;
 using LastLayerK = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>;
 
 using FullLayer = typename std::conditional<
@@ -144,42 +142,177 @@ using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSw
 
 // This code section describes the epilogue part of the kernel
 
-template <typename T>
-static constexpr int n_vectorized_elements = std::is_same<MMAOp<T>, cutlass::arch::OpClassTensorOp>::value ? (128 / cutlass::sizeof_bits<T>::value) : 1;
+template <typename V>
+struct CutlassFragmentWrapper {
+	static const uint32_t num_elements = V::kElements;
+	V x;
+};
+
+template <
+	typename ElementOutput_,                             ///< Data type used to load and store tensors
+	int Count,                                           ///< Number of elements computed per operation
+	typename ElementAccumulator_ = ElementOutput_,       ///< Accumulator data type
+	typename ElementCompute_ = ElementOutput_,           ///< Data type used to compute linear combination
+	cutlass::FloatRoundStyle Round = cutlass::FloatRoundStyle::round_to_nearest
+>
+class ActivationEpilogue {
+public:
+	using ElementOutput = ElementOutput_;
+	using ElementAccumulator = ElementAccumulator_;
+	using ElementCompute = ElementCompute_;
+
+	static int const kCount = Count;
+
+	using FragmentOutput = cutlass::Array<ElementOutput, kCount>;
+	using FragmentAccumulator = cutlass::Array<ElementAccumulator, kCount>;
+	using ComputeFragment = cutlass::Array<ElementCompute, kCount>;
+
+	static cutlass::FloatRoundStyle const kRound = Round;
+
+	struct Params {
+		Activation activation;
+		bool sum_source;
+	};
+
+public:
+	CUTLASS_HOST_DEVICE
+	ActivationEpilogue(Params const &params) : m_activation{params.activation}, m_sum_source{params.sum_source} { }
+
+	CUTLASS_HOST_DEVICE
+	bool is_source_needed() const {
+		return m_sum_source;
+	}
+
+	/// Functionally required for serial reduction in the epilogue
+	CUTLASS_HOST_DEVICE
+	void set_k_partition(int k_partition) { }
+
+	CUTLASS_HOST_DEVICE
+	FragmentOutput operator()(FragmentAccumulator const &accumulator) const {
+		cutlass::NumericArrayConverter<ElementCompute, ElementAccumulator, kCount, Round> accumulator_converter;
+
+		auto intermediate = CutlassFragmentWrapper<ComputeFragment>{accumulator_converter(accumulator)};
+		intermediate = warp_activation<ElementCompute>(m_activation, intermediate);
+
+		cutlass::NumericArrayConverter<ElementOutput, ElementCompute, kCount, Round> destination_converter;
+		return destination_converter(intermediate.x);
+	}
+
+	CUTLASS_HOST_DEVICE
+	FragmentOutput operator()(FragmentAccumulator const &accumulator, FragmentOutput const &source) const {
+		cutlass::NumericArrayConverter<ElementCompute, ElementOutput, kCount, Round> source_converter;
+		cutlass::NumericArrayConverter<ElementCompute, ElementAccumulator, kCount, Round> accumulator_converter;
+
+		cutlass::plus<ComputeFragment> plus_op;
+		auto intermediate = CutlassFragmentWrapper<ComputeFragment>{accumulator_converter(accumulator)};
+		if (m_sum_source) {
+			intermediate.x = plus_op(intermediate.x, source_converter(source));
+		}
+		intermediate = warp_activation<ElementCompute>(m_activation, intermediate);
+
+		cutlass::NumericArrayConverter<ElementOutput, ElementCompute, kCount, Round> destination_converter;
+		return destination_converter(intermediate.x);
+	}
+
+private:
+	Activation m_activation;
+	bool m_sum_source;
+};
+
+template <
+	typename ElementOutput_,                             ///< Data type used to load and store tensors
+	int Count,                                           ///< Number of elements computed per operation
+	typename ElementAccumulator_ = ElementOutput_,       ///< Accumulator data type
+	typename ElementCompute_ = ElementOutput_,           ///< Data type used to compute linear combination
+	cutlass::FloatRoundStyle Round = cutlass::FloatRoundStyle::round_to_nearest
+>
+class ActivationTransferEpilogue {
+public:
+	using ElementOutput = ElementOutput_;
+	using ElementAccumulator = ElementAccumulator_;
+	using ElementCompute = ElementCompute_;
+
+	static int const kCount = Count;
+
+	using FragmentOutput = cutlass::Array<ElementOutput, kCount>;
+	using FragmentAccumulator = cutlass::Array<ElementAccumulator, kCount>;
+	using ComputeFragment = cutlass::Array<ElementCompute, kCount>;
+
+	static cutlass::FloatRoundStyle const kRound = Round;
+
+	/// Host-constructable parameters structure
+	struct Params {
+		Activation activation;
+	};
+
+public:
+	/// Constructs the function object, possibly loading from pointers in host memory
+	CUTLASS_HOST_DEVICE
+	ActivationTransferEpilogue(Params const &params) : m_activation{params.activation} { }
+
+	/// Returns true if source is needed
+	CUTLASS_HOST_DEVICE
+	bool is_source_needed() const {
+		return true;
+	}
+
+	/// Functionally required for serial reduction in the epilogue
+	CUTLASS_HOST_DEVICE
+	void set_k_partition(int k_partition) { }
+
+	CUTLASS_HOST_DEVICE
+	FragmentOutput operator()(
+		FragmentAccumulator const &accumulator,
+		FragmentOutput const &source) const {
+
+		cutlass::NumericArrayConverter<ElementCompute, ElementOutput, kCount, Round> source_converter;
+		cutlass::NumericArrayConverter<ElementCompute, ElementAccumulator, kCount, Round> accumulator_converter;
+
+		auto converted_source = CutlassFragmentWrapper<ComputeFragment>{source_converter(source)};
+		auto intermediate = CutlassFragmentWrapper<ComputeFragment>{accumulator_converter(accumulator)};
+
+		intermediate = warp_activation_backward<ElementCompute>(m_activation, intermediate, converted_source);
+
+		cutlass::NumericArrayConverter<ElementOutput, ElementCompute, kCount, Round> destination_converter;
+		return destination_converter(intermediate.x);
+	}
+
+	CUTLASS_HOST_DEVICE
+	FragmentOutput operator()(
+		FragmentAccumulator const &accumulator) const {
+
+		cutlass::NumericArrayConverter<ElementCompute, ElementAccumulator, kCount, Round> accumulator_converter;
+
+		ComputeFragment converted_accumulator = accumulator_converter(accumulator);
+
+		cutlass::NumericArrayConverter<ElementOutput, ElementCompute, kCount, Round> destination_converter;
+
+		return destination_converter(converted_accumulator);
+	}
+
+private:
+	Activation m_activation;
+};
+
 
 template <typename T>
-using IntermediateOp = cutlass::epilogue::thread::LinearCombinationRelu<T, 4, TypeAccumulator, TypeCompute>;
+static constexpr int n_vectorized_elements = std::is_same<MMAOp<T>, cutlass::arch::OpClassTensorOp>::value ? (128 / cutlass::sizeof_bits<T>::value) : 1;
 
 template <typename T>
 using SumOp = cutlass::epilogue::thread::LinearCombination<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
 
 template <typename T>
-using ReLUOp = cutlass::epilogue::thread::LinearCombinationRelu<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
+using IntermediateActivationOp = ActivationEpilogue<T, 4, TypeAccumulator, TypeCompute>;
 
 template <typename T>
-using ReLUIntermediateOp = cutlass::epilogue::thread::LinearCombinationRelu<T, 4, TypeAccumulator, TypeCompute>;
+using IntermediateActivationTransferOp = ActivationTransferEpilogue<T, 4, TypeAccumulator, TypeCompute>;
 
 template <typename T>
-using ReLUTransferOp = ReLUTransferEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
+using ActivationOp = ActivationEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
 
 template <typename T>
-using ExponentialOp = ExponentialEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
+using ActivationTransferOp = ActivationTransferEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
 
-template <typename T>
-using ExponentialIntermediateOp = ExponentialEpilogue<T, 4, TypeAccumulator, TypeCompute>;
-
-template <typename T>
-using SineOp = SineEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
-
-template <typename T>
-using SineIntermediateOp = SineEpilogue<T, 4, TypeAccumulator, TypeCompute>;
-
-template <typename T>
-using ConversionOp = cutlass::epilogue::thread::Convert<T, n_vectorized_elements<T>, TypeAccumulator>;
-
-
-// Number of pipelines you want to use
-constexpr int NumStages = 2;
 
 template <typename EPILOGUE, typename LayerConfig, typename TypeA, typename LayoutA, typename TypeB, typename LayoutB, typename TypeOutput, typename LayoutOutput>
 using OurGemm = cutlass::gemm::device::Gemm<
@@ -197,7 +330,7 @@ using OurGemm = cutlass::gemm::device::Gemm<
 	ShapeMMAOp<TypeA>,
 	EPILOGUE,
 	SwizzleThreadBlock,
-	NumStages
+	2
 >;
 
 template <typename EPILOGUE, typename LayerConfig, typename TypeA, typename LayoutA, typename TypeB, typename LayoutB, typename TypeOutput, typename LayoutOutput>
@@ -236,7 +369,7 @@ using OurB2bGemm = cutlass::gemm::device::B2bGemm<
 	Epilogue1,
 	Epilogue2,
 	cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-	NumStages
+	2
 >;
 
 
@@ -316,8 +449,8 @@ void fc_multiply_b2b_impl(cudaStream_t stream, const typename Gemm::Arguments& a
 	CUTLASS_CHECK(status);
 }
 
-template <Activation activation, typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, network_precision_t beta, network_precision_t alpha) {
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
 	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutB = typename std::conditional<LayoutB == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutC = typename std::conditional<LayoutC == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
@@ -351,85 +484,74 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 	const int ldc = LayoutC == RM ? C.n() : C.m();
 	const int ldd = LayoutD == RM ? D.n() : D.m();
 
-	if (activation == Activation::None) {
-		using Gemm = OurGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
+	if (transfer) {
+		using Gemm = OurGemm<ActivationTransferOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
 			{(MatmulTypeCompute*)A.data(), lda},
 			{(MatmulTypeCompute*)B.data(), ldb},
 			{(MatmulTypeAccumulator*)C.data(), ldc},
 			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)alpha, (TypeCompute)beta},
-			1
-		};
-
-		fc_multiply_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::ReLU) {
-		using Gemm = OurGemm<ReLUOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)alpha, (TypeCompute)beta, (TypeCompute)0.0f},
-			1
-		};
-
-		fc_multiply_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::Exponential) {
-		using Gemm = OurGemm<ExponentialOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)beta},
-			1
-		};
-
-		fc_multiply_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::Sine) {
-		using Gemm = OurGemm<SineOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			typename SineOp<MatmulTypeAccumulator>::Params(),
-			1
-		};
-
-		fc_multiply_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::ReLUTransfer) {
-		using Gemm = OurGemm<ReLUTransferOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			typename ReLUTransferOp<MatmulTypeAccumulator>::Params(),
+			{act},
 			1
 		};
 
 		fc_multiply_impl<Gemm>(stream, arguments);
 	} else {
-        throw std::runtime_error{
-            "Unsupported activation type in fc_multiply()"
-        };
-    }
+		using Gemm = OurGemm<ActivationOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
+		typename Gemm::Arguments arguments{
+			{M, N, K},
+			{(MatmulTypeCompute*)A.data(), lda},
+			{(MatmulTypeCompute*)B.data(), ldb},
+			{(MatmulTypeAccumulator*)C.data(), ldc},
+			{(MatmulTypeAccumulator*)D.data(), ldd},
+			{act, sum_source},
+			1
+		};
+
+		fc_multiply_impl<Gemm>(stream, arguments);
+	}
 }
 
-template <Activation activation, typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, GPUMatrix<TypeD, LayoutD>& D, network_precision_t beta = (network_precision_t)0) {
-	fc_multiply<activation, config>(stream, A, B, D, D, beta);
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, typename TypeD>
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
+	if (C.layout() != D.layout()) {
+		throw std::runtime_error{"fc_multiply: Layout of GPUMatrixDynamic C and D must be equal"};
+	}
+
+	if (D.layout() == CM) {
+		auto C_CM = GPUMatrix<TypeC, CM>{C};
+		auto D_CM = GPUMatrix<TypeD, CM>{D};
+		fc_multiply<config>(stream, A, B, C_CM, D_CM, act, transfer, sum_source);
+	} else {
+		auto C_RM = GPUMatrix<TypeC, RM>{C};
+		auto D_RM = GPUMatrix<TypeD, RM>{D};
+		fc_multiply<config>(stream, A, B, C_RM, D_RM, act, transfer, sum_source);
+	}
 }
 
-template <Activation activation, typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, network_precision_t beta = (network_precision_t)0, int split_k_slices = 1, network_precision_t alpha = (network_precision_t)1) {
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, typename TypeC, typename TypeD>
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
+	if (B.layout() == CM) {
+		auto B_CM = GPUMatrix<TypeB, CM>{B};
+		fc_multiply<config>(stream, A, B_CM, C, D, act, transfer, sum_source);
+	} else {
+		auto B_RM = GPUMatrix<TypeB, RM>{B};
+		// Only column-major output is supported by CUTLASS, then B is row-major.
+		// The following constructors will throw if that assumption isn't met.
+		auto C_CM = GPUMatrix<TypeC, CM>{C};
+		auto D_CM = GPUMatrix<TypeD, CM>{D};
+		fc_multiply<config>(stream, A, B_RM, C_CM, D_CM, act, transfer, sum_source);
+	}
+}
+
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, typename TypeD>
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None) {
+	fc_multiply<config>(stream, A, B, D, D, act);
+}
+
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, int split_k_slices = 1) {
 	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutB = typename std::conditional<LayoutB == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutC = typename std::conditional<LayoutC == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
@@ -463,85 +585,66 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	const int ldc = LayoutC == RM ? C.n() : C.m();
 	const int ldd = LayoutD == RM ? D.n() : D.m();
 
-	if (activation == Activation::None) {
-		using Gemm = SplitKGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)alpha, (TypeCompute)beta},
-			split_k_slices
-		};
+	using Gemm = SplitKGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
+	typename Gemm::Arguments arguments{
+		{M, N, K},
+		{(MatmulTypeCompute*)A.data(), lda},
+		{(MatmulTypeCompute*)B.data(), ldb},
+		{(MatmulTypeAccumulator*)C.data(), ldc},
+		{(MatmulTypeAccumulator*)D.data(), ldd},
+		{(TypeCompute)1.0f, (TypeCompute)0.0f},
+		split_k_slices
+	};
 
-		fc_multiply_split_k_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::ReLU) {
-		using Gemm = SplitKGemm<ReLUOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)alpha, (TypeCompute)beta, (TypeCompute)0.0f},
-			split_k_slices
-		};
+	fc_multiply_split_k_impl<Gemm>(stream, arguments);
+}
 
-		fc_multiply_split_k_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::Exponential) {
-		using Gemm = SplitKGemm<ExponentialOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)beta},
-			split_k_slices
-		};
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, typename TypeD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+	if (C.layout() != D.layout()) {
+		throw std::runtime_error{"fc_multiply: Layout of GPUMatrixDynamic C and D must be equal"};
+	}
 
-		fc_multiply_split_k_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::Sine) {
-		using Gemm = SplitKGemm<SineOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			typename SineOp<MatmulTypeAccumulator>::Params(),
-			split_k_slices
-		};
-
-		fc_multiply_split_k_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::ReLUTransfer) {
-		using Gemm = SplitKGemm<ReLUTransferOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
-		typename Gemm::Arguments arguments{
-			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			typename ReLUTransferOp<MatmulTypeAccumulator>::Params(),
-			split_k_slices
-		};
-
-		fc_multiply_split_k_impl<Gemm>(stream, arguments);
+	if (D.layout() == CM) {
+		auto C_CM = GPUMatrix<TypeC, CM>{C};
+		auto D_CM = GPUMatrix<TypeD, CM>{D};
+		fc_multiply_split_k<config>(stream, A, B, C_CM, D_CM, split_k_slices);
 	} else {
-        throw std::runtime_error{
-            "Unsupported activation type in fc_multiply_split_k()"
-        };
-    }
+		auto C_RM = GPUMatrix<TypeC, RM>{C};
+		auto D_RM = GPUMatrix<TypeD, RM>{D};
+		fc_multiply_split_k<config>(stream, A, B, C_RM, D_RM, split_k_slices);
+	}
 }
 
-template <Activation activation, typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, GPUMatrix<TypeD, LayoutD>& D, int split_k_slices, network_precision_t alpha = (network_precision_t)1, network_precision_t beta = (network_precision_t)0) {
-	fc_multiply_split_k<activation, config>(stream, A, B, D, D, beta, split_k_slices, alpha);
+template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, typename TypeC, typename TypeD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+	if (B.layout() == CM) {
+		auto B_CM = GPUMatrix<TypeB, CM>{B};
+		fc_multiply_split_k<config>(stream, A, B_CM, C, D, split_k_slices);
+	} else {
+		auto B_RM = GPUMatrix<TypeB, RM>{B};
+		fc_multiply_split_k<config>(stream, A, B_RM, C, D, split_k_slices);
+	}
 }
 
-template <Activation activation, typename config1, typename config2, typename TypeA, MatrixLayout LayoutA, typename TypeB1, MatrixLayout LayoutB1, typename TypeC1, MatrixLayout LayoutC1, typename TypeB2, MatrixLayout LayoutB2, typename TypeC2, MatrixLayout LayoutC2, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply_b2b(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB1, LayoutB1>& B1, const GPUMatrix<TypeC1, LayoutC1>& C1, const GPUMatrix<TypeB2, LayoutB2>& B2, const GPUMatrix<TypeC2, LayoutC2>& C2, GPUMatrix<TypeD, LayoutD>& D, network_precision_t beta1 = (network_precision_t)0, network_precision_t beta2 = (network_precision_t)0) {
+template <typename config, typename TypeA, typename TypeB, MatrixLayout LayoutB, typename TypeC, typename TypeD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+	if (A.layout() == CM) {
+		auto A_CM = GPUMatrix<TypeA, CM>{A};
+		fc_multiply_split_k<config>(stream, A_CM, B, C, D, split_k_slices);
+	} else {
+		auto A_RM = GPUMatrix<TypeA, RM>{A};
+		fc_multiply_split_k<config>(stream, A_RM, B, C, D, split_k_slices);
+	}
+}
+
+template <typename config, typename TypeA, typename TypeB, MatrixLayout LayoutB, typename TypeD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrix<TypeB, LayoutB>& B, GPUMatrixDynamic<TypeD>& D, int split_k_slices) {
+	fc_multiply_split_k<config>(stream, A, B, D, D, split_k_slices);
+}
+
+template <typename config1, typename config2, typename TypeA, MatrixLayout LayoutA, typename TypeB1, MatrixLayout LayoutB1, typename TypeC1, MatrixLayout LayoutC1, typename TypeB2, MatrixLayout LayoutB2, typename TypeC2, MatrixLayout LayoutC2, typename TypeD, MatrixLayout LayoutD>
+void fc_multiply_b2b(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB1, LayoutB1>& B1, const GPUMatrix<TypeC1, LayoutC1>& C1, const GPUMatrix<TypeB2, LayoutB2>& B2, const GPUMatrix<TypeC2, LayoutC2>& C2, GPUMatrix<TypeD, LayoutD>& D, Activation act_1, Activation act_2, bool transfer, bool sum_source_1, bool sum_source_2) {
 	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutB1 = typename std::conditional<LayoutB1 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutC1 = typename std::conditional<LayoutC1 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
@@ -589,8 +692,8 @@ void fc_multiply_b2b(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, co
 	const int ldc2 = LayoutC2 == RM ? C2.n() : C2.m();
 	const int ldd = LayoutD == RM ? D.n() : D.m();
 
-	if (activation == Activation::None) {
-		using Gemm = OurB2bGemm<IntermediateOp<MatmulTypeCompute>, SumOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
+	if (transfer) {
+		using Gemm = OurB2bGemm<IntermediateActivationTransferOp<MatmulTypeCompute>, ActivationTransferOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
 		typename Gemm::Arguments arguments{
 			{M1, N1, K1},
 			{M2, N2, K2},
@@ -600,80 +703,28 @@ void fc_multiply_b2b(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, co
 			{(MatmulTypeCompute*)B2.data(), ldb2},
 			{(MatmulTypeAccumulator*)C2.data(), ldc2},
 			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)1.0f, (TypeCompute)beta1},
-			{(TypeCompute)1.0f, (TypeCompute)beta2},
-		};
-
-		fc_multiply_b2b_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::ReLU) {
-		using Gemm = OurB2bGemm<ReLUIntermediateOp<MatmulTypeCompute>, ReLUOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
-		typename Gemm::Arguments arguments{
-			{M1, N1, K1},
-			{M2, N2, K2},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B1.data(), ldb1},
-			{(MatmulTypeCompute*)C1.data(), ldc1},
-			{(MatmulTypeCompute*)B2.data(), ldb2},
-			{(MatmulTypeAccumulator*)C2.data(), ldc2},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)1.0f, (TypeCompute)beta1, (TypeCompute)0.0f},
-			{(TypeCompute)1.0f, (TypeCompute)beta2, (TypeCompute)0.0f},
-		};
-
-		fc_multiply_b2b_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::Exponential) {
-		using Gemm = OurB2bGemm<ExponentialIntermediateOp<MatmulTypeCompute>, ExponentialOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
-		typename Gemm::Arguments arguments{
-			{M1, N1, K1},
-			{M2, N2, K2},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B1.data(), ldb1},
-			{(MatmulTypeCompute*)C1.data(), ldc1},
-			{(MatmulTypeCompute*)B2.data(), ldb2},
-			{(MatmulTypeAccumulator*)C2.data(), ldc2},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)beta1},
-			{(TypeCompute)beta2},
-		};
-
-		fc_multiply_b2b_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::Sine) {
-		using Gemm = OurB2bGemm<SineIntermediateOp<MatmulTypeCompute>, SineOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
-		typename Gemm::Arguments arguments{
-			{M1, N1, K1},
-			{M2, N2, K2},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B1.data(), ldb1},
-			{(MatmulTypeCompute*)C1.data(), ldc1},
-			{(MatmulTypeCompute*)B2.data(), ldb2},
-			{(MatmulTypeAccumulator*)C2.data(), ldc2},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			typename SineIntermediateOp<MatmulTypeCompute>::Params(),
-			typename SineOp<MatmulTypeAccumulator>::Params(),
-		};
-
-		fc_multiply_b2b_impl<Gemm>(stream, arguments);
-	} else if (activation == Activation::ReLUTransfer) {
-		using Gemm = OurB2bGemm<IntermediateOp<MatmulTypeCompute>, ReLUTransferOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
-		typename Gemm::Arguments arguments{
-			{M1, N1, K1},
-			{M2, N2, K2},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B1.data(), ldb1},
-			{(MatmulTypeCompute*)C1.data(), ldc1},
-			{(MatmulTypeCompute*)B2.data(), ldb2},
-			{(MatmulTypeAccumulator*)C2.data(), ldc2},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{(TypeCompute)1.0f, (TypeCompute)beta1},
-			typename ReLUTransferOp<MatmulTypeAccumulator>::Params(),
+			{act_1},
+			{act_2},
 		};
 
 		fc_multiply_b2b_impl<Gemm>(stream, arguments);
 	} else {
-        throw std::runtime_error{
-            "Unsupported activation type in fc_multiply_b2b()"
-        };
-    }
+		using Gemm = OurB2bGemm<IntermediateActivationOp<MatmulTypeCompute>, ActivationOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
+		typename Gemm::Arguments arguments{
+			{M1, N1, K1},
+			{M2, N2, K2},
+			{(MatmulTypeCompute*)A.data(), lda},
+			{(MatmulTypeCompute*)B1.data(), ldb1},
+			{(MatmulTypeCompute*)C1.data(), ldc1},
+			{(MatmulTypeCompute*)B2.data(), ldb2},
+			{(MatmulTypeAccumulator*)C2.data(), ldc2},
+			{(MatmulTypeAccumulator*)D.data(), ldd},
+			{act_1, sum_source_1},
+			{act_2, sum_source_2},
+		};
+
+		fc_multiply_b2b_impl<Gemm>(stream, arguments);
+	}
 }
 
 TCNN_NAMESPACE_END

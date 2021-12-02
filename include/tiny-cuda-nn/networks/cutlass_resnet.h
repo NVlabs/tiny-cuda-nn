@@ -32,13 +32,10 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
-#include <tiny-cuda-nn/cutlass_matmul_interface.h>
 #include <tiny-cuda-nn/network.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/misc_kernels.h>
-
-#include <cutlass/half.h>
 
 #include <array>
 #include <iostream>
@@ -47,20 +44,19 @@
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T, Activation input_activation = Activation::None, Activation output_activation = Activation::Exponential>
+template <typename T, Activation input_activation = Activation::None>
 class CutlassResNet : public Network<T> {
 public:
 	using type_t = T;
 	static const Activation input_activation_value = input_activation;
-	static const Activation output_activation_value = output_activation;
 
-	CutlassResNet(uint32_t input_width, uint32_t network_width, uint32_t output_width, uint32_t n_blocks, uint32_t n_matrices_per_block);
+	CutlassResNet(uint32_t input_width, uint32_t network_width, uint32_t output_width, uint32_t n_blocks, uint32_t n_matrices_per_block, Activation output_activation);
 	~CutlassResNet() override;
 
 	void inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) override;
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
 
-	void forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
+	void forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
 
 	void backward(
 		cudaStream_t stream,
@@ -72,7 +68,7 @@ public:
 		bool compute_param_gradients = true
 	) override;
 
-	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
+	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
 
 	GPUMatrix<T, RM>& input_weight_matrix(bool inference) {
 		auto& weight_matrices = inference ? m_weight_matrices_inference : m_weight_matrices;
@@ -101,10 +97,6 @@ public:
 		return m_gradient_matrices.back();
 	}
 
-	void set_output_activation_param(float value) {
-		m_output_activation_param = value;
-	}
-
 	size_t n_params() const override {
 		return m_total_n_params;
 	}
@@ -129,7 +121,7 @@ public:
 		return result;
 	}
 
-	uint32_t width() const override {
+	uint32_t width(uint32_t layer) const override {
 		return m_network_width;
 	}
 
@@ -148,14 +140,14 @@ private:
 
 	void allocate_backward_buffers(uint32_t batch_size);
 
-	float m_output_activation_param = 0;
-
 	uint32_t m_n_matrices_per_block;
 	uint32_t m_input_width;
 	uint32_t m_network_width;
 	uint32_t m_output_width;
 	uint32_t m_padded_output_width;
 	uint32_t m_n_blocks;
+
+	Activation m_output_activation;
 
 	static const uint32_t tensorcore_width = 8;
 

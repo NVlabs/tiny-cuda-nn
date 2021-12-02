@@ -23,39 +23,44 @@
  *//*
  */
 
-/** @file   optimizer.h
+/** @file   object.cu
  *  @author Thomas Müller, NVIDIA
- *  @brief  API interface of optimizers that can be used with ResNets.
+ *  @brief  API interface of a TCNN object
  */
 
-#pragma once
-
-#include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/object.h>
 
-#include <stdint.h>
+#include <tiny-cuda-nn/common.h>
+#include <tiny-cuda-nn/misc_kernels.h>
 
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T>
-class Optimizer : public ObjectWithMutableHyperparams {
-public:
-	virtual ~Optimizer() {}
-
-	virtual void allocate(std::shared_ptr<ParametricObject<T>> target) = 0;
-	virtual void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) = 0;
-	virtual float learning_rate() const = 0;
-	virtual void set_learning_rate(float val) = 0;
-	virtual uint32_t step() const = 0;
-	virtual uint32_t n_weights() const = 0;
-	virtual T* custom_weights() const = 0;
-
-	virtual json serialize() const { return {}; }
-	virtual void deserialize(const json& data) { }
-};
 
 template <typename T>
-Optimizer<T>* create_optimizer(const json& params);
+__global__ void one_hot_batched_kernel(const uint32_t num_elements, const uint32_t width, const uint32_t one_hot_dim, T* out, float scale) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
+
+	const uint32_t dim = i % width;
+	out[i] = dim == one_hot_dim ? (T)scale : (T)0.0f;
+}
+
+template <typename T>
+void one_hot_batched(cudaStream_t stream, const uint32_t num_elements, const uint32_t width, const uint32_t one_hot_dim, T* out, float scale) {
+	linear_kernel(one_hot_batched_kernel<T>, 0, stream, num_elements, width, one_hot_dim, out, scale);
+}
+
+template void one_hot_batched(cudaStream_t stream, const uint32_t num_elements, const uint32_t width, const uint32_t one_hot_dim, float* out, float scale);
+template void one_hot_batched(cudaStream_t stream, const uint32_t num_elements, const uint32_t width, const uint32_t one_hot_dim, __half* out, float scale);
+
+template <typename T>
+void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float factor) {
+	linear_kernel(mult_scalar_kernel<T>, 0, stream, num_elements, inout, factor);
+}
+
+template void mult(cudaStream_t stream, const uint32_t num_elements, float* inout, float factor);
+template void mult(cudaStream_t stream, const uint32_t num_elements, __half* inout, float factor);
+
 
 TCNN_NAMESPACE_END

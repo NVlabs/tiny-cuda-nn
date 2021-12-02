@@ -397,7 +397,6 @@ struct Mma<
     FragmentB const &b,
     FragmentC const &c
   ) const {
-	  printf("test\n");
 #if defined(CUTLASS_ARCH_MMA_SM80_ENABLED)
 
     uint32_t const *A = reinterpret_cast<uint32_t const *>(&a);

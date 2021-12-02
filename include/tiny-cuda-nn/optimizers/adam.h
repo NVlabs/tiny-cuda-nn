@@ -35,8 +35,9 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/misc_kernels.h>
 #include <tiny-cuda-nn/optimizer.h>
+#include <tiny-cuda-nn/gpu_memory_json.h>
+#include <json/json.hpp>
 
-#include <random>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -52,7 +53,6 @@ __global__ void adam_step(
 	const float relative_weight_decay,
 	const float absolute_weight_decay,
 	const float loss_scale,
-	float base_learning_rate,
 	float learning_rate,
 	const float non_matrix_learning_rate_factor,
 	const bool optimize_matrix_params,
@@ -67,7 +67,8 @@ __global__ void adam_step(
 	T* __restrict__ weights,
 	const T* __restrict__ gradients,
 	float* __restrict__ first_moments,
-	float* __restrict__ second_moments
+	float* __restrict__ second_moments,
+	uint32_t* __restrict__ param_steps
 ) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_elements) return;
@@ -100,6 +101,10 @@ __global__ void adam_step(
 		learning_rate *= non_matrix_learning_rate_factor;
 	}
 
+	// Debiasing. Since some parameters might see fewer steps than others, they each need their own step counter.
+	const uint32_t current_step = ++param_steps[i];
+	learning_rate *= sqrtf(1 - powf(beta2, (float)current_step)) / (1 - powf(beta1, (float)current_step));
+
 	// Follow AdaBound paradigm
 	const float effective_learning_rate = fminf(fmaxf(learning_rate / (sqrtf(second_moment) + epsilon), lower_lr_bound), upper_lr_bound);
 
@@ -131,6 +136,9 @@ public:
 		m_second_moments.resize(size);
 		m_second_moments.memset(0);
 
+		m_param_steps.resize(size);
+		m_param_steps.memset(0);
+
 		m_n_weights_covered_by_matrices = 0;
 		auto layer_sizes = target->layer_sizes();
 
@@ -139,11 +147,8 @@ public:
 		}
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
 		++m_current_step;
-
-		m_base_learning_rate = learning_rate;
-		learning_rate = m_base_learning_rate * std::sqrt(1 - std::pow(m_beta2, (float)m_current_step)) / (1 - std::pow(m_beta1, (float)m_current_step));
 
 		float lower_lr_bound = 0;
 		float upper_lr_bound = std::numeric_limits<float>::max();
@@ -163,7 +168,6 @@ public:
 			m_absolute_weight_decay,
 			loss_scale,
 			m_base_learning_rate,
-			learning_rate,
 			m_non_matrix_learning_rate_factor,
 			m_optimize_matrix_params,
 			m_optimize_non_matrix_params,
@@ -177,23 +181,28 @@ public:
 			weights,
 			gradients,
 			m_first_moments.data(),
-			m_second_moments.data()
+			m_second_moments.data(),
+			m_param_steps.data()
 		);
 	}
 
-	float learning_rate() const {
+	float learning_rate() const override {
 		return m_base_learning_rate;
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_base_learning_rate = val;
+	}
+
+	uint32_t step() const override {
 		return m_current_step;
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_n_weights;
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return nullptr;
 	}
 
@@ -247,14 +256,21 @@ public:
 		json data;
 		data["current_step"] = m_current_step;
 		data["base_learning_rate"] = m_base_learning_rate;
-		data["first_moments_binary"] = gpu_memory_to_json_binary(m_first_moments);
-		data["second_moments_binary"] = gpu_memory_to_json_binary(m_second_moments);
+		data["first_moments_binary"] = m_first_moments;
+		data["second_moments_binary"] = m_second_moments;
+		data["param_steps_binary"] = m_param_steps;
 		return data;
 	}
 
 	void deserialize(const json& data) override {
-		json_binary_to_gpu_memory(data["first_moments_binary"], m_first_moments);
-		json_binary_to_gpu_memory(data["second_moments_binary"], m_second_moments);
+		m_first_moments = data["first_moments_binary"];
+		m_second_moments = data["second_moments_binary"];
+		if (data.contains("param_steps_binary")) {
+			m_param_steps = data["param_steps_binary"];
+		} else {
+			m_param_steps.resize(m_second_moments.get_num_elements());
+			m_param_steps.memset(0);
+		}
 		m_current_step = data["current_step"];
 		m_base_learning_rate = data["base_learning_rate"];
 	}
@@ -265,6 +281,7 @@ private:
 
 	GPUMemory<float> m_first_moments;
 	GPUMemory<float> m_second_moments;
+	GPUMemory<uint32_t> m_param_steps;
 
 	uint32_t m_current_step = 0;
 

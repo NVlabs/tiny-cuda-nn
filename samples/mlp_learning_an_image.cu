@@ -144,8 +144,8 @@ int main(int argc, char* argv[]) {
 			}},
 			{"network", {
 				{"otype", "FullyFusedMLP"},
-				// {"otype", "MLP"},
-				// {"otype", "ResNet"},
+				// {"otype", "CutlassMLP"},
+				// {"otype", "CutlassResNet"},
 				{"n_neurons", 64},
 				{"n_layers", 4},
 				{"activation", "ReLU"},
@@ -229,17 +229,11 @@ int main(int argc, char* argv[]) {
 		const uint32_t n_input_dims = 2; // 2-D image coordinate
 		const uint32_t n_output_dims = 3; // RGB color
 
-		// Input & corresponding RNG
-		curandGenerator_t rng;
-
-		CURAND_CHECK_THROW(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_DEFAULT));
-		CURAND_CHECK_THROW(curandSetPseudoRandomGeneratorSeed(rng, 1337ULL));
-
 		cudaStream_t inference_stream;
 		CUDA_CHECK_THROW(cudaStreamCreate(&inference_stream));
 		cudaStream_t training_stream = inference_stream;
 
-		CURAND_CHECK_THROW(curandSetStream(rng, training_stream));
+		default_rng_t rng{1337};
 
 		// Auxiliary matrices for training
 		GPUMatrix<float> training_target(n_output_dims, batch_size);
@@ -256,7 +250,7 @@ int main(int argc, char* argv[]) {
 
 		std::shared_ptr<Loss<precision_t>> loss{create_loss<precision_t>(loss_opts)};
 		std::shared_ptr<Optimizer<precision_t>> optimizer{create_optimizer<precision_t>(optimizer_opts)};
-		std::shared_ptr<NetworkWithInputEncoding<precision_t>> network = std::make_shared<NetworkWithInputEncoding<precision_t>>(n_input_dims, 0, n_output_dims, encoding_opts, network_opts);
+		std::shared_ptr<NetworkWithInputEncoding<precision_t>> network = std::make_shared<NetworkWithInputEncoding<precision_t>>(n_input_dims, n_output_dims, encoding_opts, network_opts);
 
 		auto trainer = std::make_shared<Trainer<float, precision_t, precision_t>>(network, optimizer, loss);
 
@@ -273,7 +267,7 @@ int main(int argc, char* argv[]) {
 
 			// Compute reference values at random coordinates
 			{
-				CURAND_CHECK_THROW(curandGenerateUniform(rng, training_batch.data(), batch_size * n_input_dims));
+				generate_random_uniform<float>(training_stream, rng, batch_size * n_input_dims, training_batch.data());
 				linear_kernel(eval_image<n_output_dims>, 0, training_stream, batch_size, texture, training_batch.data(), training_target.data());
 			}
 

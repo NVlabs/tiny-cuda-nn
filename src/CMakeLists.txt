@@ -33,6 +33,7 @@ set(SOURCES
 	loss.cu
 	misc_kernels.cu
 	network.cu
+	object.cu
 	optimizer.cu
 	reduce_sum.cu
 )
@@ -43,5 +44,5 @@ set(SOURCES
 ###############################################################################
 
 add_library(tiny-cuda-nn STATIC ${SOURCES})
-target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda curand cublas cusolver)
+target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda cublas)
 target_compile_options(tiny-cuda-nn PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)

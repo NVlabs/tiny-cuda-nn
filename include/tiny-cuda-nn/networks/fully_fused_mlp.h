@@ -38,10 +38,6 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/misc_kernels.h>
 
-#include <tiny-cuda-nn/cutlass_matmul_interface.h>
-
-#include <cutlass/half.h>
-
 #include <array>
 #include <iostream>
 #include <memory>
@@ -58,7 +54,7 @@ public:
 	void inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) override;
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
 
-	void forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
+	void forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
 
 	void backward(
 		cudaStream_t stream,
@@ -70,7 +66,7 @@ public:
 		bool compute_param_gradients = true
 	) override;
 
-	void initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
+	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
 
 	GPUMatrix<T, RM>& input_weight_matrix(WeightUsage usage) {
 		switch (usage) {
@@ -114,10 +110,6 @@ public:
 		return m_gradient_matrices.back();
 	}
 
-	void set_output_activation_param(float value) {
-		m_output_activation_param = value;
-	}
-
 	size_t n_params() const override {
 		return m_total_n_params;
 	}
@@ -142,7 +134,7 @@ public:
 		return result;
 	}
 
-	uint32_t width() const override {
+	uint32_t width(uint32_t layer) const override {
 		return WIDTH;
 	}
 
@@ -161,24 +153,6 @@ private:
 
 	void allocate_backward_buffers(uint32_t batch_size);
 
-	template <typename CutlassLayer, MatrixLayout input_layout, MatrixLayout output_layout>
-	void compute_inference_layer(
-		cudaStream_t stream,
-		Activation activation,
-		const GPUMatrix<T, RM>& weights,
-		const GPUMatrix<T, input_layout>& input,
-		GPUMatrix<T, output_layout>& output,
-		T activation_param = (T)0
-	) {
-		switch (activation) {
-			case Activation::None: fc_multiply<Activation::None, CutlassLayer>(stream, weights, input, output, activation_param); break;
-			case Activation::Exponential: fc_multiply<Activation::Exponential, CutlassLayer>(stream, weights, input, output, activation_param); break;
-			case Activation::ReLU: fc_multiply<Activation::ReLU, CutlassLayer>(stream, weights, input, output, activation_param); break;
-			case Activation::Sine: fc_multiply<Activation::Sine, CutlassLayer>(stream, weights, input, output, activation_param); break;
-			default: throw std::runtime_error{"Unsupported activation."};
-		}
-	}
-
 	uint32_t m_n_hidden_layers;
 	uint32_t m_n_hidden_matmuls;
 	uint32_t m_input_width;
@@ -188,7 +162,6 @@ private:
 
 	Activation m_activation;
 	Activation m_output_activation;
-	float m_output_activation_param = 0;
 
 	bool m_use_feedback_alignment = false;
 

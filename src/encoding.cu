@@ -30,52 +30,94 @@
 
 #include <tiny-cuda-nn/encoding.h>
 
+#include <tiny-cuda-nn/encodings/composite.h>
 #include <tiny-cuda-nn/encodings/frequency.h>
 #include <tiny-cuda-nn/encodings/identity.h>
 #include <tiny-cuda-nn/encodings/oneblob.h>
-#include <tiny-cuda-nn/encodings/nrc.h>
+#include <tiny-cuda-nn/encodings/spherical_harmonics.h>
+#include <tiny-cuda-nn/encodings/triangle_wave.h>
 
-
-#include <cutlass/half.h>
 
 
 TCNN_NAMESPACE_BEGIN
 
+InterpolationType string_to_interpolation_type(std::string interpolation_type) {
+	if (equals_case_insensitive(interpolation_type, "Linear")) {
+		return InterpolationType::Linear;
+	} else if (equals_case_insensitive(interpolation_type, "Smoothstep")) {
+		return InterpolationType::Smoothstep;
+	}
+
+	throw std::runtime_error{std::string{"Invalid interpolation type: "} + interpolation_type};
+}
+
 template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& encoding, uint32_t alignment) {
+Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment) {
 	std::string encoding_type = encoding.value("otype", "OneBlob");
 
-	if (equals_case_insensitive(encoding_type, "Identity")) {
-		return new IdentityEncoding<T>{
+	Encoding<T>* result;
+
+	if (equals_case_insensitive(encoding_type, "Composite")) {
+		result = new CompositeEncoding<T>{
+			encoding,
 			n_dims_to_encode,
-			n_dims_to_pass_through,
+		};
+	} else if (equals_case_insensitive(encoding_type, "Identity")) {
+		result = new IdentityEncoding<T>{
+			n_dims_to_encode,
 			encoding.value("scale", 1.0f),
 			encoding.value("offset", 0.0f),
-			alignment,
 		};
 	} else if (equals_case_insensitive(encoding_type, "Frequency")) {
-		return new FrequencyEncoding<T>{
+		result = new FrequencyEncoding<T>{
 			encoding.value("n_frequencies", 12u),
 			n_dims_to_encode,
-			n_dims_to_pass_through,
-			alignment,
+		};
+	} else if (equals_case_insensitive(encoding_type, "TriangleWave")) {
+		result = new TriangleWaveEncoding<T>{
+			encoding.value("n_frequencies", 12u),
+			n_dims_to_encode,
+		};
+	} else if (equals_case_insensitive(encoding_type, "SphericalHarmonics")) {
+		result = new SphericalHarmonicsEncoding<T>{
+			encoding.value("degree", 4u),
+			n_dims_to_encode,
 		};
 	} else if (equals_case_insensitive(encoding_type, "OneBlob")) {
-		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode, n_dims_to_pass_through, alignment, encoding.value("n_trailing_dims_to_ignore", 0u)};
+		result = new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
 	} else if (equals_case_insensitive(encoding_type, "OneBlobFrequency") || equals_case_insensitive(encoding_type, "NRC")) {
-		return new NrcEncoding<T>{
-			encoding.value("n_frequencies", 12u),
-			encoding.value("n_bins", 4u),
+		json nrc_composite = {
+			{"otype", "Composite"},
+			{"nested", {
+				{
+					{"n_dims_to_encode", 3},
+					{"otype", "TriangleWave"},
+					{"n_frequencies", encoding.value("n_frequencies", 12u)},
+				}, {
+					{"n_dims_to_encode", 5},
+					{"otype", "OneBlob"},
+					{"n_bins", encoding.value("n_bins", 4u)},
+				}, {
+					{"otype", "Identity"},
+				},
+			}},
+		};
+
+		result = new CompositeEncoding<T>{
+			nrc_composite,
 			n_dims_to_encode,
-			n_dims_to_pass_through,
-			alignment,
 		};
 	} else {
 		throw std::runtime_error{std::string{"Invalid encoding type: "} + encoding_type};
 	}
+
+	if (alignment > 0) {
+		result->set_alignment(alignment);
+	}
+	return result;
 }
 
-template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& encoding, uint32_t alignment);
-template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, uint32_t n_dims_to_pass_through, const json& encoding, uint32_t alignment);
+template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
+template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
 
 TCNN_NAMESPACE_END

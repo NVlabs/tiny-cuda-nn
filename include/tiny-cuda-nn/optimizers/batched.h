@@ -79,7 +79,7 @@ public:
 		m_averaged_gradients_half.resize(size);
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
 		linear_kernel(gradient_update<T>, 0, stream, m_nested->n_weights(), m_current_step % m_batch_size_multiplier == 0, m_batch_size_multiplier, gradients, m_averaged_gradients.data());
 		++m_current_step;
 
@@ -88,23 +88,27 @@ public:
 				linear_kernel(cast<T>, 0, stream, m_nested->n_weights(), m_averaged_gradients.data(), m_averaged_gradients_half.data());
 			}
 
-			m_nested->step(stream, loss_scale, learning_rate, weights_full_precision, weights, std::is_same<T, float>::value ? (T*)m_averaged_gradients.data() : (T*)m_averaged_gradients_half.data());
+			m_nested->step(stream, loss_scale, weights_full_precision, weights, std::is_same<T, float>::value ? (T*)m_averaged_gradients.data() : (T*)m_averaged_gradients_half.data());
 		}
 	}
 
-	float learning_rate() const {
+	float learning_rate() const override {
 		return m_nested->learning_rate();
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_nested->set_learning_rate(val);
+	}
+
+	uint32_t step() const override {
 		return m_current_step;
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_nested->n_weights();
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return m_nested->custom_weights();
 	}
 
@@ -121,16 +125,16 @@ public:
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();
-		data["averaged_gradients_binary"] = gpu_memory_to_json_binary(m_averaged_gradients);
-		data["averaged_gradients_half_binary"] = gpu_memory_to_json_binary(m_averaged_gradients_half);
+		data["averaged_gradients_binary"] = m_averaged_gradients;
+		data["averaged_gradients_half_binary"] = m_averaged_gradients_half;
 		data["current_step"] = m_current_step;
 		return data;
 	}
 
 	void deserialize(const json& data) override {
 		m_current_step = data["current_step"];
-		json_binary_to_gpu_memory(data["averaged_gradients_binary"], m_averaged_gradients);
-		json_binary_to_gpu_memory(data["averaged_gradients_half_binary"], m_averaged_gradients_half);
+		m_averaged_gradients = data["averaged_gradients_binary"];
+		m_averaged_gradients_half = data["averaged_gradients_half_binary"];
 		m_nested->deserialize(data["nested"]);
 	}
 

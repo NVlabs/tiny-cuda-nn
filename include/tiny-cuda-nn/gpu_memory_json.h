@@ -23,39 +23,38 @@
  *//*
  */
 
-/** @file   optimizer.h
- *  @author Thomas Müller, NVIDIA
- *  @brief  API interface of optimizers that can be used with ResNets.
+/** @file   gpu_memory_json.h
+ *  @author Nikolaus Binder and Thomas Müller, NVIDIA
+ *  @brief  binding between GPUMemory and JSON librariy
  */
 
 #pragma once
 
-#include <tiny-cuda-nn/common.h>
-#include <tiny-cuda-nn/object.h>
-
-#include <stdint.h>
-
+#include <json/json.hpp>
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T>
-class Optimizer : public ObjectWithMutableHyperparams {
-public:
-	virtual ~Optimizer() {}
+inline nlohmann::json::binary_t gpu_memory_to_json_binary(const void* gpu_data, size_t n_bytes) {
+	nlohmann::json::binary_t data_cpu;
+	data_cpu.resize(n_bytes);
+	CUDA_CHECK_THROW(cudaMemcpy(data_cpu.data(), gpu_data, n_bytes, cudaMemcpyDeviceToHost));
+	return data_cpu;
+}
 
-	virtual void allocate(std::shared_ptr<ParametricObject<T>> target) = 0;
-	virtual void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) = 0;
-	virtual float learning_rate() const = 0;
-	virtual void set_learning_rate(float val) = 0;
-	virtual uint32_t step() const = 0;
-	virtual uint32_t n_weights() const = 0;
-	virtual T* custom_weights() const = 0;
-
-	virtual json serialize() const { return {}; }
-	virtual void deserialize(const json& data) { }
-};
+inline void json_binary_to_gpu_memory(const nlohmann::json::binary_t& cpu_data, void* gpu_data, size_t n_bytes) {
+	CUDA_CHECK_THROW(cudaMemcpy(gpu_data, cpu_data.data(), n_bytes, cudaMemcpyHostToDevice));
+}
 
 template <typename T>
-Optimizer<T>* create_optimizer(const json& params);
+inline void to_json(nlohmann::json& j, const GPUMemory<T>& gpu_data) {
+	j = gpu_memory_to_json_binary(gpu_data.data(), gpu_data.get_bytes());
+}
+
+template <typename T>
+inline void from_json(const nlohmann::json& j, GPUMemory<T>& gpu_data) {
+	const nlohmann::json::binary_t& cpu_data = j;
+	gpu_data.resize(cpu_data.size()/sizeof(T));
+	json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
+}
 
 TCNN_NAMESPACE_END

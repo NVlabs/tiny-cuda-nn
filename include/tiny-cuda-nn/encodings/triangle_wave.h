@@ -23,9 +23,9 @@
  *//*
  */
 
-/** @file   frequency.h
+/** @file   triangle_wave.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  Implementation of the frequency encoding of NeRF [Mildenhall et al. 2020].
+ *  @brief  Implementation of the triangle wave encoding of NRC [Müller et al. 2021].
  */
 
 #pragma once
@@ -45,7 +45,7 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
-__global__ void frequency_encoding(
+__global__ void triangle_wave_encoding(
 	const uint32_t num_elements,
 	const uint32_t n_frequencies,
 	const uint32_t num_to_encode,
@@ -54,48 +54,36 @@ __global__ void frequency_encoding(
 	PitchedPtr<T> data_out,
 	float* __restrict__ dy_dx)
 {
+	const uint32_t fan_out_encoded = num_to_encode * n_frequencies;
+	const uint32_t fan_out = fan_out_encoded + num_to_pad;
+
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_elements) return;
-
-	const uint32_t fan_out_encoded = num_to_encode * n_frequencies * 2;
-	const uint32_t fan_out = fan_out_encoded + num_to_pad;
 
 	const uint32_t i = encoded_index / fan_out;
 	const uint32_t j = encoded_index - i * fan_out;
 
-	/* Layout of outputs (for each input record):
-	 *     frequency-encoded input dimension 0
-	 *     frequency-encoded input dimension 1
-	 *     frequency-encoded input dimension ...
-	 *     passthrough inputs
-	 *     padding (value 1.f)
-	 */
 	if (j >= fan_out_encoded) {
 		data_out(i)[j] = 1;
 	} else {
-		/* Layout of encoded features (e.g. when inputs abcd.. are XYZ positions):
-		 *     sin(a.x), cos(a.x) sin(2pi a.x), cos(2pi a.x) sin(4pi a.x) ...
-		 *     sin(a.y), cos(a.y) sin(2pi a.y), cos(2pi a.y) sin(4pi a.y) ...
-		 *     sin(a.z), cos(a.z) sin(2pi a.z), cos(2pi a.z) sin(4pi a.z) ...
-		 *     (passthrough features)
-		 *     (padding)
-		 */
-		const uint32_t encoded_input_feature_i = j / (n_frequencies * 2);
-		const uint32_t log2_frequency = (j / 2) % n_frequencies;
+		const uint32_t encoded_input_feature_i = j / n_frequencies;
+		const int log2_frequency = j - encoded_input_feature_i * n_frequencies;
 
-		const float phase_shift = (j % 2) * (PI/2);
+		const float x = scalbnf(data_in(i)[encoded_input_feature_i], log2_frequency-1);
 
-		const float x = scalbnf(data_in(i)[encoded_input_feature_i], log2_frequency);
-		const float input = x * PI + phase_shift;
-		data_out(i)[j] = (T)__sinf(input);
+		// Small log2_frequency-based phase shift to help disambiguate locations
+		const float val = x + log2_frequency * 0.25f;
+		const float result = fabsf(val - floorf(val) - 0.5f) * 4 - 1;
+
+		data_out(i)[j] = (T)result;
 		if (dy_dx != nullptr) {
-			dy_dx[i * fan_out_encoded + j] = scalbnf(1.0f, log2_frequency) * PI * __cosf(input);
+			dy_dx[i * fan_out_encoded + j] = scalbnf((int)floorf(val*2.0f) % 2 == 0 ? -1.0f : 1.0f, log2_frequency+1);
 		}
 	}
 }
 
 template <typename T>
-__global__ void frequency_encoding_backward(
+__global__ void triangle_wave_encoding_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t n_frequencies,
@@ -103,27 +91,30 @@ __global__ void frequency_encoding_backward(
 	const float* dy_dx,
 	PitchedPtr<float> dL_dx
 ) {
+	const uint32_t fan_out = n_dims_to_encode;
+
+	const uint32_t outputs_per_input = n_frequencies;
+	const uint32_t fan_out_encoded = n_dims_to_encode * outputs_per_input;
+
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_elements) return;
 
-	const uint32_t i = encoded_index / n_dims_to_encode;
-	const uint32_t j = encoded_index - i * n_dims_to_encode;
-
-	const uint32_t outputs_per_input = n_frequencies * 2;
+	const uint32_t i = encoded_index / fan_out;
+	const uint32_t j = encoded_index - i * fan_out;
 
 	float result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(i)[j * outputs_per_input + k] * dy_dx[i * n_dims_to_encode * outputs_per_input + j * outputs_per_input + k];
+		result += (float)dL_dy(i)[j * outputs_per_input + k] * dy_dx[i * fan_out_encoded + j * outputs_per_input + k];
 	}
 	dL_dx(i)[j] = result;
 }
 
 template <typename T>
-class FrequencyEncoding : public Encoding<T> {
+class TriangleWaveEncoding : public Encoding<T> {
 public:
-	FrequencyEncoding(uint32_t n_frequencies, uint32_t n_dims_to_encode)
+	TriangleWaveEncoding(uint32_t n_frequencies, uint32_t n_dims_to_encode)
 	: m_n_frequencies{n_frequencies}, m_n_dims_to_encode{n_dims_to_encode} {
-		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode * m_n_frequencies * 2;
+		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode * m_n_frequencies;
 	}
 
 	void encode(
@@ -138,7 +129,7 @@ public:
 			return;
 		}
 
-		linear_kernel(frequency_encoding<T>, 0, stream,
+		linear_kernel(triangle_wave_encoding<T>, 0, stream,
 			num_elements * num_encoded_dims(),
 			m_n_frequencies,
 			m_n_dims_to_encode,
@@ -167,7 +158,7 @@ public:
 			return;
 		}
 
-		linear_kernel(frequency_encoding_backward<T>, 0, stream,
+		linear_kernel(triangle_wave_encoding_backward<T>, 0, stream,
 			num_elements * m_n_dims_to_encode,
 			m_n_dims_to_encode,
 			m_n_frequencies,
@@ -186,7 +177,7 @@ public:
 	}
 
 	uint32_t num_forward_gradient_dims() const override {
-		return m_n_dims_to_encode * m_n_frequencies * 2;
+		return m_n_dims_to_encode * m_n_frequencies;
 	}
 
 	void set_alignment(uint32_t alignment) override {

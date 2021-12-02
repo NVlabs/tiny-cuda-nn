@@ -40,112 +40,11 @@
 
 TCNN_NAMESPACE_BEGIN
 
-
-static constexpr float K_ACT = 10.0f;
-
 void check_shmem_error(cudaError_t error) {
 	if (error != cudaSuccess) {
 		throw std::runtime_error{"FullyFusedMLP: insufficient shared memory available on the GPU. Reduce `n_neurons` or use `CutlassMLP` (better compatibility but slower) instead."};
 	}
 }
-
-template <typename fragment_t>
-__device__ void warp_activation(Activation activation, fragment_t& frag) {
-	switch (activation) {
-		case Activation::None:
-			return;
-		case Activation::ReLU:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] *= (__half)(frag.x[t] > (__half)0.0f);
-			}
-			return;
-		case Activation::Exponential:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] = (__half)(__expf(frag.x[t]));
-			}
-			return;
-		case Activation::Sigmoid:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] = (__half)(logistic(frag.x[t]));
-			}
-			return;
-		case Activation::Sine:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] = (__half)(__sinf(frag.x[t]));
-			}
-			return;
-		case Activation::Squareplus:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				float x = (float)frag.x[t] * K_ACT;
-				frag.x[t] = (__half)(0.5f * (x + sqrtf(x * x + 4)) / K_ACT);
-			}
-			return;
-		case Activation::Softplus:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] = (__half)(__logf(__expf((float)frag.x[t] * K_ACT) + 1.0f) / K_ACT);
-			}
-			return;
-		default:
-			// Unsupported activation
-			// assert(false); // Commented out due to isolated strange side-effects on Windows
-			return;
-	}
-}
-
-template <typename fragment_t, typename forward_fragment_t>
-__device__ void warp_activation_backward(Activation activation, fragment_t& frag, const forward_fragment_t& forward_frag) {
-	switch (activation) {
-		case Activation::None:
-			return;
-		case Activation::ReLU:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] *= (__half)(forward_frag.x[t] > (__half)0.0f);
-			}
-			return;
-		case Activation::Exponential:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] *= forward_frag.x[t];
-			}
-			return;
-		case Activation::Sigmoid:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] *= (__half)(forward_frag.x[t] * ((__half)1.0f - forward_frag.x[t]));
-			}
-			return;
-		case Activation::Sine:
-			// Sine requires stored pre-activations, which we don't have. We only
-			// write out the post-activations.
-			// assert(false); // Commented out due to isolated strange side-effects on Windows
-			return;
-		case Activation::Squareplus:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				float y = (float)forward_frag.x[t] * K_ACT;
-				frag.x[t] *= (__half)(y * y / (y * y + 1));
-			}
-			return;
-		case Activation::Softplus:
-			#pragma unroll
-			for (int t=0; t < frag.num_elements; t++) {
-				frag.x[t] *= (__half)(1.0f - __expf(-(float)forward_frag.x[t] * K_ACT));
-			}
-			return;
-		default:
-			// Unsupported activation
-			// assert(false); // Commented out due to isolated strange side-effects on Windows
-			return;
-	}
-}
-
 
 template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T, bool BACKWARD=false>
 __device__ void threadblock_layer(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out_intermediate_threadblock_this_layer, const OUT_T* __restrict__ activation_aux = nullptr) {
@@ -209,9 +108,9 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 		if (BACKWARD) {
 			// Load the temporary forward matrix for the relu transfer
 			wmma::load_matrix_sync(act_frag, activation_aux + weights_col + (threadIdx.z + l * BLOCK_DIM_Z) * 16 * WIDTH, WIDTH);
-			warp_activation_backward(activation, result_frag[l], act_frag);
+			warp_activation_backward<__half>(activation, result_frag[l], act_frag, result_frag[l]);
 		} else {
-			warp_activation(activation, result_frag[l]);
+			warp_activation<__half>(activation, result_frag[l], result_frag[l]);
 		}
 	}
 
@@ -316,7 +215,7 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 			wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> forward_frag;
 			wmma::load_matrix_sync(forward_frag, forward + output_stride * n_hidden_matmuls + weights_col + (elem_idx + l * BLOCK_DIM_Z * 16) * WIDTH, WIDTH);
 
-			warp_activation_backward(ACTIVATION, result_frag[l], forward_frag);
+			warp_activation_backward<__half>(ACTIVATION, result_frag[l], forward_frag, result_frag[l]);
 		}
 
 		__syncthreads();
@@ -475,7 +374,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 
 		__syncthreads();
 
-		warp_activation(activation, result_frag[l]);
+		warp_activation<__half>(activation, result_frag[l], result_frag[l]);
 	}
 
 	#pragma unroll
@@ -544,7 +443,7 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 			wmma::mma_sync(result_frag, act_frag, weights_frag[i], result_frag);
 		}
 
-		warp_activation(activation, result_frag);
+		warp_activation<__half>(activation, result_frag, result_frag);
 
 		if (output_layout == wmma::mem_row_major) {
 			wmma::store_matrix_sync(out + (threadIdx.z + idx * BLOCK_DIM_Z) * 16 * 16, result_frag, 16, output_layout);
@@ -622,7 +521,7 @@ __global__ void kernel_mlp_fused(const Activation output_activation, const __hal
 		if constexpr (INFERENCE) {
 			threadblock_write_output_static<WIDTH, BLOCK_DIM_Z, N_ITERS>(act_shmem, out_intermediate + elem_idx * WIDTH);
 		}
-	} else {
+	} else if (out) {
 		// Last layer
 		if (output_layout == nvcuda::wmma::mem_row_major) {
 			threadblock_last_layer_forward<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T>(output_activation, act_shmem, weights + first_layer_size + layer_stride * n_hidden_matmuls, out + elem_idx * 16, 16, output_layout);
@@ -640,13 +539,12 @@ void mlp_fused_forward(
 	const GPUMatrix<T, RM>& weights,
 	const GPUMatrix<T>& input,
 	GPUMatrix<T>& output_intermediate,
-	GPUMatrixDynamic<T>& output,
+	GPUMatrixDynamic<T>* output,
 	const uint32_t n_hidden_layers
 ) {
 	if constexpr (std::is_same<T, __half>::value) {
 		const uint32_t batch_size = input.cols();
 		const uint32_t in_width = input.rows();
-		const uint32_t out_width = output.rows();
 
 		constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0; // <- always going to be 8 as we only support multiple-of-16 widths
 		constexpr uint32_t INPUT_SKEW = 8; // <- likewise with inputs
@@ -669,7 +567,7 @@ void mlp_fused_forward(
 			throw std::runtime_error{"Batch size of inputs and output_intermediate doesn't match."};
 		}
 
-		if (output.cols() != batch_size) {
+		if (output && output->cols() != batch_size) {
 			throw std::runtime_error{"Batch size of inputs and outputs doesn't match."};
 		}
 
@@ -699,9 +597,12 @@ void mlp_fused_forward(
 			input.data(),
 			weights.data(),
 			output_intermediate.data(),
-			output.data(),
-			batch_size, in_width, out_width, n_hidden_layers,
-			output.layout() == RM ? nvcuda::wmma::mem_col_major : nvcuda::wmma::mem_row_major // The kernels operate with transposed layouts compared with the MLP code
+			output ? output->data() : nullptr,
+			batch_size,
+			in_width,
+			output ? output->rows() : 0,
+			n_hidden_layers,
+			output && output->layout() == RM ? nvcuda::wmma::mem_col_major : nvcuda::wmma::mem_row_major // The kernels operate with transposed layouts compared with the MLP code
 		);
 	} else {
 		throw std::runtime_error{"The fully fused forward pass only supports __half precision."};
@@ -793,6 +694,17 @@ void FullyFusedMLP<T, WIDTH>::inference(cudaStream_t stream, const GPUMatrix<T>&
 	trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, m_inference_output_tmp.data(), output.data());
 }
 
+template <typename CutlassLayer, MatrixLayout input_layout, typename T>
+void compute_inference_layer(
+	cudaStream_t stream,
+	Activation activation,
+	const GPUMatrix<T, RM>& weights,
+	const GPUMatrix<T, input_layout>& input,
+	GPUMatrixDynamic<T>& output
+) {
+	fc_multiply<CutlassLayer>(stream, weights, input, output, activation);
+}
+
 template <typename T, int WIDTH>
 void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
 	// Various error checks
@@ -818,41 +730,35 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, con
 
 	// ASSUMPTION: weight matrices are contiguous in memory
 	switch (m_activation) {
-		case Activation::None:        mlp_fused_forward<WIDTH, T, Activation::None, true>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, output, m_n_hidden_matmuls); break;
-		case Activation::Exponential: mlp_fused_forward<WIDTH, T, Activation::Exponential, true>(stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, output, m_n_hidden_matmuls); break;
-		case Activation::Sigmoid:     mlp_fused_forward<WIDTH, T, Activation::Sigmoid, true>(    stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, output, m_n_hidden_matmuls); break;
-		case Activation::ReLU:        mlp_fused_forward<WIDTH, T, Activation::ReLU, true>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, output, m_n_hidden_matmuls); break;
-		case Activation::Squareplus:  mlp_fused_forward<WIDTH, T, Activation::Squareplus, true>( stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, output, m_n_hidden_matmuls); break;
-		case Activation::Softplus:    mlp_fused_forward<WIDTH, T, Activation::Softplus, true>(   stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, output, m_n_hidden_matmuls); break;
+		case Activation::None:        mlp_fused_forward<WIDTH, T, Activation::None, true>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, &output, m_n_hidden_matmuls); break;
+		case Activation::Exponential: mlp_fused_forward<WIDTH, T, Activation::Exponential, true>(stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, &output, m_n_hidden_matmuls); break;
+		case Activation::Sigmoid:     mlp_fused_forward<WIDTH, T, Activation::Sigmoid, true>(    stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, &output, m_n_hidden_matmuls); break;
+		case Activation::ReLU:        mlp_fused_forward<WIDTH, T, Activation::ReLU, true>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, &output, m_n_hidden_matmuls); break;
+		case Activation::Squareplus:  mlp_fused_forward<WIDTH, T, Activation::Squareplus, true>( stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, &output, m_n_hidden_matmuls); break;
+		case Activation::Softplus:    mlp_fused_forward<WIDTH, T, Activation::Softplus, true>(   stream, m_output_activation, input_weight_matrix(weight_usage), input, m_inference_tmp, &output, m_n_hidden_matmuls); break;
 		default: throw std::runtime_error{"Unsupported activation."};
 	}
 
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
 	if (m_output_width > 16) {
-		if (output.layout() == CM) {
-			auto tmp = GPUMatrix<T>{output};
-			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_inference_tmp, tmp, (T)m_output_activation_param);
-		} else {
-			auto tmp = GPUMatrix<T, RM>{output};
-			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_inference_tmp, tmp, (T)m_output_activation_param);
-		}
+		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_inference_tmp, output);
 	}
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices, bool prepare_input_gradients) {
+void FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
 	}
 
-	if (output.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width (must be padded): ") + std::to_string(output.m()) + "!=" + std::to_string(m_padded_output_width));
+	if (output && output->m() != m_padded_output_width) {
+		throw std::runtime_error(std::string("Output has incorrect width (must be padded): ") + std::to_string(output->m()) + "!=" + std::to_string(m_padded_output_width));
 	}
 
-	if (input.n() != output.n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
+	if (output && input.n() != output->n()) {
+		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output->n()));
 	}
 
 	// Make sure our temporary buffers have the correct size for the given batch size
@@ -876,14 +782,8 @@ void FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrix<T>& i
 
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
-	if (m_output_width > 16) {
-		if (output.layout() == CM) {
-			auto tmp = GPUMatrix<T>{output};
-			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_forward_tmp.back(), tmp, (T)m_output_activation_param);
-		} else {
-			auto tmp = GPUMatrix<T, RM>{output};
-			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_forward_tmp.back(), tmp, (T)m_output_activation_param);
-		}
+	if (output && m_output_width > 16) {
+		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_forward_tmp.back(), *output);
 	}
 }
 
@@ -908,13 +808,8 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	}
 
 	// Compute transfer of output activation in-place... it's treated specially for performance reasons
-	const uint32_t n_elements = (uint32_t)dL_doutput.n_elements();
-	switch (m_output_activation) {
-		case Activation::None: break;
-		case Activation::Exponential: exp_transfer_output<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, output.data(), dL_doutput.data(), m_backward_output_tmp.data()); break;
-		case Activation::Sigmoid: logistic_transfer_output<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, output.data(), dL_doutput.data(), m_backward_output_tmp.data()); break;
-		case Activation::ReLU: relu_transfer_output<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, output.data(), dL_doutput.data(), m_backward_output_tmp.data()); break;
-		default: throw std::runtime_error{"Unsupported output activation."};
+	if (m_output_activation != Activation::None) {
+		activation_backward_output_gpu(stream, dL_doutput.n_elements(), m_output_activation, output.data(), dL_doutput.data(), m_backward_output_tmp.data());
 	}
 
 	// Backprop
@@ -923,12 +818,8 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	// - RELU: pre_activation_gradinet = post_activation_gradient if val > 0 else 0
 
 	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Backward;
-	Activation transfer_activation = m_activation == Activation::None ? Activation::None : Activation::ReLUTransfer;
 
 	{
-		// T normalization = (T)(1.0f / batch_size);
-		T normalization = (T)(1.0f);
-
 		int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
 
 		m_backward_output_tmp.set_layout(dL_doutput.layout());
@@ -943,11 +834,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
 
 			// Compute weight gradients
-			if (output.layout() == CM) {
-				fc_multiply_split_k<Activation::None, LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), GPUMatrix<T>{tmp_dL_doutput}, m_forward_tmp.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, normalization);
-			} else {
-				fc_multiply_split_k<Activation::None, LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), GPUMatrix<T, RM>{tmp_dL_doutput}, m_forward_tmp.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, normalization);
-			}
+			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, m_forward_tmp.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor);
 
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 		}
@@ -955,23 +842,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		// If the output width is larger than 16 dims, we use cutlass to backpropagate through the last layer
 		// rather than fusing it with our kernel.
 		if (m_output_width > 16) {
-			switch (transfer_activation) {
-				case Activation::None:
-					if (output.layout() == CM) {
-						fc_multiply<Activation::None, FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), GPUMatrix<T>{tmp_dL_doutput}, m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx));
-					} else {
-						fc_multiply<Activation::None, FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), GPUMatrix<T, RM>{tmp_dL_doutput}, m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx));
-					}
-					break;
-				case Activation::ReLUTransfer:
-					if (output.layout() == CM) {
-						fc_multiply<Activation::ReLUTransfer, FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), GPUMatrix<T>{tmp_dL_doutput}, m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx));
-					} else {
-						fc_multiply<Activation::ReLUTransfer, FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), GPUMatrix<T, RM>{tmp_dL_doutput}, m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx));
-					}
-					break;
-				default: throw std::runtime_error{"Unsupported activation transfer."};
-			};
+			fc_multiply<FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), tmp_dL_doutput, m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx), m_activation, true);
 		}
 
 		// ASSUMPTION: weight matrices & forward_tmp matrices are contiguous in memory
@@ -997,7 +868,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 			if (compute_param_gradients) {
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
 				cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-				fc_multiply_split_k<Activation::None, FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), m_backward_tmp.at(backward_tmp_idx-1), m_forward_tmp.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, normalization);
+				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), m_backward_tmp.at(backward_tmp_idx-1), m_forward_tmp.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor);
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 			}
 
@@ -1008,14 +879,14 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		if (compute_param_gradients) {
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
 			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-			fc_multiply_split_k<Activation::None, FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), m_backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, normalization);
+			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), m_backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor);
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 		}
 
 		// If requested and if the fully fused kernel didn't already take care of it, compute sensitivity of loss w.r.t. inputs
 		if (dL_dinput && input.m() != m_forward_tmp.at(0).m()) {
 			// TODO: optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-			fc_multiply<Activation::None, FullLayer>(stream, input_weight_matrix(weight_usage).transposed(), m_backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
+			fc_multiply<FullLayer>(stream, input_weight_matrix(weight_usage).transposed(), m_backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 		}
 	}
 
@@ -1066,7 +937,7 @@ void FullyFusedMLP<T, WIDTH>::allocate_backward_buffers(uint32_t batch_size) {
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::initialize_params(std::mt19937& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void FullyFusedMLP<T, WIDTH>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
 		m_weight_matrices[i].set_data(params + current_pos);

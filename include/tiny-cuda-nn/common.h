@@ -41,10 +41,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+using namespace std::string_literals;
 
-#include <cublas_v2.h>
-#include <cusolverDn.h>
-#include <curand.h>
+#include <cuda_fp16.h>
 
 
 TCNN_NAMESPACE_BEGIN
@@ -62,6 +61,30 @@ std::string to_lower(std::string str);
 std::string to_upper(std::string str);
 inline bool equals_case_insensitive(const std::string& str1, const std::string& str2) {
 	return to_lower(str1) == to_lower(str2);
+}
+
+inline bool is_pot(uint32_t num, uint32_t* log2 = nullptr) {
+	if (log2) *log2 = 0;
+	if (num > 0) {
+		while (num % 2 == 0) {
+			num /= 2;
+			if (log2) ++*log2;
+		}
+		if (num == 1) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+inline uint32_t powi(uint32_t base, uint32_t exponent) {
+	uint32_t result = 1;
+	for (uint32_t i = 0; i < exponent; ++i) {
+		result *= base;
+	}
+
+	return result;
 }
 
 //////////////////////////////////////
@@ -95,92 +118,18 @@ inline bool equals_case_insensitive(const std::string& str1, const std::string& 
 			std::cout << "CUDA Error: " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
 	} while(0)
 
-
-#define CURAND_CHECK_THROW(x)                                                      \
-	do {                                                                           \
-		curandStatus_t result = x;                                                 \
-		if (result != CURAND_STATUS_SUCCESS)                                       \
-			throw std::runtime_error(std::string("CURAND Error: " #x " failed"));  \
-	} while(0)
-
-
-#define CUBLAS_CHECK_THROW(x)                                                                                           \
-	do {                                                                                                                \
-		cublasStatus_t result = x;                                                                                      \
-		if (result != CUBLAS_STATUS_SUCCESS)                                                                            \
-			throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(result));  \
-	} while(0)
-
-#define CUSOLVER_CHECK_THROW(x)                                                                                             \
-	do {                                                                                                                    \
-		cusolverStatus_t result = x;                                                                                        \
-		if (result != CUBLAS_STATUS_SUCCESS)                                                                                \
-			throw std::runtime_error(std::string("CUSOLVER Error: " #x " failed with error ") + cusolverGetError(result));  \
-	} while(0)
-
-
-inline std::string cusolverGetError(cusolverStatus_t error) {
-	switch (error) {
-		case CUSOLVER_STATUS_SUCCESS:
-			return "CUSOLVER_SUCCESS";
-
-		case CUSOLVER_STATUS_NOT_INITIALIZED:
-			return "CUSOLVER_STATUS_NOT_INITIALIZED";
-
-		case CUSOLVER_STATUS_ALLOC_FAILED:
-			return "CUSOLVER_STATUS_ALLOC_FAILED";
-
-		case CUSOLVER_STATUS_INVALID_VALUE:
-			return "CUSOLVER_STATUS_INVALID_VALUE";
-
-		case CUSOLVER_STATUS_ARCH_MISMATCH:
-			return "CUSOLVER_STATUS_ARCH_MISMATCH";
-
-		case CUSOLVER_STATUS_EXECUTION_FAILED:
-			return "CUSOLVER_STATUS_EXECUTION_FAILED";
-
-		case CUSOLVER_STATUS_INTERNAL_ERROR:
-			return "CUSOLVER_STATUS_INTERNAL_ERROR";
-
-		case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
-			return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
-	}
-
-	return "<unknown>";
-}
-
-inline std::string cublasGetError(cublasStatus_t error) {
-	switch (error) {
-		case CUBLAS_STATUS_SUCCESS:
-			return "CUBLAS_STATUS_SUCCESS";
-
-		case CUBLAS_STATUS_NOT_INITIALIZED:
-			return "CUBLAS_STATUS_NOT_INITIALIZED";
-
-		case CUBLAS_STATUS_ALLOC_FAILED:
-			return "CUBLAS_STATUS_ALLOC_FAILED";
-
-		case CUBLAS_STATUS_INVALID_VALUE:
-			return "CUBLAS_STATUS_INVALID_VALUE";
-
-		case CUBLAS_STATUS_ARCH_MISMATCH:
-			return "CUBLAS_STATUS_ARCH_MISMATCH";
-
-		case CUBLAS_STATUS_MAPPING_ERROR:
-			return "CUBLAS_STATUS_MAPPING_ERROR";
-
-		case CUBLAS_STATUS_EXECUTION_FAILED:
-			return "CUBLAS_STATUS_EXECUTION_FAILED";
-
-		case CUBLAS_STATUS_INTERNAL_ERROR:
-			return "CUBLAS_STATUS_INTERNAL_ERROR";
-
-		case CUBLAS_STATUS_NOT_SUPPORTED:
-			return "CUBLAS_STATUS_NOT_SUPPORTED";
-	}
-
-	return "<unknown>";
-}
+#if defined(__CUDA_ARCH__)
+	#if defined(__CUDACC_RTC__) || (defined(__clang__) && defined(__CUDA__))
+		#define TCNN_PRAGMA_UNROLL _Pragma("unroll")
+		#define TCNN_PRAGMA_NO_UNROLL _Pragma("unroll 1")
+	#else
+		#define TCNN_PRAGMA_UNROLL #pragma unroll
+		#define TCNN_PRAGMA_NO_UNROLL #pragma unroll 1
+	#endif
+#else
+	#define TCNN_PRAGMA_UNROLL
+	#define TCNN_PRAGMA_NO_UNROLL
+#endif
 
 
 ////////////////////
@@ -235,13 +184,44 @@ inline std::string bytes_to_string(size_t bytes) {
 	return oss.str();
 }
 
+template <typename T, uint32_t N_ELEMS>
+struct alignas(sizeof(T) * N_ELEMS) vector_t {
+	TCNN_HOST_DEVICE T& operator[](uint32_t idx) {
+		return data[idx];
+	}
+
+	TCNN_HOST_DEVICE T operator [](uint32_t idx) const {
+		return data[idx];
+	}
+
+	T data[N_ELEMS];
+	static constexpr uint32_t N = N_ELEMS;
+};
+
 template <uint32_t N_FLOATS>
-using vector_fullp_t = std::array<float, N_FLOATS>;
+using vector_fullp_t = vector_t<float, N_FLOATS>;
 
 template <uint32_t N_HALFS>
-using vector_halfp_t = std::array<__half, N_HALFS>;
+using vector_halfp_t = vector_t<__half, N_HALFS>;
 
-template <typename T, uint32_t N_ELEMS>
-using vector_t = std::conditional_t<std::is_same_v<T, float>, vector_fullp_t<N_ELEMS>, vector_halfp_t<N_ELEMS>>;
+template <typename T>
+struct PitchedPtr {
+	TCNN_HOST_DEVICE PitchedPtr() : ptr{nullptr}, stride_in_bytes{sizeof(T)} {}
+	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0) : ptr{ptr + offset}, stride_in_bytes{(uint32_t)(stride_in_elements * sizeof(T))} {}
+
+	template <typename U>
+	TCNN_HOST_DEVICE explicit PitchedPtr(PitchedPtr<U> other) : ptr{(T*)other.ptr}, stride_in_bytes{other.stride_in_bytes} {}
+
+	TCNN_HOST_DEVICE T* operator()(uint32_t y) const {
+		return (T*)((const char*)ptr + y * stride_in_bytes);
+	}
+
+	TCNN_HOST_DEVICE explicit operator bool() const {
+		return ptr;
+	}
+
+	T* ptr;
+	uint32_t stride_in_bytes;
+};
 
 TCNN_NAMESPACE_END

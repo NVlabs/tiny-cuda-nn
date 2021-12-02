@@ -101,8 +101,8 @@ public:
 		m_tmp.memset(0);
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
-		m_nested->step(stream, loss_scale, learning_rate, weights_full_precision, weights, gradients);
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
+		m_nested->step(stream, loss_scale, weights_full_precision, weights, gradients);
 
 		uint32_t current_step = m_nested->step();
 
@@ -137,19 +137,23 @@ public:
 		}
 	}
 
-	float learning_rate() const {
+	float learning_rate() const override {
 		return m_nested->learning_rate();
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_nested->set_learning_rate(val);
+	}
+
+	uint32_t step() const override {
 		return m_nested->step();
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_nested->n_weights();
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return m_weights_ema.data();
 	}
 
@@ -170,12 +174,12 @@ public:
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();
-		data["weights_ema_binary"] = gpu_memory_to_json_binary(m_weights_ema);
+		data["weights_ema_binary"] = m_weights_ema;
 		return data;
 	}
 
 	void deserialize(const json& data) override {
-		json_binary_to_gpu_memory(data["weights_ema_binary"], m_weights_ema);
+		m_weights_ema = data["weights_ema_binary"];
 		m_tmp.resize(m_weights_ema.get_num_elements());
 		linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.get_num_elements(), m_weights_ema.data(), m_tmp.data());
 		m_nested->deserialize(data["nested"]);

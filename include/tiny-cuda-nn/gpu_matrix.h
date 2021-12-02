@@ -34,7 +34,8 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/matrix_layout.h>
 
-#include <random>
+#include <pcg32/pcg32.h>
+
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -95,9 +96,11 @@ public:
 	}
 
 	// Pointing to external memory
-	explicit GPUMatrixDynamic(T* data = nullptr, uint32_t m = 0, uint32_t n = 0, MatrixLayout layout = CM)
+	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM)
 	: m_data{data}, m_rows{m}, m_cols{n}, m_layout{layout} {
 	}
+
+	GPUMatrixDynamic() : GPUMatrixDynamic(nullptr, 0, 0) {}
 
 	GPUMatrixDynamic(GPUMatrixDynamic<T>&& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{std::move(other.m_owned_data)} { }
 	explicit GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{other.m_owned_data} {
@@ -141,83 +144,79 @@ public:
 	}
 
 	// Various initializations
-	void initialize_xavier_uniform(std::mt19937& rnd, float scale = 1) {
+	void initialize_xavier_uniform(pcg32& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
 		scale *= std::sqrt(6.0f / (float)(fan_in() + fan_out()));
-		std::uniform_real_distribution<float> distribution(-scale, scale);
 
 		// Sample initialized values
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
+			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_fa_uniform_forward(std::mt19937& rnd, float scale = 1) {
+	void initialize_fa_uniform_forward(pcg32& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
 		scale *= std::sqrt(1.0f / (float)fan_in());
-		std::uniform_real_distribution<float> distribution(-scale, scale);
 
 		// Sample initialized values
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
+			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_fa_uniform_backward(std::mt19937& rnd, float scale = 1) {
+	void initialize_fa_uniform_backward(pcg32& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
 		scale *= std::sqrt(1.0f / (float)fan_out());
-		std::uniform_real_distribution<float> distribution(-scale, scale);
 
 		// Sample initialized values
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
+			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_siren_uniform(std::mt19937& rnd, float scale = 1) {
+	void initialize_siren_uniform(pcg32& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
 
 		// Define probability distribution
 		scale *= std::sqrt(6.0f / (float)fan_in());
-		std::uniform_real_distribution<float> distribution(-scale, scale);
 
 		// Sample initialized values
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
+			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
-	void initialize_siren_uniform_first(std::mt19937& rnd, float scale = 1) {
+	void initialize_siren_uniform_first(pcg32& rnd, float scale = 1) {
 		if (!data()) {
 			throw std::runtime_error("Matrix has no allocated data");
 		}
@@ -226,53 +225,12 @@ public:
 
 		// The 30 in the first layer comes from https://vsitzmann.github.io/siren/
 		scale *= 30.0f / (float)fan_in();
-		std::uniform_real_distribution<float> distribution(-scale, scale);
 
 		// Sample initialized values
 		std::vector<T> new_data(n_elements());
 
 		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
-		}
-
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
-	}
-
-	void initialize_siren_normal_first(std::mt19937& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
-
-		// Define probability distribution
-
-		// The 30 in the first layer comes from https://vsitzmann.github.io/siren/
-		scale *= 10.0f / (float)fan_in();
-		std::normal_distribution<float> distribution(0, scale);
-
-		// Sample initialized values
-		std::vector<T> new_data(n_elements());
-
-		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
-		}
-
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
-	}
-
-	void initialize_xavier_normal(std::mt19937& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
-
-		// Define probability distribution
-		scale *= std::sqrt(2.0f / (fan_out() + fan_in()));
-		std::normal_distribution<float> distribution(0, scale);
-
-		// Sample initialized values
-		std::vector<T> new_data(n_elements());
-
-		for (size_t i = 0; i < new_data.size(); ++i) {
-			new_data[i] = (T)distribution(rnd);
+			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
@@ -342,8 +300,10 @@ public:
 	: GPUMatrixDynamic<T>{m, n, static_layout, stream} { }
 
 	// Pointing to external memory
-	explicit GPUMatrix(T* data = nullptr, uint32_t m = 0, uint32_t n = 0)
+	explicit GPUMatrix(T* data, uint32_t m, uint32_t n)
 	: GPUMatrixDynamic<T>{data, m, n, static_layout} { }
+
+	GPUMatrix() : GPUMatrix(nullptr, 0, 0) {}
 
 	GPUMatrix(GPUMatrixDynamic<T>&& other)
 	: GPUMatrixDynamic<T>{other} {

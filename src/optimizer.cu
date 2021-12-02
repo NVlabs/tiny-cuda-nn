@@ -41,8 +41,6 @@
 #include <tiny-cuda-nn/optimizers/shampoo.h>
 
 
-#include <cutlass/half.h>
-
 
 TCNN_NAMESPACE_BEGIN
 

@@ -29,6 +29,7 @@
  */
 
 #include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/encodings/oneblob.h>
 
@@ -238,6 +239,8 @@ int main(int argc, char* argv[]) {
 	cudaTextureObject_t texture;
 	CUDA_CHECK_THROW(cudaCreateTextureObject(&texture, &resDesc, &texDesc, &viewDesc));
 
+	default_rng_t rng{1337};
+
 	// Third step: sample a reference image to dump to disk. Visual comparison of this reference image and the learned
 	//             function will be eventually possible.
 
@@ -280,29 +283,20 @@ int main(int argc, char* argv[]) {
 				uint32_t n_iterations_warmup = n_iterations / 2;
 
 				const uint32_t num_dims_encoded = 2;
-				const uint32_t num_dims_passthrough = 0;
-
 				const uint32_t num_output_dims = 3;
 
 				// Input & corresponding RNG
 				GPUMemory<float> batch(batch_size * num_dims_encoded);
 
-				curandGenerator_t rng;
-
-				CURAND_CHECK_THROW(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_DEFAULT));
-				CURAND_CHECK_THROW(curandSetPseudoRandomGeneratorSeed(rng, 1337ULL));
-
 				cudaStream_t inference_stream;
 				CUDA_CHECK_THROW(cudaStreamCreate(&inference_stream));
 				cudaStream_t training_stream = inference_stream;
-
-				CURAND_CHECK_THROW(curandSetStream(rng, training_stream));
 
 				std::ifstream f{argv[2]};
 				json config = json::parse(f, nullptr, true, /*skip_comments=*/true);
 
 				json encoding_opts = config.value("encoding", json::object());
-				std::shared_ptr<Encoding<precision_t>> encoding{create_encoding<precision_t>(num_dims_encoded, num_dims_passthrough, encoding_opts, 16)};
+				std::shared_ptr<Encoding<precision_t>> encoding{create_encoding<precision_t>(num_dims_encoded, encoding_opts, 16)};
 				const uint32_t padded_num_input_dims = encoding->num_encoded_dims();
 
 				// Auxiliary matrices for training
@@ -344,12 +338,11 @@ int main(int argc, char* argv[]) {
 					float loss_value;
 					for (uint32_t j = 0; j < STEPS_INCREMENT; ++j) {
 						// Compute reference values at random coordinates
-						CURAND_CHECK_THROW(curandGenerateUniform(rng, batch.data(), batch_size * num_dims_encoded));
-						linear_kernel(eval_image<num_output_dims>, 0, training_stream, batch_size, texture, filter, width, height, batch.data(), bench_target.data());
+						generate_random_uniform<float>(training_stream, rng, batch_size * num_dims_encoded, batch.data());
 
 						// Training step
 						float* p_loss = j == (STEPS_INCREMENT - 1) ? &loss_value : nullptr;
-						encoding->encode(batch_size, batch.data(), bench_obe_out.data(), training_stream);
+						encoding->encode(training_stream, batch_size, {batch.data(), num_dims_encoded}, {bench_obe_out.data(), num_output_dims});
 						trainer->training_step(training_stream, bench_obe_out, bench_target, p_loss);
 					}
 
@@ -378,7 +371,7 @@ int main(int argc, char* argv[]) {
 				mean_training_throughput /= (double)mean_counter;
 
 				// Dump learned image for sanity checking
-				encoding->encode(n_coords, xs_and_ys.data(), eval_obe_out.data(), inference_stream);
+				encoding->encode(inference_stream, n_coords, {xs_and_ys.data(), num_dims_encoded}, {eval_obe_out.data(), num_output_dims});
 				network->inference(inference_stream, eval_obe_out, prediction);
 
 				save_image(prediction_data, sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".exr");
@@ -387,8 +380,6 @@ int main(int argc, char* argv[]) {
 				std::this_thread::sleep_for(std::chrono::seconds{10});
 
 				// Inference benchmark
-				CURAND_CHECK_THROW(curandSetStream(rng, inference_stream));
-
 				double mean_inference_throughput = 0;
 				mean_counter = 0;
 
@@ -399,10 +390,10 @@ int main(int argc, char* argv[]) {
 					bool print_loss = i % print_interval == 0;
 
 					// Compute inference values at random coordinates
-					CURAND_CHECK_THROW(curandGenerateUniform(rng, batch.data(), batch_size * num_dims_encoded));
+					generate_random_uniform<float>(inference_stream, rng, batch_size * num_dims_encoded, batch.data());
 
 					// Inference step
-					encoding->encode(batch_size, batch.data(), bench_obe_out.data(), inference_stream);
+					encoding->encode(inference_stream, batch_size, {batch.data(), num_dims_encoded}, {bench_obe_out.data(), num_output_dims});
 					network->inference(inference_stream, bench_obe_out, bench_target);
 
 					// Debug outputs

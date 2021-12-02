@@ -34,8 +34,6 @@
 #include <tiny-cuda-nn/networks/cutlass_resnet.h>
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
 
-#include <cutlass/half.h>
-
 
 TCNN_NAMESPACE_BEGIN
 
@@ -58,6 +56,14 @@ Activation string_to_activation(std::string activation_name) {
 
 	throw std::runtime_error{std::string{"Invalid activation name: "} + activation_name};
 }
+
+template <typename T>
+void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, float* output) {
+	linear_kernel(extract_dimension_pos_neg_kernel<T>, 0, stream, num_elements, dim, fan_in, fan_out, encoded, output);
+}
+
+template void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const network_precision_t* encoded, float* output);
+
 
 template <typename T>
 Network<T>* create_network(const json& network) {
@@ -118,12 +124,13 @@ Network<T>* create_network(const json& network) {
 			string_to_activation(network.value("output_activation", "None")),
 		};
 	} else if (equals_case_insensitive(network_type, "ResNet") || equals_case_insensitive(network_type, "CutlassResNet")) {
-		return new CutlassResNet<T, Activation::None, Activation::None>{
+		return new CutlassResNet<T, Activation::None>{
 			network["n_input_dims"],
 			network.value("n_neurons", 128u),
 			network["n_output_dims"],
 			network.value("n_blocks", 2u),
 			network.value("n_matrices_per_block", 2u),
+			string_to_activation(network.value("output_activation", "None")),
 		};
 	}
 

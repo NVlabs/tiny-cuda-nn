@@ -39,9 +39,12 @@
 #include <tiny-cuda-nn/loss.h>
 
 #include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/reduce_sum.h>
+#include <tiny-cuda-nn/gpu_memory_json.h>
 
 #include <iostream>
+#include <random>
 
 
 TCNN_NAMESPACE_BEGIN
@@ -51,15 +54,14 @@ class Trainer : public ObjectWithMutableHyperparams {
 public:
 	Trainer(std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> model, std::shared_ptr<Optimizer<PARAMS_T>> optimizer, std::shared_ptr<Loss<COMPUTE_T>> loss, uint32_t seed = 1337, float perturbation_sigma = 0)
 	: m_model{model}, m_optimizer{optimizer}, m_loss{loss}, m_perturbation_sigma{perturbation_sigma} {
-		initialize_params(seed);
-
-		CURAND_CHECK_THROW(curandCreateGenerator(&m_curand, CURAND_RNG_PSEUDO_DEFAULT));
-		CURAND_CHECK_THROW(curandSetPseudoRandomGeneratorSeed(m_curand, 1337ULL));
+		std::seed_seq seq{seed};
+		std::vector<uint32_t> seeds(2);
+		seq.generate(std::begin(seeds), std::end(seeds));
+		m_rng = pcg32{seeds.front()};
+		initialize_params();
 	}
 
-	virtual ~Trainer() {
-		curandDestroyGenerator(m_curand);
-	}
+	virtual ~Trainer() {}
 
 	void set_loss(std::shared_ptr<Loss<COMPUTE_T>> loss) {
 		if (!loss) {
@@ -68,7 +70,7 @@ public:
 		m_loss = loss;
 	}
 
-	void initialize_params(uint32_t seed) {
+	void initialize_params() {
 		size_t n_params = m_model->n_params();
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
 
@@ -89,13 +91,8 @@ public:
 			m_params_inference = m_params;
 		}
 
-		std::seed_seq seq{seed};
-		std::vector<uint32_t> seeds(1);
-		seq.generate(std::begin(seeds), std::end(seeds));
-		std::mt19937 rnd(seeds.front());
-
 		m_model->initialize_params(
-			rnd,
+			m_rng,
 			m_params_full_precision,
 			m_params,
 			m_params_inference,
@@ -127,6 +124,79 @@ public:
 		);
 	}
 
+	const GPUMatrix<COMPUTE_T>& forward(cudaStream_t stream, const GPUMatrix<T>& input) {
+		// Make sure our teporary buffers have the correct size for the given batch size
+		uint32_t batch_size = input.n();
+		if (m_training_prediction_tmp.n() != batch_size) {
+			allocate_training_buffers(m_model->padded_output_width(), batch_size);
+		}
+
+		m_model->forward(stream, input, &m_training_prediction_tmp);
+		return m_training_prediction_tmp;
+	}
+
+	const GPUMatrix<COMPUTE_T>& forward(const GPUMatrix<T>& input) {
+		return forward(nullptr, input);
+	}
+
+	void evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+		// Make sure our teporary buffers have the correct size for the given batch size
+		uint32_t batch_size = target.n();
+		if (m_training_prediction_tmp.n() != batch_size) {
+			throw std::runtime_error{"Trainer: you must call `forward` before calling `evaluate_loss`"};
+		}
+
+		if (m_perturbation_sigma > 0) {
+			const uint32_t n_elements = m_perturbation.n_elements();
+			generate_random_logistic<float>(stream, m_rng, n_elements, m_perturbation.data(), 0.0f, m_perturbation_sigma);
+			add<<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_training_prediction_tmp.data(), m_perturbation.data(), m_perturbed_training_prediction_tmp.data());
+		}
+
+		auto& loss_input = m_perturbation_sigma > 0 ? m_perturbed_training_prediction_tmp : m_training_prediction_tmp;
+
+		m_loss->evaluate(
+			stream,
+			m_model->padded_output_width(),
+			m_model->output_width(),
+			loss_scale,
+			loss_input,
+			target,
+			m_training_loss_tmp,
+			m_training_loss_gradient_tmp,
+			data_pdf
+		);
+
+		if (loss_value) {
+			*loss_value = reduce_sum(m_training_loss_tmp.data(), m_training_loss_tmp.n_elements(), stream);
+		}
+	}
+
+	void evaluate_loss(const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+		evaluate_loss(nullptr, loss_scale, target, data_pdf, loss_value);
+	}
+
+	void backward(cudaStream_t stream, const GPUMatrix<T>& input) {
+		// Make sure our teporary buffers have the correct size for the given batch size
+		uint32_t batch_size = input.n();
+		if (m_training_prediction_tmp.n() != batch_size) {
+			throw std::runtime_error{"Trainer: you must call `forward` and `evaluate_loss` before calling `backward`"};
+		}
+
+		m_model->backward(stream, input, m_training_prediction_tmp, m_training_loss_gradient_tmp);
+	}
+
+	void backward(const GPUMatrix<T>& input) {
+		backward(nullptr, input);
+	}
+
+	void optimizer_step(cudaStream_t stream, float loss_scale) {
+		m_optimizer->step(stream, loss_scale, m_params_full_precision, m_params, m_param_gradients);
+	}
+
+	void optimizer_step(float loss_scale) {
+		optimizer_step(nullptr, loss_scale);
+	}
+
 	void training_step(
 		cudaStream_t stream,
 		const GPUMatrix<T>& input,
@@ -138,52 +208,27 @@ public:
 			throw std::runtime_error(std::string("Input and target don't have matching batch size ") + std::to_string(input.n()) + "!=" + std::to_string(target.n()));
 		}
 
-		uint32_t padded_output_width = m_model->padded_output_width();
-		uint32_t output_width = m_model->output_width();
-
-		if (target.m() != output_width) {
-			throw std::runtime_error(std::string("Target does not have the correct number of dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(output_width));
+		if (target.m() != m_model->output_width()) {
+			throw std::runtime_error(std::string("Target does not have the correct number of dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(m_model->output_width()));
 		}
 
 		// Make sure our teporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		bool did_allocate = false;
 		if (m_training_prediction_tmp.n() != batch_size) {
-			allocate_training_buffers(padded_output_width, batch_size);
+			allocate_training_buffers(m_model->padded_output_width(), batch_size);
 			did_allocate = true;
 		}
 
 		static const float loss_scale = 128;
 
 		m_graph.capture_and_execute(stream, did_allocate, [&]() {
-			m_model->forward(stream, input, m_training_prediction_tmp);
-
-			if (m_perturbation_sigma > 0) {
-				const uint32_t n_elements = m_perturbation.n_elements();
-				CURAND_CHECK_THROW(curandSetStream(m_curand, stream));
-				CURAND_CHECK_THROW(curandGenerateNormal(m_curand, m_perturbation.data(), n_elements, 0.0f, m_perturbation_sigma));
-
-				add<<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_training_prediction_tmp.data(), m_perturbation.data(), m_perturbed_training_prediction_tmp.data());
-			}
-
-			auto& loss_input = m_perturbation_sigma > 0 ? m_perturbed_training_prediction_tmp : m_training_prediction_tmp;
-
-			m_loss->evaluate(
-				stream,
-				padded_output_width,
-				output_width,
-				loss_scale,
-				loss_input,
-				target,
-				m_training_loss_tmp,
-				m_training_loss_gradient_tmp,
-				data_pdf
-			);
-
-			m_model->backward(stream, input, m_training_prediction_tmp, m_training_loss_gradient_tmp);
+			forward(stream, input);
+			evaluate_loss(stream, loss_scale, target, data_pdf);
+			backward(stream, input);
 		});
 
-		m_optimizer->step(stream, loss_scale, m_optimizer->learning_rate(), m_params_full_precision, m_params, m_param_gradients);
+		optimizer_step(stream, loss_scale);
 
 		if (loss_value) {
 			*loss_value = reduce_sum(m_training_loss_tmp.data(), m_training_loss_tmp.n_elements(), stream);
@@ -197,14 +242,6 @@ public:
 		const GPUMatrix<float>* data_pdf = nullptr
 	) {
 		training_step(nullptr, input, target, loss_value, data_pdf);
-	}
-
-	void optimizer_step_with_precomputed_gradients(cudaStream_t stream, float loss_scale) {
-		m_optimizer->step(stream, loss_scale, m_optimizer->learning_rate(), m_params_full_precision, m_params, m_param_gradients);
-	}
-
-	void optimizer_step_with_precomputed_gradients(float loss_scale) {
-		optimizer_step_with_precomputed_gradients(nullptr, loss_scale);
 	}
 
 	void update_hyperparams(const json& params) override {
@@ -281,7 +318,6 @@ private:
 	PARAMS_T* m_param_gradients = nullptr;
 
 	float m_perturbation_sigma;
-	curandGenerator_t m_curand;
 
 	GPUMemory<char> m_training_buffer;
 
@@ -290,6 +326,8 @@ private:
 	GPUMatrix<COMPUTE_T> m_training_prediction_tmp;
 	GPUMatrix<COMPUTE_T> m_training_loss_gradient_tmp;
 	GPUMatrix<float> m_training_loss_tmp;
+
+	pcg32 m_rng;
 };
 
 TCNN_NAMESPACE_END

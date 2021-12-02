@@ -51,34 +51,45 @@ public:
 		m_nested.reset(create_optimizer<T>(params.value("nested", json::object())));
 		update_hyperparams(params);
 
-		m_learning_rate = m_nested->learning_rate();
+		m_learning_rate_factor = 1.0f;
+		m_base_learning_rate = m_nested->learning_rate();
 	}
 
 	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
 		m_nested->allocate(target);
 	}
 
-	void step(cudaStream_t stream, float loss_scale, float learning_rate, float* weights_full_precision, T* weights, const T* gradients) override {
-		if (step() >= m_decay_start && (step() - m_decay_start) % m_decay_interval == 0) {
-			m_learning_rate *= m_decay_base;
+	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
+		if (step() == 0) {
+			m_learning_rate_factor = 1.0f;
 		}
 
-		m_nested->step(stream, loss_scale, m_learning_rate, weights_full_precision, weights, gradients);
+		if (step() >= m_decay_start && (step() - m_decay_start) % m_decay_interval == 0 && step() <= m_decay_end) {
+			m_learning_rate_factor *= m_decay_base;
+		}
+
+		m_nested->set_learning_rate(m_base_learning_rate * m_learning_rate_factor);
+		m_nested->step(stream, loss_scale, weights_full_precision, weights, gradients);
 	}
 
-	float learning_rate() const {
-		return m_learning_rate;
+	float learning_rate() const override {
+		return m_base_learning_rate * m_learning_rate_factor;
 	}
 
-	uint32_t step() const {
+	void set_learning_rate(float val) override {
+		m_base_learning_rate = val / m_learning_rate_factor;
+		m_nested->set_learning_rate(m_base_learning_rate * m_learning_rate_factor);
+	}
+
+	uint32_t step() const override {
 		return m_nested->step();
 	}
 
-	uint32_t n_weights() const {
+	uint32_t n_weights() const override {
 		return m_nested->n_weights();
 	}
 
-	T* custom_weights() const {
+	T* custom_weights() const override {
 		return m_nested->custom_weights();
 	}
 
@@ -95,6 +106,10 @@ public:
 			m_decay_start = params["decay_start"];
 		}
 
+		if (params.contains("decay_end")) {
+			m_decay_end = params["decay_end"];
+		}
+
 		if (params.contains("nested")) {
 			m_nested->update_hyperparams(params["nested"]);
 		}
@@ -103,23 +118,27 @@ public:
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();
-		data["learning_rate"] = m_learning_rate;
+		data["learning_rate"] = m_base_learning_rate;
+		data["learning_rate_factor"] = m_learning_rate_factor;
 		return data;
 	}
 
 	void deserialize(const json& data) override {
-		m_learning_rate = data["learning_rate"];
+		m_base_learning_rate = data["learning_rate"];
+		m_learning_rate_factor = data.value("learning_rate_factor", 1.0f);
 		m_nested->deserialize(data["nested"]);
 	}
 
 private:
 	std::unique_ptr<Optimizer<T>> m_nested;
 
-	float m_learning_rate;
+	float m_learning_rate_factor = 1.0f;
+	float m_base_learning_rate;
 
 	float m_decay_base = 0.1f;
 	uint32_t m_decay_interval = 10000;
 	uint32_t m_decay_start = 10000;
+	uint32_t m_decay_end = 10000000;
 };
 
 TCNN_NAMESPACE_END
