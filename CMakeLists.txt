@@ -28,8 +28,8 @@ PROJECT(tiny-cuda-nn
 	LANGUAGES CXX CUDA
 )
 
-# set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
-# find_package(CUDAToolkit 11.3 REQUIRED)
+option(TCNN_BUILD_BENCHMARK "Build tiny-cuda-nn example benchmark?" ON)
+option(TCNN_BUILD_EXAMPLES "Build tiny-cuda-nn example applications?" ON)
 
 ###############################################################################
 # Build type and C++ compiler setup
@@ -104,5 +104,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR})
 
 add_subdirectory("src")
-add_subdirectory("samples")
-add_subdirectory("benchmarks/image")
+
+if (TCNN_BUILD_EXAMPLES)
+	add_subdirectory("samples")
+endif()
+if (TCNN_BUILD_BENCHMARK)
+	add_subdirectory("benchmarks/image")
+endif()
