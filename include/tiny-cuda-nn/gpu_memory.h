@@ -69,14 +69,12 @@ public:
 	GPUMemory() {}
 
 	GPUMemory<T>& operator=(GPUMemory<T>&& other) {
-		m_size = other.m_size;
-		m_allocation_n_bytes = other.m_allocation_n_bytes;
-		m_data = other.m_data;
-		m_compressed = other.m_compressed;
-		m_stream = other.m_stream;
-		m_alloc_handle = other.m_alloc_handle;
-
-		other.m_size = 0; other.m_data = nullptr; other.m_stream = nullptr;
+		std::swap(m_size, other.m_size);
+		std::swap(m_allocation_n_bytes, other.m_allocation_n_bytes);
+		std::swap(m_data, other.m_data);
+		std::swap(m_compressed, other.m_compressed);
+		std::swap(m_stream, other.m_stream);
+		std::swap(m_alloc_handle, other.m_alloc_handle);
 		return *this;
 	}
 
