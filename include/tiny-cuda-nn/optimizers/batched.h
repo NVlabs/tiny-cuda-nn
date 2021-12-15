@@ -32,7 +32,7 @@
 
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/optimizer.h>
 
 #include <memory>

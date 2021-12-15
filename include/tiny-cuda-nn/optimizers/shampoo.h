@@ -347,7 +347,7 @@ public:
 	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
 		uint32_t size = (uint32_t)target->n_params();
 		m_n_weights = size;
-		if (m_n_weights <= m_first_moments.get_num_elements()) {
+		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
 
@@ -465,7 +465,7 @@ public:
 
 		uint32_t n_elements = M*M;
 		uint32_t workspace_size = n_elements * 6 * n_matrices;
-		if (tmp.get_num_elements() < workspace_size) {
+		if (tmp.size() < workspace_size) {
 			tmp.resize(workspace_size * 2);
 		}
 
@@ -702,8 +702,8 @@ public:
 			CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 
 			if (m_frobenius_normalization) {
-				cudaMemsetAsync(m_sqr1_tmp.data(), 0, m_sqr1_tmp.get_num_elements() * sizeof(float), stream);
-				cudaMemsetAsync(m_sqr2_tmp.data(), 0, m_sqr2_tmp.get_num_elements() * sizeof(float), stream);
+				cudaMemsetAsync(m_sqr1_tmp.data(), 0, m_sqr1_tmp.size() * sizeof(float), stream);
+				cudaMemsetAsync(m_sqr2_tmp.data(), 0, m_sqr2_tmp.size() * sizeof(float), stream);
 			}
 
 			cudaEventRecord(m_global_event, stream);
@@ -754,7 +754,7 @@ public:
 
 				// m_L[i] = m_beta2 * m_L[i] + (1 - m_beta2) * gradient_matrix * gradient_matrix.transpose();
 				CUBLAS_CHECK_THROW(cublasSetStream(m_cublas, L_stream));
-				CUBLAS_CHECK_THROW(cublasSetWorkspace(m_cublas, L_workspace.data(), L_workspace.get_num_elements()));
+				CUBLAS_CHECK_THROW(cublasSetWorkspace(m_cublas, L_workspace.data(), L_workspace.size()));
 				CUBLAS_CHECK_THROW(cublasGemmStridedBatchedEx(
 					m_cublas, CUBLAS_OP_T, CUBLAS_OP_N,
 					M, M, N,
@@ -772,7 +772,7 @@ public:
 
 				// m_R[i] = m_beta2 * m_R[i] + (1 - m_beta2) * gradient_matrix.transpose() * gradient_matrix;
 				CUBLAS_CHECK_THROW(cublasSetStream(m_cublas, R_stream));
-				CUBLAS_CHECK_THROW(cublasSetWorkspace(m_cublas, R_workspace.data(), R_workspace.get_num_elements()));
+				CUBLAS_CHECK_THROW(cublasSetWorkspace(m_cublas, R_workspace.data(), R_workspace.size()));
 				CUBLAS_CHECK_THROW(cublasGemmStridedBatchedEx(
 					m_cublas, CUBLAS_OP_N, CUBLAS_OP_T,
 					N, N, M,
@@ -795,7 +795,7 @@ public:
 				// Must wait until after the first step for the L and R matrix roots to get initialized.
 				if (m_current_step-1 > 0) {
 					CUBLAS_CHECK_THROW(cublasSetStream(m_cublas, update_stream));
-					CUBLAS_CHECK_THROW(cublasSetWorkspace(m_cublas, update_workspace.data(), update_workspace.get_num_elements()));
+					CUBLAS_CHECK_THROW(cublasSetWorkspace(m_cublas, update_workspace.data(), update_workspace.size()));
 
 					// gradient_matrix = L_root * gradients
 					CUBLAS_CHECK_THROW(cublasGemmStridedBatchedEx(

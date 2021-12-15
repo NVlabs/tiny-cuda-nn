@@ -35,7 +35,7 @@
 #include <tiny-cuda-nn/common.h>
 
 #include <tiny-cuda-nn/gpu_matrix.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 #include <cutlass/cutlass.h>
 
@@ -372,12 +372,14 @@ using OurB2bGemm = cutlass::gemm::device::B2bGemm<
 	2
 >;
 
+inline std::map<cudaStream_t, GPUMemory<uint8_t>>& cutlass_workspaces() {
+	static std::map<cudaStream_t, GPUMemory<uint8_t>> s_workspaces;
+	return s_workspaces;
+}
 
-static std::map<cudaStream_t, GPUMemory<uint8_t>> workspaces;
-
-inline uint8_t* get_workspace(size_t size, cudaStream_t stream) {
-	GPUMemory<uint8_t>& workspace = workspaces[stream];
-	if (size > workspace.get_num_elements()) {
+inline uint8_t* cutlass_get_workspace(size_t size, cudaStream_t stream) {
+	GPUMemory<uint8_t>& workspace = cutlass_workspaces()[stream];
+	if (size > workspace.size()) {
 		size *= 2;
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 		std::cout << "CUTLASS GEMM: Allocating temporary workspace of " << bytes_to_string(size) << "." << std::endl;
@@ -389,15 +391,15 @@ inline uint8_t* get_workspace(size_t size, cudaStream_t stream) {
 	return workspace.data();
 }
 
-inline void free_workspace(cudaStream_t stream) {
-	if (workspaces.count(stream) == 0) {
+inline void cutlass_free_workspace(cudaStream_t stream) {
+	if (cutlass_workspaces().count(stream) == 0) {
 		return;
 	}
 
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-	std::cout << "CUTLASS GEMM: Freeing temporary workspace of " << bytes_to_string(workspaces.at(stream).get_num_elements()) << "." << std::endl;
+	std::cout << "CUTLASS GEMM: Freeing temporary workspace of " << bytes_to_string(cutlass_workspaces().at(stream).size()) << "." << std::endl;
 #endif
-	workspaces.erase(stream);
+	cutlass_workspaces().erase(stream);
 }
 
 
@@ -410,7 +412,7 @@ void fc_multiply_impl(cudaStream_t stream, const typename Gemm::Arguments& args)
 	Gemm gemm_op;
 
 	// Initialize CUTLASS kernel with arguments and workspace pointer
-	cutlass::Status status = gemm_op.initialize(args, get_workspace(workspace_size, stream), stream);
+	cutlass::Status status = gemm_op.initialize(args, cutlass_get_workspace(workspace_size, stream), stream);
 	CUTLASS_CHECK(status);
 
 	// Launch initialized CUTLASS kernel
@@ -427,7 +429,7 @@ void fc_multiply_split_k_impl(cudaStream_t stream, const typename Gemm::Argument
 	Gemm gemm_op;
 
 	// Initialize CUTLASS kernel with arguments and workspace pointer
-	cutlass::Status status = gemm_op.initialize(args, get_workspace(workspace_size, stream));
+	cutlass::Status status = gemm_op.initialize(args, cutlass_get_workspace(workspace_size, stream));
 	CUTLASS_CHECK(status);
 
 	// Launch initialized CUTLASS kernel

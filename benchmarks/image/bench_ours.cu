@@ -28,7 +28,7 @@
  *  @brief  Generates performance data for comparison with TensorFlow.
  */
 
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/encodings/oneblob.h>
@@ -147,7 +147,7 @@ GPUMemory<float> load_image(const std::string& filename, int& width, int& height
 
 template <typename T>
 void save_image(const GPUMemory<T>& image, int width, int height, int n_channels, int channel_stride, const std::string& filename) {
-	std::vector<T> host_data(image.get_num_elements());
+	std::vector<T> host_data(image.size());
 	image.copy_to_host(host_data.data());
 
 	std::vector<float> float_host_data(host_data.size());

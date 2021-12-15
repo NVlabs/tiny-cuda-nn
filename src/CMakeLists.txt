@@ -26,12 +26,12 @@
 
 set(SOURCES
 	common.cu
+	common_device.cu
 	cutlass_mlp.cu
 	cutlass_resnet.cu
 	encoding.cu
 	fully_fused_mlp.cu
 	loss.cu
-	misc_kernels.cu
 	network.cu
 	object.cu
 	optimizer.cu

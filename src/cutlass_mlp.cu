@@ -36,10 +36,6 @@
 
 TCNN_NAMESPACE_BEGIN
 
-void cutlass_free_workspace(cudaStream_t stream) {
-	free_workspace(stream);
-}
-
 template <typename T>
 CutlassMLP<T>::CutlassMLP(
 	uint32_t input_width,
@@ -112,7 +108,7 @@ m_output_activation{output_activation}
 template <typename T>
 CutlassMLP<T>::~CutlassMLP() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		free_workspace(m_training_splitk_streams[i]);
+		cutlass_free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));

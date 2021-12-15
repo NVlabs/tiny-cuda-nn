@@ -28,6 +28,7 @@
  *  @brief  API interface of a neural network implementation
  */
 
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/network.h>
 
 #include <tiny-cuda-nn/networks/cutlass_mlp.h>

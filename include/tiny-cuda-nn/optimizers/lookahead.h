@@ -72,7 +72,7 @@ public:
 
 		uint32_t size = (uint32_t)target->n_params();
 
-		if (size <= m_weights_lookahead.get_num_elements()) {
+		if (size <= m_weights_lookahead.size()) {
 			return;
 		}
 
@@ -83,7 +83,7 @@ public:
 		uint32_t current_step = m_nested->step();
 
 		if (current_step == 0) {
-			CUDA_CHECK_THROW(cudaMemcpy(m_weights_lookahead.data(), weights, m_weights_lookahead.get_num_elements() * sizeof(T), cudaMemcpyDeviceToDevice));
+			CUDA_CHECK_THROW(cudaMemcpy(m_weights_lookahead.data(), weights, m_weights_lookahead.size() * sizeof(T), cudaMemcpyDeviceToDevice));
 		}
 
 		if (current_step % m_n_steps == 0) {

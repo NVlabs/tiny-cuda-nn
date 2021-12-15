@@ -45,7 +45,7 @@ uint32_t reduce_sum_workspace_size(uint32_t n_elements);
 inline uint8_t* get_workspace_sum(size_t size, cudaStream_t stream) {
 	static std::map<cudaStream_t, GPUMemory<uint8_t>> workspaces;
 	GPUMemory<uint8_t>& workspace = workspaces[stream];
-	if (size > workspace.get_num_elements()) {
+	if (size > workspace.size()) {
 		size *= 2;
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 		std::cout << "reduce_sum: Allocating temporary workspace with size " << bytes_to_string(size) << "." << std::endl;

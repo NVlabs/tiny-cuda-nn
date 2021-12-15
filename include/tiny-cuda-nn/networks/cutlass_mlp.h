@@ -36,11 +36,9 @@
 #include <tiny-cuda-nn/network.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
 
 #include <array>
-#include <iostream>
-#include <memory>
+#include <vector>
 
 
 TCNN_NAMESPACE_BEGIN

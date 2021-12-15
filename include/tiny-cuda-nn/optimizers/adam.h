@@ -33,7 +33,7 @@
 
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/gpu_memory_json.h>
 #include <json/json.hpp>
@@ -126,7 +126,7 @@ public:
 		uint32_t size = (uint32_t)target->n_params();
 
 		m_n_weights = size;
-		if (m_n_weights <= m_first_moments.get_num_elements()) {
+		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
 
@@ -268,7 +268,7 @@ public:
 		if (data.contains("param_steps_binary")) {
 			m_param_steps = data["param_steps_binary"];
 		} else {
-			m_param_steps.resize(m_second_moments.get_num_elements());
+			m_param_steps.resize(m_second_moments.size());
 			m_param_steps.memset(0);
 		}
 		m_current_step = data["current_step"];

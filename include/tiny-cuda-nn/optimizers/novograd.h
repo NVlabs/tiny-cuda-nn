@@ -103,7 +103,7 @@ public:
 		uint32_t size = (uint32_t)target->n_params();
 
 		m_n_weights = size;
-		if (m_n_weights <= m_first_moments.get_num_elements()) {
+		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
 
@@ -129,7 +129,7 @@ public:
 		for (size_t i = 0; i < m_layers.size(); ++i) {
 			uint32_t workspace_size = reduce_sum_workspace_size(m_layers[i]);
 
-			if (workspace_size > m_reduction_workspace.get_num_elements()) {
+			if (workspace_size > m_reduction_workspace.size()) {
 				workspace_size *= 2;
 				std::cout << "NOVOGRAD: resizing reduction buffer to " << workspace_size << std::endl;
 				m_reduction_workspace.resize(workspace_size);

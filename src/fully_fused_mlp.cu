@@ -32,7 +32,7 @@
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
 
 #include <tiny-cuda-nn/cutlass_matmul.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 #include <mma.h>
 #include <cuda_pipeline.h>
@@ -679,7 +679,7 @@ m_output_activation{output_activation}
 template <typename T, int WIDTH>
 FullyFusedMLP<T, WIDTH>::~FullyFusedMLP() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		free_workspace(m_training_splitk_streams[i]);
+		cutlass_free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));

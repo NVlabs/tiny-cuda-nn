@@ -38,7 +38,7 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/loss.h>
 
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/reduce_sum.h>
 #include <tiny-cuda-nn/gpu_memory_json.h>

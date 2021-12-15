@@ -90,7 +90,7 @@ public:
 
 		uint32_t size = (uint32_t)target->n_params();
 
-		if (size <= m_weights_ema.get_num_elements()) {
+		if (size <= m_weights_ema.size()) {
 			return;
 		}
 
@@ -180,8 +180,8 @@ public:
 
 	void deserialize(const json& data) override {
 		m_weights_ema = data["weights_ema_binary"];
-		m_tmp.resize(m_weights_ema.get_num_elements());
-		linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.get_num_elements(), m_weights_ema.data(), m_tmp.data());
+		m_tmp.resize(m_weights_ema.size());
+		linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.size(), m_weights_ema.data(), m_tmp.data());
 		m_nested->deserialize(data["nested"]);
 	}
 

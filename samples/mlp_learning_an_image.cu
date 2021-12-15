@@ -29,7 +29,7 @@
             2D function that represents an image.
  */
 
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 #include <tiny-cuda-nn/config.h>
 

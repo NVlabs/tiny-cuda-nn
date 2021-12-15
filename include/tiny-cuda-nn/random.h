@@ -31,7 +31,7 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 #include <pcg32/pcg32.h>
 

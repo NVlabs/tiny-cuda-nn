@@ -36,8 +36,6 @@
 
 TCNN_NAMESPACE_BEGIN
 
-void cutlass_free_workspace(cudaStream_t stream);
-
 enum class WeightUsage {
 	Inference,
 	Forward,
