@@ -53,6 +53,16 @@ using network_precision_t = __half;
 
 // #define TCNN_VERBOSE_MEMORY_ALLOCS
 
+enum class Activation {
+	ReLU,
+	Exponential,
+	Sine,
+	Sigmoid,
+	Squareplus,
+	Softplus,
+	None,
+};
+
 //////////////////
 // Misc helpers //
 //////////////////
