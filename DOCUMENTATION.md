@@ -1,8 +1,8 @@
 # JSON Configuration Documentation
 
-This documentation so far only contains the JSON parameters for configuring each component of __tiny-cuda-nn__.
+This document lists the JSON parameters of all components of __tiny-cuda-nn__.
 
-For each component, we provide a sample configuration with each parameter's default value.
+For each component, we provide a sample configuration that lists each parameter's default value.
 
 ## Networks
 
@@ -27,7 +27,7 @@ The following activation functions are supported:
 
 ### Fully Fused MLP
 
-Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 32, 64, or 128 and outputs of 16 or fewer dimensions.
+Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 32, 64, 128, or 256.
 
 ```json5
 {
@@ -236,7 +236,7 @@ Relative L2 loss normalized by the network prediction [[Lehtinen et al. 2018]](h
 
 ### Relative L2 Luminance
 
-Same as above, but normalized by the luminance of the network prediction. Only applicable when network prediction is RGB. Used in Neural Radiance Caching [Müller et al. 2021] (to appear).
+Same as above, but normalized by the luminance of the network prediction. Only applicable when network prediction is RGB. Used in Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf).
 
 ```json5
 {

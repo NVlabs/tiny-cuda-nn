@@ -37,7 +37,7 @@ This framework powers the following publications:
 > [ [Paper](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) ] [ [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c) ] [ [Video](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.mp4) ] [ [Interactive Results Viewer](https://tom94.net/data/publications/mueller21realtime/interactive-viewer/) ] [ [BibTeX](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.bib) ]
 
 > __Extracting Triangular 3D Models, Materials, and Lighting From Images__  
-> [Jakob Munkberg](https://research.nvidia.com/person/jacob-munkberg), [Jon Hasselgren](https://research.nvidia.com/person/jon-hasselgren), [Tianchang Shen](http://www.cs.toronto.edu/~shenti11/), [Jun Gao](http://www.cs.toronto.edu/~jungao/), [Wenzheng Chen](http://www.cs.toronto.edu/~wenzheng/), [Alex Evans](https://research.nvidia.com/person/alex-evans), [Thomas Müller](https://tom94.net), [Sanja Fidler](https://www.cs.toronto.edu/~fidler/)  
+> [Jacob Munkberg](https://research.nvidia.com/person/jacob-munkberg), [Jon Hasselgren](https://research.nvidia.com/person/jon-hasselgren), [Tianchang Shen](http://www.cs.toronto.edu/~shenti11/), [Jun Gao](http://www.cs.toronto.edu/~jungao/), [Wenzheng Chen](http://www.cs.toronto.edu/~wenzheng/), [Alex Evans](https://research.nvidia.com/person/alex-evans), [Thomas Müller](https://tom94.net), [Sanja Fidler](https://www.cs.toronto.edu/~fidler/)  
 > _[arXiv:2111.12503 [cs.CV]](https://arxiv.org/abs/2111.12503)_, Nov 2021
 >
 > [ [Website](https://nvlabs.github.io/nvdiffrec/) ] [ [Paper](https://nvlabs.github.io/nvdiffrec/assets/paper.pdf) ] [ [Video](https://nvlabs.github.io/nvdiffrec/assets/video.mp4) ] [ [BibTeX](https://nvlabs.github.io/nvdiffrec/assets/bib.txt) ]
@@ -125,26 +125,24 @@ producing an image every 1000 training steps. Each 1000 steps should take roughl
 
 Begin by cloning this repository and all its submodules using the following command:
 ```sh
-> git clone --recursive https://github.com/nvlabs/tiny-cuda-nn
-> cd tiny-cuda-nn
-tiny-cuda-nn>
+$ git clone --recursive https://github.com/nvlabs/tiny-cuda-nn
+$ cd tiny-cuda-nn
 ```
 
 Then, use CMake to generate build files:
 
 ```sh
-tiny-cuda-nn> mkdir build
-tiny-cuda-nn> cd build
-tiny-cuda-nn/build> cmake ..
+tiny-cuda-nn$ mkdir build
+tiny-cuda-nn$ cd build
+tiny-cuda-nn/build$ cmake ..
 ```
 
-Then, depending on your operating system
-
-On Windows, open `tiny-cuda-nn/build/tiny-cuda-nn.sln` in Visual Studio and click the "Build" button.
-On Linux you can compile with
-```sh
-tiny-cuda-nn/build> make -j
-```
+The last step differs by operating system.
+- Windows: open `tiny-cuda-nn/build/tiny-cuda-nn.sln` in Visual Studio and click the "Build" button.
+- Linux: run the command
+  ```sh
+  tiny-cuda-nn/build$ make -j
+  ```
 
 ## Components
 
