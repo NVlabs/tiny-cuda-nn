@@ -141,7 +141,7 @@ public:
 		return forward(nullptr, input);
 	}
 
-	void evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+	const GPUMatrix<float>& evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
 		// Make sure our teporary buffers have the correct size for the given batch size
 		uint32_t batch_size = target.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
@@ -171,6 +171,8 @@ public:
 		if (loss_value) {
 			*loss_value = reduce_sum(m_training_loss_tmp.data(), m_training_loss_tmp.n_elements(), stream);
 		}
+
+		return m_training_loss_tmp;
 	}
 
 	void evaluate_loss(const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
