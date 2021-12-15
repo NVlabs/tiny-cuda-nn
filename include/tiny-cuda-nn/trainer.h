@@ -101,7 +101,9 @@ public:
 		);
 
 		// initialize_params is only expected to initialize m_params_full_precision. Cast and copy these over!
-		linear_kernel(cast<PARAMS_T>, 0, nullptr, n_params, m_params_full_precision, m_params);
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params=m_params] __device__ (size_t i) {
+			params[i] = (PARAMS_T)params_fp[i];
+		});
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
@@ -258,7 +260,11 @@ public:
 			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_full_precision, params_cpu, sizeof(float)*n_params, cudaMemcpyHostToDevice));
-		linear_kernel(cast<PARAMS_T>, 0, nullptr, n_params, m_params_full_precision, m_params_inference);
+
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params_inference=m_params_inference] __device__ (size_t i) {
+			params_inference[i] = (PARAMS_T)params_fp[i];
+		});
+
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
@@ -269,7 +275,11 @@ public:
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_inference, params_cpu, sizeof(PARAMS_T)*n_params, cudaMemcpyHostToDevice));
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
-		linear_kernel(cast_from<PARAMS_T>, 0, nullptr, n_params, m_params_inference, m_params_full_precision);
+
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params_inference=m_params_inference] __device__ (size_t i) {
+			params_fp[i] = (float)params_inference[i];
+		});
+
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
