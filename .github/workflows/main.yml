@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-20.04
-            cuda: "11.3"
+            cuda: "11.2"
     env:
       build_dir: "build"
       config: "Release"
@@ -46,7 +46,7 @@ jobs:
       matrix:
         include:
           - os: windows-2019
-            cuda: "11.3.0"
+            cuda: "11.2.2"
             visual_studio: "Visual Studio 16 2019"
     env:
       build_dir: "build"
@@ -57,7 +57,7 @@ jobs:
         with:
           submodules: recursive
       - name: Install CUDA
-        env: 
+        env:
           cuda: ${{ matrix.cuda }}
           visual_studio: ${{ matrix.visual_studio }}
         shell: powershell
