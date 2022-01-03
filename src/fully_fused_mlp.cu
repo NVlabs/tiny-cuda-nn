@@ -35,7 +35,6 @@
 #include <tiny-cuda-nn/common_device.h>
 
 #include <mma.h>
-#include <cuda_pipeline.h>
 
 
 TCNN_NAMESPACE_BEGIN
@@ -59,7 +58,6 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 	constexpr uint32_t N_BLOCKS = WIDTH / 16;
 
 	using namespace nvcuda;
-	using namespace nvcuda::experimental;
 
 	// If we're performing the backward pass, weights must be loaded in transposed form, which
 	// is achieved by interpreting the memory in row_major instead of col_major order.
@@ -183,7 +181,6 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 	// Backprop through last layer
 	if (out_width <= 16) {
 		using namespace nvcuda;
-		using namespace nvcuda::experimental;
 
 		// Fragments in registers
 		wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, OUTPUT_LAYOUT> act_frag;
@@ -323,7 +320,6 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 	constexpr uint32_t N_BLOCKS = WIDTH / 16;
 
 	using namespace nvcuda;
-	using namespace nvcuda::experimental;
 
 	// Fragments
 	wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> act_frag;
@@ -412,7 +408,6 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 	constexpr uint32_t N_BLOCKS = WIDTH / 16;
 
 	using namespace nvcuda;
-	using namespace nvcuda::experimental;
 
 	// Fragments
 	wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> act_frag;

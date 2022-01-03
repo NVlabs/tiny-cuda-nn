@@ -38,7 +38,6 @@
 #include <tiny-cuda-nn/reduce_sum.h>
 
 #include <mma.h>
-#include <cuda_pipeline.h>
 #include <cublas_v2.h>
 
 #include <iostream>
