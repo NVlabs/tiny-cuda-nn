@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-20.04
-            cuda: "10.2"
+            cuda: "11.2"
     env:
       build_dir: "build"
       config: "Release"
