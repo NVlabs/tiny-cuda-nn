@@ -77,7 +77,7 @@ TCNN_NAMESPACE_BEGIN
 
 #ifdef TCNN_AMPERE
 using SmArch = typename std::conditional<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>::type;
-#elif
+#else
 using SmArch = cutlass::arch::Sm75;
 #endif
 
