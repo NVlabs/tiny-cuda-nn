@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-20.04
-            cuda: "11.2"
+            cuda: "10.2"
     env:
       build_dir: "build"
       config: "Release"
@@ -46,7 +46,7 @@ jobs:
       matrix:
         include:
           - os: windows-2019
-            cuda: "11.2.2"
+            cuda: "10.2.89"
             visual_studio: "Visual Studio 16 2019"
     env:
       build_dir: "build"
