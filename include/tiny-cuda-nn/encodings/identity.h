@@ -164,7 +164,7 @@ public:
 	}
 
 	void set_alignment(uint32_t alignment) override {
-		alignment = std::lcm(alignment, min_alignment());
+		alignment = lcm(alignment, min_alignment());
 		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
 		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
 	}

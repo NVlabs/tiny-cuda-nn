@@ -77,8 +77,8 @@ TCNN_NAMESPACE_BEGIN
 
 using SmArch = typename std::conditional<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>::type;
 
-using TypeAccumulator = std::conditional_t<std::is_same_v<network_precision_t, float>, float, cutlass::half_t>;
-using TypeCompute = std::conditional_t<std::is_same_v<network_precision_t, float>, float, cutlass::half_t>;
+using TypeAccumulator = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
+using TypeCompute = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
 
 template <typename T>
 using MMAOp = typename std::conditional<
@@ -462,8 +462,8 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 	static_assert(std::is_same<TypeC, TypeD>::value, "Type of matrix C and D must be equal");
 	static_assert(std::is_same<CutlassLayoutC, CutlassLayoutD>::value, "Layout of matrix C and D must be equal");
 
-	using MatmulTypeCompute = std::conditional_t<std::is_same_v<TypeA, float>, float, cutlass::half_t>;
-	using MatmulTypeAccumulator = std::conditional_t<std::is_same_v<TypeC, float>, float, cutlass::half_t>;
+	using MatmulTypeCompute = std::conditional_t<std::is_same<TypeA, float>::value, float, cutlass::half_t>;
+	using MatmulTypeAccumulator = std::conditional_t<std::is_same<TypeC, float>::value, float, cutlass::half_t>;
 
 	if (A.n() != B.m()) {
 		throw std::runtime_error("Matrices A and B can not be multiplied together");
@@ -559,8 +559,8 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	using CutlassLayoutC = typename std::conditional<LayoutC == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutD = typename std::conditional<LayoutD == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 
-	using MatmulTypeCompute = std::conditional_t<std::is_same_v<TypeA, float>, float, cutlass::half_t>;
-	using MatmulTypeAccumulator = std::conditional_t<std::is_same_v<TypeC, float>, float, cutlass::half_t>;
+	using MatmulTypeCompute = std::conditional_t<std::is_same<TypeA, float>::value, float, cutlass::half_t>;
+	using MatmulTypeAccumulator = std::conditional_t<std::is_same<TypeC, float>::value, float, cutlass::half_t>;
 
 	static_assert(std::is_same<TypeA, TypeB>::value, "Type of matrix A and B must be equal");
 	static_assert(std::is_same<TypeC, TypeD>::value, "Type of matrix C and D must be equal");
@@ -654,8 +654,8 @@ void fc_multiply_b2b(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, co
 	using CutlassLayoutC2 = typename std::conditional<LayoutC2 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutD = typename std::conditional<LayoutD == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 
-	using MatmulTypeCompute = std::conditional_t<std::is_same_v<TypeA, float>, float, cutlass::half_t>;
-	using MatmulTypeAccumulator = std::conditional_t<std::is_same_v<TypeD, float>, float, cutlass::half_t>;
+	using MatmulTypeCompute = std::conditional_t<std::is_same<TypeA, float>::value, float, cutlass::half_t>;
+	using MatmulTypeAccumulator = std::conditional_t<std::is_same<TypeD, float>::value, float, cutlass::half_t>;
 
 	static_assert(std::is_same<TypeA, TypeB1>::value, "Type of matrix A and B1 must be equal");
 	static_assert(std::is_same<TypeB1, TypeC1>::value, "Type of matrix B1 and C1 must be equal");

@@ -71,7 +71,7 @@ Network<T>* create_network(const json& network) {
 	std::string network_type = network.value("otype", "MLP");
 
 	if (equals_case_insensitive(network_type, "MegakernelMLP") || equals_case_insensitive(network_type, "FullyFusedMLP")) {
-		if constexpr (!std::is_same<network_precision_t, __half>::value) {
+		if (!std::is_same<network_precision_t, __half>::value) {
 			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};
 		} else {
 			uint32_t n_neurons = network.value("n_neurons", 128u);

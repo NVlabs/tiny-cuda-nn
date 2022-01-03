@@ -41,7 +41,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-using namespace std::string_literals;
 
 #include <cuda_fp16.h>
 
@@ -155,6 +154,31 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 #define TCNN_DEVICE
 #define TCNN_HOST
 #endif
+
+template <typename T>
+TCNN_HOST_DEVICE T clamp(T val, T lower, T upper) {
+	return std::max(std::min(val, upper), lower);
+}
+
+template <typename T>
+TCNN_HOST_DEVICE void inline host_device_swap(T& a, T& b) {
+	T c(a); a=b; b=c;
+}
+
+template <typename T>
+TCNN_HOST_DEVICE T gcd(T a, T b) {
+	while (a != 0) {
+		b %= a;
+		host_device_swap(a, b);
+	}
+	return b;
+}
+
+template <typename T>
+TCNN_HOST_DEVICE T lcm(T a, T b) {
+	T tmp = gcd(a, b);
+	return tmp ? (a / tmp) * b : 0;
+}
 
 template <typename T>
 TCNN_HOST_DEVICE T div_round_up(T val, T divisor) {

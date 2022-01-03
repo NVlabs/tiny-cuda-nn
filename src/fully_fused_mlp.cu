@@ -250,9 +250,8 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 	}
 }
 
-
 template <int WIDTH, typename T, Activation ACTIVATION>
-void mlp_fused_backward(
+std::enable_if_t<!std::is_same<__half, T>::value> mlp_fused_backward(
 	cudaStream_t stream,
 	const GPUMatrix<T, RM>& weights_first_layer,
 	const GPUMatrix<T, RM>& weights,
@@ -262,44 +261,53 @@ void mlp_fused_backward(
 	GPUMatrix<T>* dL_dinput,
 	const uint32_t n_hidden_matmuls
 ) {
-	if constexpr (std::is_same<T, __half>::value) {
-		const uint32_t batch_size = dL_doutput.cols();
-		const uint32_t out_width = dL_doutput.rows();
-		constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0;
-		constexpr uint32_t N_BLOCKS = WIDTH / 16;
-
-		if (forward.cols() != batch_size) {
-			throw std::runtime_error{"Batch size of matrices dL_doutput and temporaries doesn't match."};
-		}
-
-		const int N_ITERS = WIDTH >= 256 ? 2 : 8;
-		const uint32_t BLOCK_DIM_Z = 1;
-
-		if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
-			throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
-		}
-
-		const dim3 threads = { 32u, N_BLOCKS, BLOCK_DIM_Z }; // 32 threads = 1 warp, 8 warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
-
-		uint32_t n_elems_per_block = 16 * BLOCK_DIM_Z * N_ITERS;
-		uint32_t n_blocks = div_round_up(batch_size, n_elems_per_block);
-
-		int shmem_size = sizeof(__half) * ((16 * BLOCK_DIM_Z * N_ITERS) * (WIDTH + SKEW)); // WIDTH rows of input and 16 * threads.z rows of weights
-		const dim3 blocks = { n_blocks, 1u, 1u };
-
-		// The kernels operate with transposed layouts compared with the MLP code
-		if (dL_doutput.layout() == RM) {
-			check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::col_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
-			kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::col_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
-		} else {
-			check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::row_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
-			kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::row_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
-		}
-	} else {
-		throw std::runtime_error{"The fully fused backward pass only supports __half precision."};
-	}
+	throw std::runtime_error{"The fully fused backward pass only supports __half precision."};
 }
 
+template <int WIDTH, typename T, Activation ACTIVATION>
+std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_backward(
+	cudaStream_t stream,
+	const GPUMatrix<T, RM>& weights_first_layer,
+	const GPUMatrix<T, RM>& weights,
+	const GPUMatrixDynamic<T>& dL_doutput,
+	GPUMatrix<T>& temporaries,
+	const GPUMatrix<T>& forward,
+	GPUMatrix<T>* dL_dinput,
+	const uint32_t n_hidden_matmuls
+) {
+	const uint32_t batch_size = dL_doutput.cols();
+	const uint32_t out_width = dL_doutput.rows();
+	constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0;
+	constexpr uint32_t N_BLOCKS = WIDTH / 16;
+
+	if (forward.cols() != batch_size) {
+		throw std::runtime_error{"Batch size of matrices dL_doutput and temporaries doesn't match."};
+	}
+
+	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
+	const uint32_t BLOCK_DIM_Z = 1;
+
+	if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
+		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
+	}
+
+	const dim3 threads = { 32u, N_BLOCKS, BLOCK_DIM_Z }; // 32 threads = 1 warp, 8 warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
+
+	uint32_t n_elems_per_block = 16 * BLOCK_DIM_Z * N_ITERS;
+	uint32_t n_blocks = div_round_up(batch_size, n_elems_per_block);
+
+	int shmem_size = sizeof(__half) * ((16 * BLOCK_DIM_Z * N_ITERS) * (WIDTH + SKEW)); // WIDTH rows of input and 16 * threads.z rows of weights
+	const dim3 blocks = { n_blocks, 1u, 1u };
+
+	// The kernels operate with transposed layouts compared with the MLP code
+	if (dL_doutput.layout() == RM) {
+		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::col_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
+		kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::col_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
+	} else {
+		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::row_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
+		kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::row_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
+	}
+}
 
 template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T>
 __device__ void threadblock_input_layer_forward_dynamic(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ input_threadblock, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out_intermediate_threadblock_this_layer, const uint32_t in_width) {
@@ -474,7 +482,6 @@ __device__ void threadblock_write_output_static(const __half* __restrict__ act_s
 	}
 }
 
-
 template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T, Activation ACTIVATION, bool INFERENCE>
 __global__ void kernel_mlp_fused(const Activation output_activation, const __half* __restrict__ input, const __half* __restrict__ weights, OUT_T* __restrict__ out_intermediate, OUT_T* __restrict__ out, const uint32_t batch_size, const uint32_t in_width, const uint32_t out_width, const uint32_t n_hidden_matmuls, const nvcuda::wmma::layout_t output_layout = nvcuda::wmma::mem_row_major) {
 	// `input` points to the input matrix. Can be any width.
@@ -518,7 +525,7 @@ __global__ void kernel_mlp_fused(const Activation output_activation, const __hal
 
 	if (out_width > 16) {
 		// In the forward pass, intermediate activations are already written out.
-		if constexpr (INFERENCE) {
+		if (INFERENCE) {
 			threadblock_write_output_static<WIDTH, BLOCK_DIM_Z, N_ITERS>(act_shmem, out_intermediate + elem_idx * WIDTH);
 		}
 	} else if (out) {
@@ -531,9 +538,8 @@ __global__ void kernel_mlp_fused(const Activation output_activation, const __hal
 	}
 }
 
-
 template <int WIDTH, typename T, Activation ACTIVATION, bool INFERENCE>
-void mlp_fused_forward(
+std::enable_if_t<!std::is_same<__half, T>::value> mlp_fused_forward(
 	cudaStream_t stream,
 	Activation output_activation,
 	const GPUMatrix<T, RM>& weights,
@@ -542,71 +548,80 @@ void mlp_fused_forward(
 	GPUMatrixDynamic<T>* output,
 	const uint32_t n_hidden_layers
 ) {
-	if constexpr (std::is_same<T, __half>::value) {
-		const uint32_t batch_size = input.cols();
-		const uint32_t in_width = input.rows();
+	throw std::runtime_error{"The fully fused forward pass only supports __half precision."};
+}
 
-		constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0; // <- always going to be 8 as we only support multiple-of-16 widths
-		constexpr uint32_t INPUT_SKEW = 8; // <- likewise with inputs
-		constexpr uint32_t N_BLOCK_ROWS = WIDTH / 16;
+template <int WIDTH, typename T, Activation ACTIVATION, bool INFERENCE>
+std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
+	cudaStream_t stream,
+	Activation output_activation,
+	const GPUMatrix<T, RM>& weights,
+	const GPUMatrix<T>& input,
+	GPUMatrix<T>& output_intermediate,
+	GPUMatrixDynamic<T>* output,
+	const uint32_t n_hidden_layers
+) {
+	const uint32_t batch_size = input.cols();
+	const uint32_t in_width = input.rows();
 
-		static_assert(WIDTH % 16 == 0, "Width must be a multiply of 16.");
-		if (in_width % 16 != 0) {
-			throw std::runtime_error{"Inputs must have a multiple-of-16 elements."};
-		}
+	constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0; // <- always going to be 8 as we only support multiple-of-16 widths
+	constexpr uint32_t INPUT_SKEW = 8; // <- likewise with inputs
+	constexpr uint32_t N_BLOCK_ROWS = WIDTH / 16;
 
-		if (weights.rows() != WIDTH) {
-			throw std::runtime_error{"The fully fused forward pass only works with WIDTH-sized matrices."};
-		}
-
-		if (weights.cols() % 16 != 0) {
-			throw std::runtime_error{std::string("weights must have a multiple-of-16 number of columns. ") + std::to_string(weights.cols())};
-		}
-
-		if (output_intermediate.cols() != batch_size) {
-			throw std::runtime_error{"Batch size of inputs and output_intermediate doesn't match."};
-		}
-
-		if (output && output->cols() != batch_size) {
-			throw std::runtime_error{"Batch size of inputs and outputs doesn't match."};
-		}
-
-		const int N_ITERS = WIDTH >= 256 ? 2 : 8;
-		const uint32_t BLOCK_DIM_Z = (INFERENCE && WIDTH == 128) ? 2 : 1;
-
-		if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
-			throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
-		}
-
-		const dim3 threads = { 32u, N_BLOCK_ROWS, BLOCK_DIM_Z }; // 32 threads = 1 warp, N_BLOCK_ROWS warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
-
-		uint32_t n_elems_per_block = 16 * BLOCK_DIM_Z * N_ITERS;
-		uint32_t n_blocks = div_round_up(batch_size, n_elems_per_block);
-
-		size_t shmem_size = sizeof(__half) * (16 + 16 * BLOCK_DIM_Z * N_ITERS) * (WIDTH + SKEW); // 16*WIDTH rows of weights (for the last layer; others are in registers only) + 16*WIDTH*BLOCK_DIM_Z*N_ITERS rows of intermediate activations
-		if (in_width != WIDTH) {
-			// If the input width is dynamic, the input weight matrix as well as part of the input will live in extra shared memory
-			shmem_size = std::max(shmem_size, sizeof(__half) * (WIDTH + 16 * BLOCK_DIM_Z) * (in_width + INPUT_SKEW));
-		}
-
-		const dim3 blocks = { n_blocks, 1u, 1u };
-
-		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, ACTIVATION, INFERENCE>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)shmem_size));
-		kernel_mlp_fused<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, ACTIVATION, INFERENCE><<<blocks, threads, shmem_size, stream>>>(
-			output_activation,
-			input.data(),
-			weights.data(),
-			output_intermediate.data(),
-			output ? output->data() : nullptr,
-			batch_size,
-			in_width,
-			output ? output->rows() : 0,
-			n_hidden_layers,
-			output && output->layout() == RM ? nvcuda::wmma::mem_col_major : nvcuda::wmma::mem_row_major // The kernels operate with transposed layouts compared with the MLP code
-		);
-	} else {
-		throw std::runtime_error{"The fully fused forward pass only supports __half precision."};
+	static_assert(WIDTH % 16 == 0, "Width must be a multiply of 16.");
+	if (in_width % 16 != 0) {
+		throw std::runtime_error{"Inputs must have a multiple-of-16 elements."};
 	}
+
+	if (weights.rows() != WIDTH) {
+		throw std::runtime_error{"The fully fused forward pass only works with WIDTH-sized matrices."};
+	}
+
+	if (weights.cols() % 16 != 0) {
+		throw std::runtime_error{std::string("weights must have a multiple-of-16 number of columns. ") + std::to_string(weights.cols())};
+	}
+
+	if (output_intermediate.cols() != batch_size) {
+		throw std::runtime_error{"Batch size of inputs and output_intermediate doesn't match."};
+	}
+
+	if (output && output->cols() != batch_size) {
+		throw std::runtime_error{"Batch size of inputs and outputs doesn't match."};
+	}
+
+	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
+	const uint32_t BLOCK_DIM_Z = (INFERENCE && WIDTH == 128) ? 2 : 1;
+
+	if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
+		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
+	}
+
+	const dim3 threads = { 32u, N_BLOCK_ROWS, BLOCK_DIM_Z }; // 32 threads = 1 warp, N_BLOCK_ROWS warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
+
+	uint32_t n_elems_per_block = 16 * BLOCK_DIM_Z * N_ITERS;
+	uint32_t n_blocks = div_round_up(batch_size, n_elems_per_block);
+
+	size_t shmem_size = sizeof(__half) * (16 + 16 * BLOCK_DIM_Z * N_ITERS) * (WIDTH + SKEW); // 16*WIDTH rows of weights (for the last layer; others are in registers only) + 16*WIDTH*BLOCK_DIM_Z*N_ITERS rows of intermediate activations
+	if (in_width != WIDTH) {
+		// If the input width is dynamic, the input weight matrix as well as part of the input will live in extra shared memory
+		shmem_size = std::max(shmem_size, sizeof(__half) * (WIDTH + 16 * BLOCK_DIM_Z) * (in_width + INPUT_SKEW));
+	}
+
+	const dim3 blocks = { n_blocks, 1u, 1u };
+
+	check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, ACTIVATION, INFERENCE>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)shmem_size));
+	kernel_mlp_fused<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, ACTIVATION, INFERENCE><<<blocks, threads, shmem_size, stream>>>(
+		output_activation,
+		input.data(),
+		weights.data(),
+		output_intermediate.data(),
+		output ? output->data() : nullptr,
+		batch_size,
+		in_width,
+		output ? output->rows() : 0,
+		n_hidden_layers,
+		output && output->layout() == RM ? nvcuda::wmma::mem_col_major : nvcuda::wmma::mem_row_major // The kernels operate with transposed layouts compared with the MLP code
+	);
 }
 
 
