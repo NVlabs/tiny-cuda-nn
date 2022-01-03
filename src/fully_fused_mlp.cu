@@ -396,7 +396,6 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 	}
 }
 
-
 template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T>
 __device__ void threadblock_last_layer_forward(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out, const uint32_t batch_size, const nvcuda::wmma::layout_t output_layout) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch
@@ -618,7 +617,6 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 		output && output->layout() == RM ? nvcuda::wmma::mem_col_major : nvcuda::wmma::mem_row_major // The kernels operate with transposed layouts compared with the MLP code
 	);
 }
-
 
 template <typename T, int WIDTH>
 FullyFusedMLP<T, WIDTH>::FullyFusedMLP(

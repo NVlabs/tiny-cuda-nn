@@ -38,7 +38,10 @@
 #include <tiny-cuda-nn/optimizers/lookahead.h>
 #include <tiny-cuda-nn/optimizers/novograd.h>
 #include <tiny-cuda-nn/optimizers/sgd.h>
+
+#ifdef TCNN_SHAMPOO
 #include <tiny-cuda-nn/optimizers/shampoo.h>
+#endif
 
 
 
@@ -65,7 +68,11 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 	} else if (equals_case_insensitive(optimizer_type, "SGD")) {
 		return new SGDOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Shampoo")) {
+#ifdef TCNN_SHAMPOO
 		return new ShampooOptimizer<T>{optimizer};
+#else
+		throw std::runtime_error{"The Shampoo optimizer is only available when compiling with CUDA 11 or higher."};
+#endif
 	} else {
 		throw std::runtime_error{std::string{"Invalid optimizer type: "} + optimizer_type};
 	}

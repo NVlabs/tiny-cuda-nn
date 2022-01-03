@@ -93,6 +93,12 @@ if (80 IN_LIST CMAKE_CUDA_ARCHITECTURES OR 86 IN_LIST CMAKE_CUDA_ARCHITECTURES)
 	endif()
 endif()
 
+if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
+	# Only compile the shampoo optimizer if
+	# a new enough cuBLAS version is available.
+	add_definitions(-DTCNN_SHAMPOO)
+endif()
+
 message(STATUS "Targeting GPU architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 if (TCNN_HAS_PARENT)
 	set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES} PARENT_SCOPE)
