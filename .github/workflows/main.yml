@@ -46,12 +46,17 @@ jobs:
       matrix:
         include:
           - os: windows-2019
+            cuda: "11.2.2"
+            visual_studio: "Visual Studio 16 2019"
+            arch: 86
+          - os: windows-2019
             cuda: "10.2.89"
             visual_studio: "Visual Studio 16 2019"
+            arch: 75
     env:
       build_dir: "build"
       config: "Release"
-      TCNN_CUDA_ARCHITECTURES: 86
+      TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v2
         with:
