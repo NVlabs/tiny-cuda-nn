@@ -22,7 +22,8 @@ $CUDA_KNOWN_URLS = @{
     "11.2.0" = "https://developer.download.nvidia.com/compute/cuda/11.2.0/network_installers/cuda_11.2.0_win10_network.exe";
     "11.2.1" = "https://developer.download.nvidia.com/compute/cuda/11.2.1/network_installers/cuda_11.2.1_win10_network.exe";
     "11.2.2" = "https://developer.download.nvidia.com/compute/cuda/11.2.2/network_installers/cuda_11.2.2_win10_network.exe";
-    "11.3.0" = "https://developer.download.nvidia.com/compute/cuda/11.3.0/network_installers/cuda_11.3.0_win10_network.exe"
+    "11.3.0" = "https://developer.download.nvidia.com/compute/cuda/11.3.0/network_installers/cuda_11.3.0_win10_network.exe";
+    "11.3.1" = "https://developer.download.nvidia.com/compute/cuda/11.3.1/network_installers/cuda_11.3.1_win10_network.exe"
 }
 
 # @todo - change this to be based on _MSC_VER intead, or invert it to be CUDA keyed instead?
@@ -141,12 +142,12 @@ Start-Process -Wait -FilePath .\"$($CUDA_REPO_PKG_LOCAL)" -ArgumentList "-s $($C
 # Check the return status of the CUDA installer.
 if (!$?) {
     Write-Output "Error: CUDA installer reported error. $($LASTEXITCODE)"
-    exit 1 
+    exit 1
 }
 
 # Store the CUDA_PATH in the environment for the current session, to be forwarded in the action.
 $CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$($CUDA_MAJOR).$($CUDA_MINOR)"
-$CUDA_PATH_VX_Y = "CUDA_PATH_V$($CUDA_MAJOR)_$($CUDA_MINOR)" 
+$CUDA_PATH_VX_Y = "CUDA_PATH_V$($CUDA_MAJOR)_$($CUDA_MINOR)"
 # Set environmental variables in this session
 $env:CUDA_PATH = "$($CUDA_PATH)"
 $env:CUDA_PATH_VX_Y = "$($CUDA_PATH_VX_Y)"
@@ -159,7 +160,7 @@ Write-Output "CUDA_PATH_VX_Y $($CUDA_PATH_VX_Y)"
 
 
 # If executing on github actions, emit the appropriate echo statements to update environment variables
-if (Test-Path "env:GITHUB_ACTIONS") { 
+if (Test-Path "env:GITHUB_ACTIONS") {
     # Set paths for subsequent steps, using $env:CUDA_PATH
     echo "Adding CUDA to CUDA_PATH, CUDA_PATH_X_Y and PATH"
     echo "CUDA_PATH=$env:CUDA_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

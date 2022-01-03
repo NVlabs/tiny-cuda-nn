@@ -50,12 +50,12 @@ jobs:
       matrix:
         include:
           - os: windows-2019
-            cuda: "11.3.1"
             visual_studio: "Visual Studio 16 2019"
+            cuda: "11.3.1"
             arch: 86
           - os: windows-2019
-            cuda: "10.2.89"
             visual_studio: "Visual Studio 16 2019"
+            cuda: "10.2.89"
             arch: 75
     env:
       build_dir: "build"
