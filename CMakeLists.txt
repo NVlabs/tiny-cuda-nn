@@ -20,11 +20,12 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.18)
 
-PROJECT(tiny-cuda-nn
-	VERSION 1.1
-	DESCRIPTION "A tiny, fast neural network with a fixed structure in CUDA"
+PROJECT(
+	tiny-cuda-nn
+	VERSION 1.3
+	DESCRIPTION "Lightning fast & tiny C++/CUDA neural network framework"
 	LANGUAGES CXX CUDA
 )
 
