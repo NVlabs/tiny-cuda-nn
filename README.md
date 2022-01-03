@@ -115,12 +115,10 @@ producing an image every 1000 training steps. Each 1000 steps should take roughl
 
 ## Requirements
 
-- CUDA __v11.2 or higher__.
+- CUDA __v10.2 or higher__.
 - CMake __v3.18 or higher__.
 - A __C++14__ capable compiler.
 - A high-end NVIDIA GPU that supports TensorCores and has a large amount of shared memory. The framework was tested primarily with an RTX 3090.
-	- Ampere GPUs: compiles out of the box.
-	- Turing GPUs: requires changing `SmArch` in `include/tiny-cuda-nn/cutlass_matmul.h` to `cutlass::arch::Sm75`.
 - The fully fused MLP component of this framework requires a __very large__ amount of shared memory in its default configuration. It will likely only work on an RTX 3090, an RTX 2080 Ti, or high-end enterprise GPUs. Lower end cards must reduce the `n_neurons` parameter or use the `CutlassMLP` (better compatibility but slower) instead.
 
 ## Compilation
