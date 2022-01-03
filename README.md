@@ -75,8 +75,7 @@ nlohmann::json config = {
 
 using namespace tcnn;
 
-auto [loss, optimizer, network, trainer] =
-	create_from_config(n_input_dims, n_output_dims, config);
+auto model = create_from_config(n_input_dims, n_output_dims, config);
 
 // Train the model
 GPUMatrix<float> training_batch_inputs(n_input_dims, batch_size);
@@ -86,7 +85,7 @@ for (int i = 0; i < n_training_steps; ++i) {
 	generate_training_batch(&training_batch_inputs, &training_batch_targets); // <-- your code
 
 	float loss;
-	trainer->training_step(training_batch_inputs, training_batch_targets, &loss);
+	model.trainer->training_step(training_batch_inputs, training_batch_targets, &loss);
 	std::cout << "iteration=" << i << " loss=" << loss << std::endl;
 }
 
@@ -95,7 +94,7 @@ GPUMatrix<float> inference_inputs(n_input_dims, batch_size);
 generate_inputs(&inference_inputs); // <-- your code
 
 GPUMatrix<float> inference_outputs(n_output_dims, batch_size);
-network->inference(inference_inputs, inference_outputs);
+model.network->inference(inference_inputs, inference_outputs);
 ```
 
 
