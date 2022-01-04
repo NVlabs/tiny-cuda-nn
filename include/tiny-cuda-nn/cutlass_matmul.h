@@ -46,8 +46,6 @@
 #include <cutlass/numeric_conversion.h>
 #include <cutlass/numeric_types.h>
 
-#include <cutlass_b2b/device/b2b_gemm.h>
-
 #include <iostream>
 #include <map>
 #include <type_traits>
@@ -75,10 +73,14 @@ TCNN_NAMESPACE_BEGIN
 	}                                                                     \
 }
 
+#ifdef TCNN_AMPERE
 using SmArch = typename std::conditional<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>::type;
+#else
+using SmArch = cutlass::arch::Sm75;
+#endif
 
-using TypeAccumulator = std::conditional_t<std::is_same_v<network_precision_t, float>, float, cutlass::half_t>;
-using TypeCompute = std::conditional_t<std::is_same_v<network_precision_t, float>, float, cutlass::half_t>;
+using TypeAccumulator = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
+using TypeCompute = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
 
 template <typename T>
 using MMAOp = typename std::conditional<
@@ -128,14 +130,6 @@ using LastLayer = typename std::conditional<
 		LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>
 	>::type
 >::type;
-
-using FullLayerB2bPreReLU64 = LayerConfig<cutlass::gemm::GemmShape<128, 64, 32, true>, cutlass::gemm::GemmShape<32, 64, 32, true>>;
-using FullLayerB2bPreReLU128 = LayerConfig<cutlass::gemm::GemmShape<128, 128, 32, true>, cutlass::gemm::GemmShape<32, 128, 32, true>>;
-using FullLayerB2bPreReLU256 = LayerConfig<cutlass::gemm::GemmShape<128, 256, 16, true>, cutlass::gemm::GemmShape<32, 256, 16, true>>;
-
-using FullLayerB2b64 = LayerConfig<cutlass::gemm::GemmShape<128, 64, 32>, cutlass::gemm::GemmShape<32, 64, 32>>;
-using FullLayerB2b128 = LayerConfig<cutlass::gemm::GemmShape<128, 128, 32>, cutlass::gemm::GemmShape<32, 128, 32>>;
-using FullLayerB2b256 = LayerConfig<cutlass::gemm::GemmShape<128, 256, 16>, cutlass::gemm::GemmShape<32, 256, 16>>;
 
 // This code section describes how threadblocks are scheduled on GPU
 using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
@@ -350,28 +344,6 @@ using SplitKGemm = cutlass::gemm::device::GemmSplitKParallel<
 	EPILOGUE
 >;
 
-template <typename Epilogue1, typename Epilogue2, typename LayerConfig1, typename LayerConfig2, typename TypeA, typename LayoutA, typename TypeB, typename LayoutB, typename TypeOutput, typename LayoutOutput>
-using OurB2bGemm = cutlass::gemm::device::B2bGemm<
-	TypeA,
-	LayoutA,
-	TypeB,
-	LayoutB,
-	TypeOutput,
-	LayoutOutput,
-	TypeAccumulator,
-	MMAOp<TypeA>,
-	SmArch,
-	typename LayerConfig1::k_thread_block,
-	typename LayerConfig2::k_thread_block,
-	typename LayerConfig1::k_warp,
-	typename LayerConfig2::k_warp,
-	ShapeMMAOp<TypeA>,
-	Epilogue1,
-	Epilogue2,
-	cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
-	2
->;
-
 inline std::map<cudaStream_t, GPUMemory<uint8_t>>& cutlass_workspaces() {
 	static std::map<cudaStream_t, GPUMemory<uint8_t>> s_workspaces;
 	return s_workspaces;
@@ -437,20 +409,6 @@ void fc_multiply_split_k_impl(cudaStream_t stream, const typename Gemm::Argument
 	CUTLASS_CHECK(status);
 }
 
-template <class Gemm>
-void fc_multiply_b2b_impl(cudaStream_t stream, const typename Gemm::Arguments& args) {
-	// Instantiate CUTLASS kernel depending on templates
-	Gemm gemm_op;
-
-	// Initialize CUTLASS kernel with arguments and workspace pointer
-	cutlass::Status status = gemm_op.initialize(args, nullptr, stream);
-	CUTLASS_CHECK(status);
-
-	// Launch initialized CUTLASS kernel
-	status = gemm_op(stream);
-	CUTLASS_CHECK(status);
-}
-
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
 void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
 	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
@@ -462,8 +420,8 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 	static_assert(std::is_same<TypeC, TypeD>::value, "Type of matrix C and D must be equal");
 	static_assert(std::is_same<CutlassLayoutC, CutlassLayoutD>::value, "Layout of matrix C and D must be equal");
 
-	using MatmulTypeCompute = std::conditional_t<std::is_same_v<TypeA, float>, float, cutlass::half_t>;
-	using MatmulTypeAccumulator = std::conditional_t<std::is_same_v<TypeC, float>, float, cutlass::half_t>;
+	using MatmulTypeCompute = std::conditional_t<std::is_same<TypeA, float>::value, float, cutlass::half_t>;
+	using MatmulTypeAccumulator = std::conditional_t<std::is_same<TypeC, float>::value, float, cutlass::half_t>;
 
 	if (A.n() != B.m()) {
 		throw std::runtime_error("Matrices A and B can not be multiplied together");
@@ -559,8 +517,8 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	using CutlassLayoutC = typename std::conditional<LayoutC == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutD = typename std::conditional<LayoutD == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 
-	using MatmulTypeCompute = std::conditional_t<std::is_same_v<TypeA, float>, float, cutlass::half_t>;
-	using MatmulTypeAccumulator = std::conditional_t<std::is_same_v<TypeC, float>, float, cutlass::half_t>;
+	using MatmulTypeCompute = std::conditional_t<std::is_same<TypeA, float>::value, float, cutlass::half_t>;
+	using MatmulTypeAccumulator = std::conditional_t<std::is_same<TypeC, float>::value, float, cutlass::half_t>;
 
 	static_assert(std::is_same<TypeA, TypeB>::value, "Type of matrix A and B must be equal");
 	static_assert(std::is_same<TypeC, TypeD>::value, "Type of matrix C and D must be equal");
@@ -643,90 +601,6 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, 
 template <typename config, typename TypeA, typename TypeB, MatrixLayout LayoutB, typename TypeD>
 void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrix<TypeB, LayoutB>& B, GPUMatrixDynamic<TypeD>& D, int split_k_slices) {
 	fc_multiply_split_k<config>(stream, A, B, D, D, split_k_slices);
-}
-
-template <typename config1, typename config2, typename TypeA, MatrixLayout LayoutA, typename TypeB1, MatrixLayout LayoutB1, typename TypeC1, MatrixLayout LayoutC1, typename TypeB2, MatrixLayout LayoutB2, typename TypeC2, MatrixLayout LayoutC2, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply_b2b(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB1, LayoutB1>& B1, const GPUMatrix<TypeC1, LayoutC1>& C1, const GPUMatrix<TypeB2, LayoutB2>& B2, const GPUMatrix<TypeC2, LayoutC2>& C2, GPUMatrix<TypeD, LayoutD>& D, Activation act_1, Activation act_2, bool transfer, bool sum_source_1, bool sum_source_2) {
-	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
-	using CutlassLayoutB1 = typename std::conditional<LayoutB1 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
-	using CutlassLayoutC1 = typename std::conditional<LayoutC1 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
-	using CutlassLayoutB2 = typename std::conditional<LayoutB2 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
-	using CutlassLayoutC2 = typename std::conditional<LayoutC2 == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
-	using CutlassLayoutD = typename std::conditional<LayoutD == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
-
-	using MatmulTypeCompute = std::conditional_t<std::is_same_v<TypeA, float>, float, cutlass::half_t>;
-	using MatmulTypeAccumulator = std::conditional_t<std::is_same_v<TypeD, float>, float, cutlass::half_t>;
-
-	static_assert(std::is_same<TypeA, TypeB1>::value, "Type of matrix A and B1 must be equal");
-	static_assert(std::is_same<TypeB1, TypeC1>::value, "Type of matrix B1 and C1 must be equal");
-	static_assert(std::is_same<TypeC1, TypeB2>::value, "Type of matrix C1 and B2 must be equal");
-	static_assert(std::is_same<TypeC2, TypeD>::value, "Type of matrix C2 and D must be equal");
-	static_assert(std::is_same<CutlassLayoutC2, CutlassLayoutD>::value, "Layout of matrix C and D must be equal");
-
-	if (A.n() != B1.m()) {
-		throw std::runtime_error("Matrices A and B can not be multiplied together");
-	}
-
-	const int M1 = A.m();
-	const int K1 = A.n();
-	const int N1 = B1.n();
-
-	if (C1.m() != M1 || C1.n() != N1) {
-		throw std::runtime_error(std::string("Matrix C has incorrect size ") + std::to_string(C1.m()) + "," + std::to_string(C1.n()) + "!=" + std::to_string(M1) + "," + std::to_string(N1));
-	}
-
-	const int M2 = C1.m();
-	const int K2 = C1.n();
-	const int N2 = B2.n();
-
-	if (C2.m() != M2 || C2.n() != N2) {
-		throw std::runtime_error(std::string("Matrix C has incorrect size ") + std::to_string(C2.m()) + "," + std::to_string(C2.n()) + "!=" + std::to_string(M2) + "," + std::to_string(N2));
-	}
-
-	if (D.m() != M2 || D.n() != N2) {
-		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M2) + "," + std::to_string(N2));
-	}
-
-	const int lda = LayoutA == RM ? A.n() : A.m();
-	const int ldb1 = LayoutB1 == RM ? B1.n() : B1.m();
-	const int ldc1 = LayoutC1 == RM ? C1.n() : C1.m();
-	const int ldb2 = LayoutB2 == RM ? B2.n() : B2.m();
-	const int ldc2 = LayoutC2 == RM ? C2.n() : C2.m();
-	const int ldd = LayoutD == RM ? D.n() : D.m();
-
-	if (transfer) {
-		using Gemm = OurB2bGemm<IntermediateActivationTransferOp<MatmulTypeCompute>, ActivationTransferOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
-		typename Gemm::Arguments arguments{
-			{M1, N1, K1},
-			{M2, N2, K2},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B1.data(), ldb1},
-			{(MatmulTypeCompute*)C1.data(), ldc1},
-			{(MatmulTypeCompute*)B2.data(), ldb2},
-			{(MatmulTypeAccumulator*)C2.data(), ldc2},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{act_1},
-			{act_2},
-		};
-
-		fc_multiply_b2b_impl<Gemm>(stream, arguments);
-	} else {
-		using Gemm = OurB2bGemm<IntermediateActivationOp<MatmulTypeCompute>, ActivationOp<MatmulTypeAccumulator>, config1, config2, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB1, MatmulTypeCompute, CutlassLayoutC1>;
-		typename Gemm::Arguments arguments{
-			{M1, N1, K1},
-			{M2, N2, K2},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B1.data(), ldb1},
-			{(MatmulTypeCompute*)C1.data(), ldc1},
-			{(MatmulTypeCompute*)B2.data(), ldb2},
-			{(MatmulTypeAccumulator*)C2.data(), ldc2},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
-			{act_1, sum_source_1},
-			{act_2, sum_source_2},
-		};
-
-		fc_multiply_b2b_impl<Gemm>(stream, arguments);
-	}
 }
 
 TCNN_NAMESPACE_END

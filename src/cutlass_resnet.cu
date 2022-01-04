@@ -106,65 +106,6 @@ CutlassResNet<T, input_activation>::~CutlassResNet() {
 	}
 }
 
-template <typename T, typename arch>
-std::enable_if_t<std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value> residual_block_2_inference(
-	cudaStream_t stream,
-	const GPUMatrix<T>& input,
-	const GPUMatrix<T, RM>& weights1,
-	const GPUMatrix<T, RM>& weights2,
-	GPUMatrix<T>& output
-) {
-	auto transposed_output = output.transposed();
-
-	switch (weights1.n()) {
-		case 64:
-			fc_multiply_b2b<FullLayerB2bPreReLU64, FullLayerB2bPreReLU64>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				input.transposed(),
-				transposed_output,
-				Activation::None, // ReLU is taken care of by layout above
-				Activation::None,
-				false, // transfer
-				false,
-				true // Sum into the main branch
-			);
-			break;
-		case 128:
-			fc_multiply_b2b<FullLayerB2bPreReLU128, FullLayerB2bPreReLU128>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				input.transposed(),
-				transposed_output,
-				Activation::None, // ReLU is taken care of by layout above
-				Activation::None,
-				false, // transfer
-				false,
-				true // Sum into the main branch
-			);
-			break;
-		default:
-			throw std::runtime_error{"Invalid layer size (must be 64, 128, or 256)."};
-	}
-}
-
-template <typename T, typename arch>
-std::enable_if_t<!(std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value)> residual_block_2_inference(
-	cudaStream_t,
-	const GPUMatrix<T>&,
-	const GPUMatrix<T, RM>&,
-	const GPUMatrix<T, RM>&,
-	GPUMatrix<T>&
-) {
-	// Dummy implementation for successful compilation when Sm75 is not available
-}
-
 template <typename T, Activation input_activation>
 void CutlassResNet<T, input_activation>::inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) {
 	inference_mixed_precision(stream, input, m_inference_output_tmp);
@@ -194,12 +135,6 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 		allocate_inference_buffers(batch_size);
 	}
 
-	const bool can_fuse_residual_block =
-		std::is_same<SmArch, cutlass::arch::Sm75>::value &&
-		std::is_same<__half, T>::value &&
-		m_n_matrices_per_block == 2 &&
-		(m_network_width == 128 || m_network_width == 64);
-
 	// Run the actual network
 	{
 		// Input
@@ -207,19 +142,6 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 
 		// Res blocks
 		for (uint32_t i = 0; i < m_n_blocks; ++i) {
-			// Compute a residual block using a _single_ fused back-to-back matrix multiplication when applicable.
-			if (can_fuse_residual_block) {
-				residual_block_2_inference<T, SmArch>(
-					stream,
-					i == 0 ? m_inference_linear_tmp : m_inference_residual_tmp[i % 2],
-					weight_matrix_at(use_inference_matrices, i, 0),
-					weight_matrix_at(use_inference_matrices, i, 1),
-					m_inference_residual_tmp[(i + 1) % 2]
-				);;
-
-				continue;
-			}
-
 			fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), m_inference_linear_tmp, m_inference_residual_tmp[0]);
 
 			for (uint32_t matrix_idx = 1; matrix_idx < m_n_matrices_per_block - 1; ++matrix_idx) {
@@ -245,10 +167,8 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 			}
 		}
 
-		auto& output_matrix = can_fuse_residual_block ? m_inference_residual_tmp[m_n_blocks % 2] : m_inference_linear_tmp;
-
 		// Output
-		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), output_matrix, output, m_output_activation);
+		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), m_inference_linear_tmp, output, m_output_activation);
 	}
 }
 

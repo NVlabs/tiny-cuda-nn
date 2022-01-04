@@ -72,7 +72,9 @@ public:
 
 	void initialize_params() {
 		size_t n_params = m_model->n_params();
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
+#endif
 
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);

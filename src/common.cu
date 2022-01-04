@@ -32,6 +32,8 @@
 #include <tiny-cuda-nn/common.h>
 
 #include <algorithm>
+#include <cctype>
+
 
 TCNN_NAMESPACE_BEGIN
 

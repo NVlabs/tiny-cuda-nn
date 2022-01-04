@@ -348,7 +348,6 @@ public:
         smem_size);
 
       if (result != cudaSuccess) {
-        std::cout << "4: " << cudaGetErrorString(result) << std::endl;
         return Status::kErrorInternal;
       }
 
@@ -357,7 +356,6 @@ public:
         cudaFuncAttributePreferredSharedMemoryCarveout, 100);
 
       if (result != cudaSuccess) {
-        std::cout << "3: " << cudaGetErrorString(result) << std::endl;
         return Status::kErrorInternal;
       }
     }
@@ -365,7 +363,6 @@ public:
     result = cudaGetLastError();
 
     if (result != cudaSuccess) {
-      std::cout << "5: " << cudaGetErrorString(result) << std::endl;
       return Status::kErrorInternal;
     }
 
@@ -374,7 +371,6 @@ public:
     result = cudaGetLastError();
 
     if (result != cudaSuccess) {
-      std::cout << "2: " << cudaGetErrorString(result) << std::endl;
       return Status::kErrorInternal;
     }
 
@@ -390,7 +386,6 @@ public:
     result = cudaGetLastError();
 
     if (result != cudaSuccess) {
-      std::cout << "1: " << cudaGetErrorString(result) << std::endl;
       return Status::kErrorInternal;
     }
 

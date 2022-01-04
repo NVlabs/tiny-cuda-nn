@@ -43,12 +43,14 @@
 
 TCNN_NAMESPACE_BEGIN
 
-inline std::tuple<
-	std::shared_ptr<Loss<network_precision_t>>,
-	std::shared_ptr<Optimizer<network_precision_t>>,
-	std::shared_ptr<NetworkWithInputEncoding<network_precision_t>>,
-	std::shared_ptr<Trainer<float, network_precision_t, network_precision_t>>
-> create_from_config(
+struct TrainableModel {
+	std::shared_ptr<Loss<network_precision_t>> loss;
+	std::shared_ptr<Optimizer<network_precision_t>> optimizer;
+	std::shared_ptr<NetworkWithInputEncoding<network_precision_t>> network;
+	std::shared_ptr<Trainer<float, network_precision_t, network_precision_t>> trainer;
+};
+
+inline TrainableModel create_from_config(
 	uint32_t n_input_dims,
 	uint32_t n_output_dims,
 	json config

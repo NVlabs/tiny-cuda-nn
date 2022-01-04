@@ -115,61 +115,6 @@ CutlassMLP<T>::~CutlassMLP() {
 	}
 }
 
-template <typename T, typename arch>
-std::enable_if_t<std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value> fused_2_inference(
-	cudaStream_t stream,
-	Activation activation,
-	const GPUMatrix<T>& input,
-	const GPUMatrix<T, RM>& weights1,
-	const GPUMatrix<T, RM>& weights2,
-	GPUMatrix<T>& output
-) {
-	auto transposed_output = output.transposed();
-
-	switch (weights1.n()) {
-		case 64:
-			fc_multiply_b2b<FullLayerB2b64, FullLayerB2b64>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				transposed_output,
-				transposed_output,
-				activation,
-				activation
-			);
-			break;
-		case 128:
-			fc_multiply_b2b<FullLayerB2b128, FullLayerB2b128>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				transposed_output,
-				transposed_output,
-				activation,
-				activation
-			);
-			break;
-		default:
-			throw std::runtime_error{"Invalid layer size (must be 64, 128, or 256)."};
-	}
-}
-
-template <typename T, typename arch>
-std::enable_if_t<!(std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value)> fused_2_inference(
-	cudaStream_t,
-	Activation,
-	const GPUMatrix<T>&,
-	const GPUMatrix<T, RM>&,
-	const GPUMatrix<T, RM>&,
-	GPUMatrix<T>&
-) {
-	// Dummy implementation for successful compilation when Sm75 is not available
-}
-
 template <typename T>
 void CutlassMLP<T>::inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) {
 	inference_mixed_precision(stream, input, m_inference_output_tmp);
@@ -247,11 +192,6 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 	}
 
 	m_inference_graph.capture_and_execute(stream, did_reallocate, [&]() {
-		const bool can_fuse_pairs =
-			std::is_same<SmArch, cutlass::arch::Sm75>::value &&
-			std::is_same<T, __half>::value &&
-			(m_network_width == 128 || m_network_width == 64);
-
 		// Run the actual network
 		{
 			uint32_t tmp_idx = 0;
@@ -261,20 +201,6 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 
 			// Hidden layers
 			for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-				if (can_fuse_pairs && i < m_n_hidden_matmuls - 1) {
-					fused_2_inference<T, SmArch>(
-						stream,
-						m_activation,
-						m_inference_tmp[(tmp_idx + 1) % 2],
-						weight_matrix_at(use_inference_matrices, i),
-						weight_matrix_at(use_inference_matrices, i + 1),
-						m_inference_tmp[tmp_idx % 2]
-					);
-					++i;
-					++tmp_idx;
-					continue;
-				}
-
 				compute_inference_layer<FullLayer>(stream, m_activation, weight_matrix_at(use_inference_matrices, i), m_inference_tmp[(tmp_idx + 1) % 2], m_inference_tmp[tmp_idx % 2]);
 				++tmp_idx;
 			}

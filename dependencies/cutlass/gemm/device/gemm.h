@@ -454,7 +454,6 @@ public:
                                     smem_size);
 
       if (result != cudaSuccess) {
-          std::cout << "Got bad cuda status 1 (" << smem_size << "): " << cudaGetErrorString(result) << " at line: " << __LINE__ << std::endl;
         return Status::kErrorInternal;
       }
 
@@ -463,7 +462,6 @@ public:
           cudaFuncAttributePreferredSharedMemoryCarveout, 100);
 
       if (result != cudaSuccess) {
-          std::cout << "Got bad cuda status 2: " << cudaGetErrorString(result) << " at line: " << __LINE__ << std::endl;
         return Status::kErrorInternal;
       }
     }
@@ -471,10 +469,6 @@ public:
     cutlass::Kernel<GemmKernel><<<grid, block, smem_size, stream>>>(params_);
 
     result = cudaGetLastError();
-    if (result != cudaSuccess) {
-        std::cout << "Got bad cuda status 3: " << cudaGetErrorString(result) << " at line: " << __LINE__ << std::endl;
-    }
-
     return result == cudaSuccess ? Status::kSuccess : Status::kErrorInternal;
   }
 

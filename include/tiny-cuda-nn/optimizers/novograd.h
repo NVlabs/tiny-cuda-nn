@@ -131,7 +131,9 @@ public:
 
 			if (workspace_size > m_reduction_workspace.size()) {
 				workspace_size *= 2;
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 				std::cout << "NOVOGRAD: resizing reduction buffer to " << workspace_size << std::endl;
+#endif
 				m_reduction_workspace.resize(workspace_size);
 			}
 

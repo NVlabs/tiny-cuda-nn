@@ -276,7 +276,7 @@ template <typename T>
 void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* in, T* out) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{"activation_gpu: number of elements must be a multiple of "s + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{std::string{"activation_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation::None is a noop
@@ -290,7 +290,7 @@ void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Acti
 template <typename T>
 void activation_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output) {
 	if (input.n() != output.n() || input.m() != output.m()) {
-		throw std::runtime_error("Input and output don't have matching size: "s + std::to_string(input.n()) + "!="s + std::to_string(output.n()));
+		throw std::runtime_error(std::string{"Input and output don't have matching size: "} + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
 	}
 
 	activation_gpu(stream, input.n_elements(), activation, input.data(), output.data());
@@ -300,7 +300,7 @@ template <typename T>
 void activation_backward_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ values, const T* gradients_out, T* gradients_in) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{"activation_backward_gpu: number of elements must be a multiple of "s + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{std::string{"activation_backward_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation transfer is a noop for Activation::None
@@ -324,7 +324,7 @@ template <typename T>
 void activation_backward_output_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ output_values, const T* gradients_out, T* gradients_in) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{"activation_backward_output_gpu: number of elements must be a multiple of "s + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{std::string{"activation_backward_output_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation transfer is a noop for Activation::None
@@ -335,11 +335,9 @@ void activation_backward_output_gpu(cudaStream_t stream, const uint32_t num_elem
 	linear_kernel(kernel_activation_backward_output<T, ACTIVATION_VECTOR_SIZE>, 0, stream, div_round_up(num_elements, ACTIVATION_VECTOR_SIZE), act, output_values, gradients_out, gradients_in);
 }
 
-
-
 // Expands a 10-bit integer into 30 bits
 // by inserting 2 zeros after each bit.
-__device__ inline uint32_t expand_bits(uint32_t v) {
+__host__ __device__ inline uint32_t expand_bits(uint32_t v) {
 	v = (v * 0x00010001u) & 0xFF0000FFu;
 	v = (v * 0x00000101u) & 0x0F00F00Fu;
 	v = (v * 0x00000011u) & 0xC30C30C3u;
@@ -349,14 +347,14 @@ __device__ inline uint32_t expand_bits(uint32_t v) {
 
 // Calculates a 30-bit Morton code for the
 // given 3D point located within the unit cube [0,1].
-__device__ inline uint32_t morton3D(uint32_t x, uint32_t y, uint32_t z) {
+__host__ __device__ inline uint32_t morton3D(uint32_t x, uint32_t y, uint32_t z) {
 	uint32_t xx = expand_bits(x);
 	uint32_t yy = expand_bits(y);
 	uint32_t zz = expand_bits(z);
 	return xx | (yy << 1) | (zz << 2);
 }
 
-__device__ inline uint32_t morton3D_invert(uint32_t x) {
+__host__ __device__ inline uint32_t morton3D_invert(uint32_t x) {
 	x = x               & 0x49249249;
 	x = (x | (x >> 2))  & 0xc30c30c3;
 	x = (x | (x >> 4))  & 0x0f00f00f;
@@ -365,7 +363,7 @@ __device__ inline uint32_t morton3D_invert(uint32_t x) {
 	return x;
 }
 
-__device__ inline uint64_t expand_bits(uint64_t w)  {
+__host__ __device__ inline uint64_t expand_bits(uint64_t w)  {
 	w &=                0x00000000001fffff;
 	w = (w | w << 32) & 0x001f00000000ffff;
 	w = (w | w << 16) & 0x001f0000ff0000ff;
@@ -375,7 +373,7 @@ __device__ inline uint64_t expand_bits(uint64_t w)  {
 	return w;
 }
 
-__device__ inline uint64_t morton3D_64bit(uint32_t x, uint32_t y, uint32_t z)  {
+__host__ __device__ inline uint64_t morton3D_64bit(uint32_t x, uint32_t y, uint32_t z)  {
 	return ((expand_bits((uint64_t)x)) | (expand_bits((uint64_t)y) << 1) | (expand_bits((uint64_t)z) << 2));
 }
 
@@ -483,7 +481,7 @@ __global__ void shuffle(const uint32_t n_elements, const uint32_t stride, const 
 	out[i] = in[permute(elem_id ^ seed, n_elements) * stride + member_id];
 }
 
-template <typename T, bool RESCALE = false>
+template <typename T>
 __global__ void fill_rollover(const uint32_t n_elements, const uint32_t stride, const uint32_t* n_input_elements_ptr, T* inout) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	const uint32_t n_input_elements = *n_input_elements_ptr;
@@ -491,9 +489,18 @@ __global__ void fill_rollover(const uint32_t n_elements, const uint32_t stride, 
 	if (i < (n_input_elements * stride) || i >= (n_elements * stride) || n_input_elements == 0) return;
 
 	T result = inout[i % (n_input_elements * stride)];
-	if constexpr (RESCALE) {
-		result = (T)((float)result * n_input_elements / n_elements);
-	}
+	inout[i] = result;
+}
+
+template <typename T>
+__global__ void fill_rollover_and_rescale(const uint32_t n_elements, const uint32_t stride, const uint32_t* n_input_elements_ptr, T* inout) {
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	const uint32_t n_input_elements = *n_input_elements_ptr;
+
+	if (i < (n_input_elements * stride) || i >= (n_elements * stride) || n_input_elements == 0) return;
+
+	T result = inout[i % (n_input_elements * stride)];
+	result = (T)((float)result * n_input_elements / n_elements);
 	inout[i] = result;
 }
 

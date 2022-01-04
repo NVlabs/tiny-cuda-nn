@@ -20,11 +20,12 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.18)
 
-PROJECT(tiny-cuda-nn
-	VERSION 1.1
-	DESCRIPTION "A tiny, fast neural network with a fixed structure in CUDA"
+PROJECT(
+	tiny-cuda-nn
+	VERSION 1.3
+	DESCRIPTION "Lightning fast & tiny C++/CUDA neural network framework"
 	LANGUAGES CXX CUDA
 )
 
@@ -51,7 +52,7 @@ if (MSVC)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -59,31 +60,48 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # CUDA compiler setup
 ###############################################################################
 
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
 
 get_directory_property(TCNN_HAS_PARENT PARENT_DIRECTORY)
 
+# adapted from https://stackoverflow.com/a/69353718
+include(FindCUDA/select_compute_arch)
+CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
+string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
+string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
+string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
+set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+
 if (DEFINED ENV{TCNN_CUDA_ARCHITECTURES})
 	message(STATUS "Obtained target architecture from environment variable TCNN_CUDA_ARCHITECTURES=$ENV{TCNN_CUDA_ARCHITECTURES}")
-	if (TCNN_HAS_PARENT)
-		set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES} PARENT_SCOPE)
-	endif()
 	set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES})
-else()
-	# adapted from https://stackoverflow.com/a/69353718
-	include(FindCUDA/select_compute_arch)
-	CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
-	string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
-	string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
-	string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
-	if (TCNN_HAS_PARENT)
-		set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST} PARENT_SCOPE)
+endif()
+
+if (80 IN_LIST CMAKE_CUDA_ARCHITECTURES OR 86 IN_LIST CMAKE_CUDA_ARCHITECTURES)
+	if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
+		add_definitions(-DTCNN_AMPERE)
+		message(STATUS "Enabling Ampere TensorCore support")
+	else()
+		message(WARNING "CUDA version ${CUDA_VERSION} is too low for targeting Ampere GPUs. Reverting to compute capability 75.")
+		list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES 80 86)
+		if (NOT 75 IN_LIST CMAKE_CUDA_ARCHITECTURES)
+			list(APPEND CMAKE_CUDA_ARCHITECTURES 75)
+		endif()
 	endif()
-	set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
-	message(STATUS "Automatically detected GPU architectures: ${CUDA_ARCH_LIST}")
+endif()
+
+if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
+	# Only compile the shampoo optimizer if
+	# a new enough cuBLAS version is available.
+	add_definitions(-DTCNN_SHAMPOO)
+endif()
+
+message(STATUS "Targeting GPU architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+if (TCNN_HAS_PARENT)
+	set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES} PARENT_SCOPE)
 endif()
 
 if (MSVC)

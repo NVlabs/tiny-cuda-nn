@@ -96,8 +96,6 @@ public:
 
 			dims_encoded_so_far += m_nested[i]->num_encoded_dims();
 		}
-
-		std::cout << "CompositeEncoding: " << m_n_dims_to_encode << "->" << num_encoded_dims() << std::endl;
 	}
 
 	void encode(

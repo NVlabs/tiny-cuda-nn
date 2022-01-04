@@ -75,8 +75,7 @@ nlohmann::json config = {
 
 using namespace tcnn;
 
-auto [loss, optimizer, network, trainer] =
-	create_from_config(n_input_dims, n_output_dims, config);
+auto model = create_from_config(n_input_dims, n_output_dims, config);
 
 // Train the model
 GPUMatrix<float> training_batch_inputs(n_input_dims, batch_size);
@@ -86,7 +85,7 @@ for (int i = 0; i < n_training_steps; ++i) {
 	generate_training_batch(&training_batch_inputs, &training_batch_targets); // <-- your code
 
 	float loss;
-	trainer->training_step(training_batch_inputs, training_batch_targets, &loss);
+	model.trainer->training_step(training_batch_inputs, training_batch_targets, &loss);
 	std::cout << "iteration=" << i << " loss=" << loss << std::endl;
 }
 
@@ -95,7 +94,7 @@ GPUMatrix<float> inference_inputs(n_input_dims, batch_size);
 generate_inputs(&inference_inputs); // <-- your code
 
 GPUMatrix<float> inference_outputs(n_output_dims, batch_size);
-network->inference(inference_inputs, inference_outputs);
+model.network->inference(inference_inputs, inference_outputs);
 ```
 
 
@@ -115,12 +114,10 @@ producing an image every 1000 training steps. Each 1000 steps should take roughl
 
 ## Requirements
 
-- CUDA __v11.2 or higher__.
-- CMake __v3.17 or higher__.
-- A __C++17__ capable compiler.
+- CUDA __v10.2 or higher__.
+- CMake __v3.18 or higher__.
+- A __C++14__ capable compiler.
 - A high-end NVIDIA GPU that supports TensorCores and has a large amount of shared memory. The framework was tested primarily with an RTX 3090.
-	- Ampere GPUs: compiles out of the box.
-	- Turing GPUs: requires changing `SmArch` in `include/tiny-cuda-nn/cutlass_matmul.h` to `cutlass::arch::Sm75`.
 - The fully fused MLP component of this framework requires a __very large__ amount of shared memory in its default configuration. It will likely only work on an RTX 3090, an RTX 2080 Ti, or high-end enterprise GPUs. Lower end cards must reduce the `n_neurons` parameter or use the `CutlassMLP` (better compatibility but slower) instead.
 
 ## Compilation
