@@ -157,11 +157,11 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 
 template <typename T>
 TCNN_HOST_DEVICE T clamp(T val, T lower, T upper) {
-	return std::max(std::min(val, upper), lower);
+	return val < lower ? lower : (upper < val ? upper : val);
 }
 
 template <typename T>
-TCNN_HOST_DEVICE void inline host_device_swap(T& a, T& b) {
+TCNN_HOST_DEVICE void host_device_swap(T& a, T& b) {
 	T c(a); a=b; b=c;
 }
 
