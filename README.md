@@ -18,8 +18,7 @@ If you use it in your research, we would appreciate a citation via
 }
 ```
 
-For business inquiries, please contact <researchinquiries@nvidia.com>.  
-For press and other inquiries, please contact Hector Marinez at <hmarinez@nvidia.com>.
+For business inquiries, please visit our website and submit the form: [NVIDIA Research Licensing](https://www.nvidia.com/en-us/research/inquiries/)
 
 
 ## Performance
