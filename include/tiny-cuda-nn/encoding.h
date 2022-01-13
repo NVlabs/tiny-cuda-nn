@@ -39,6 +39,7 @@
 TCNN_NAMESPACE_BEGIN
 
 enum InterpolationType {
+	Nearest,
 	Linear,
 	Smoothstep,
 };
