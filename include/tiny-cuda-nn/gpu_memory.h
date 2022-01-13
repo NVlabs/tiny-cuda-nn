@@ -32,8 +32,10 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
-#include <atomic>
+
 #include <cuda.h>
+
+#include <atomic>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -79,12 +81,12 @@ public:
 		uint8_t buf[DEBUG_GUARD_SIZE];
 		const uint8_t *rawptr=(const uint8_t *)m_data;
 		cudaMemcpy(buf, rawptr-DEBUG_GUARD_SIZE, DEBUG_GUARD_SIZE, cudaMemcpyDeviceToHost);
-		for (int i=0;i<DEBUG_GUARD_SIZE;++i) if (buf[i]!=0xff) {
+		for (int i=0;i<DEBUG_GUARD_SIZE;++i) if (buf[i] != 0xff) {
 			printf("TRASH BEFORE BLOCK offset %d data %p, read 0x%02x expected 0xff!\n", i, m_data, buf[i] );
 			break;
 		}
 		cudaMemcpy(buf, rawptr+m_size*sizeof(T), DEBUG_GUARD_SIZE, cudaMemcpyDeviceToHost);
-		for (int i=0;i<DEBUG_GUARD_SIZE;++i) if (buf[i]!=0xfe) {
+		for (int i=0;i<DEBUG_GUARD_SIZE;++i) if (buf[i] != 0xfe) {
 			printf("TRASH AFTER BLOCK offset %d data %p, read 0x%02x expected 0xfe!\n", i, m_data, buf[i] );
 			break;
 		}
