@@ -74,46 +74,24 @@ Network<T>* create_network(const json& network) {
 		if (!std::is_same<network_precision_t, __half>::value) {
 			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};
 		} else {
+#define TCNN_FULLY_FUSED_PARAMS \
+	network["n_input_dims"], \
+	network["n_output_dims"], \
+	network.value("n_hidden_layers", 5u), \
+	network.value("feedback_alignment", false), \
+	string_to_activation(network.value("activation", "ReLU")), \
+	string_to_activation(network.value("output_activation", "None")),
+
 			uint32_t n_neurons = network.value("n_neurons", 128u);
-			if (n_neurons == 256) {
-				return new FullyFusedMLP<T, 256>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else if (n_neurons == 128) {
-				return new FullyFusedMLP<T, 128>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else if (n_neurons == 64) {
-				return new FullyFusedMLP<T, 64>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else if (n_neurons == 32) {
-				return new FullyFusedMLP<T, 32>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else {
-				throw std::runtime_error{std::string{"FullyFusedMLP only supports 32, 64, 128, and 256 neurons, but got: "} + std::to_string(n_neurons)};
+			switch (n_neurons) {
+				case 16:  return new FullyFusedMLP<T,  16>{TCNN_FULLY_FUSED_PARAMS};
+				case 32:  return new FullyFusedMLP<T,  32>{TCNN_FULLY_FUSED_PARAMS};
+				case 64:  return new FullyFusedMLP<T,  64>{TCNN_FULLY_FUSED_PARAMS};
+				case 128: return new FullyFusedMLP<T, 128>{TCNN_FULLY_FUSED_PARAMS};
+				case 256: return new FullyFusedMLP<T, 256>{TCNN_FULLY_FUSED_PARAMS};
+				default: throw std::runtime_error{std::string{"FullyFusedMLP only supports 16, 32, 64, 128, and 256 neurons, but got: "} + std::to_string(n_neurons)};
 			}
+#undef TCNN_FULLY_FUSED_PARAMS
 		}
 	} else if (equals_case_insensitive(network_type, "MLP") || equals_case_insensitive(network_type, "CutlassMLP")) {
 		return new CutlassMLP<T>{

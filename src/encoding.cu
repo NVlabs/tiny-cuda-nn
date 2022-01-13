@@ -32,17 +32,19 @@
 
 #include <tiny-cuda-nn/encodings/composite.h>
 #include <tiny-cuda-nn/encodings/frequency.h>
+#include <tiny-cuda-nn/encodings/grid.h>
 #include <tiny-cuda-nn/encodings/identity.h>
 #include <tiny-cuda-nn/encodings/oneblob.h>
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
 
 
-
 TCNN_NAMESPACE_BEGIN
 
 InterpolationType string_to_interpolation_type(std::string interpolation_type) {
-	if (equals_case_insensitive(interpolation_type, "Linear")) {
+	if (equals_case_insensitive(interpolation_type, "Nearest")) {
+		return InterpolationType::Nearest;
+	} else if (equals_case_insensitive(interpolation_type, "Linear")) {
 		return InterpolationType::Linear;
 	} else if (equals_case_insensitive(interpolation_type, "Smoothstep")) {
 		return InterpolationType::Smoothstep;
@@ -107,6 +109,13 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 			nrc_composite,
 			n_dims_to_encode,
 		};
+	} else if (
+		equals_case_insensitive(encoding_type, "Grid") ||
+		equals_case_insensitive(encoding_type, "HashGrid") ||
+		equals_case_insensitive(encoding_type, "TiledGrid") ||
+		equals_case_insensitive(encoding_type, "DenseGrid")
+	) {
+		result = create_grid_encoding<T>(n_dims_to_encode, encoding);
 	} else {
 		throw std::runtime_error{std::string{"Invalid encoding type: "} + encoding_type};
 	}
