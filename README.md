@@ -1,6 +1,4 @@
-# Tiny CUDA Neural Networks
-
-![](https://github.com/NVlabs/tiny-cuda-nn/workflows/CI/badge.svg)
+# Tiny CUDA Neural Networks ![](https://github.com/NVlabs/tiny-cuda-nn/workflows/CI/badge.svg)
 
 This is a small, self-contained framework for training and querying neural networks. Most notably, it contains a lightning fast "fully fused" multi-layer perceptron as well as support for various advanced input encodings, losses, and optimizers.
 
