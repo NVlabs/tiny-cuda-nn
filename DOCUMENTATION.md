@@ -75,6 +75,78 @@ The hidden layers always use ReLU activations for performance reasons.
 
 ## Encodings
 
+
+### Composite
+
+Allows composing multiple encodings. The following example replicates the Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) encoding by composing the `TriangleWave` encoding for the first 3 (spatial) dimensions, the `OneBlob` encoding for the following 5 non-linear appearance dimensions, and the `Identity` for all remaining dimensions.
+
+```json5
+{
+	"otype": "Composite",
+	"nested": [
+		{
+			"n_dims_to_encode": 3, // Spatial dims
+			"otype": "TriangleWave",
+			"n_frequencies": 12
+		},
+		{
+			"n_dims_to_encode": 5, // Non-linear appearance dims.
+			"otype": "OneBlob",
+			"n_bins": 4
+		},
+		{
+			// Number of remaining linear dims is automatically derived
+			"otype": "Identity"
+		}
+	]
+}
+```
+
+### Frequency
+
+From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
+
+The number of encoded dimensions is twice the specified number of frequencies for each input dimension.
+
+```json5
+{
+	"otype": "Frequency", // Component type.
+	"n_frequencies": 12   // Number of frequencies (sin & cos)
+	                      // per encoded dimension.
+}
+```
+
+### Grid
+
+Encoding based on trainable multiresolution grids. The grids can be backed by hashtables, dense storage, or tiled storage.
+
+The number of encoded dimensions is `n_levels * n_features_per_level`.
+
+```json5
+{
+	"otype": "Grid",           // Component type.
+	"type": "Hash",            // Type of backing storage of the
+	                           // grids. Can be "Hash", "Tiled"
+	                           // or "Dense".
+	"n_levels": 16,            // Number of levels (resolutions)
+	"n_features_per_level": 2, // Dimensionality of feature vector
+	                           // stored in each level's entries.
+	"log2_hashmap_size": 19,   // If type is "Hash", is the base-2
+	                           // logarithm of the number of elements
+	                           // in each backing hash table.
+	"base_resolution": 16,     // The resolution of the coarsest le-
+	                           // vel is base_resolution^input_dims.
+	"per_level_scale": 2.0,    // The geometric growth factor, i.e.
+	                           // the factor by which the resolution
+	                           // of each grid is larger (per axis)
+	                           // than that of the preceeding level.
+	"interpolation": "Linear"  // How to interpolate nearby grid
+	                           // lookups. Can be "Nearest", "Linear",
+	                           // or "Smoothstep" (for smooth deri-
+	                           // vatives).
+}
+```
+
 ### Identity
 
 Leaves values untouched. Optionally, multiplies each dimension by a scalar and adds an offset.
@@ -100,34 +172,6 @@ For performance reasons, the encoding uses a quartic kernel rather than a Gaussi
 }
 ```
 
-### Frequency
-
-From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
-
-The number of encoded dimensions is twice the specified number of frequencies for each input dimension.
-
-```json5
-{
-	"otype": "Frequency", // Component type.
-	"n_frequencies": 12   // Number of frequencies (sin & cos)
-	                      // per encoded dimension.
-}
-```
-
-### TriangleWave
-
-Similar to the `Frequency` encoding, but replaces the sine function with a cheaper-to-compute triangle wave. Also omits the cosine function. Proposed in [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
-
-The number of encoded dimensions is the specified number of frequencies for each input dimension.
-
-```json5
-{
-	"otype": "TriangleWave", // Component type.
-	"n_frequencies": 12      // Number of frequencies (triwave)
-	                         // per encoded dimension.
-}
-```
-
 ### Spherical Harmonics
 
 A frequency-space encoding that is more suitable to direction vectors than component-wise `Frequency` or `TriangleWave` encodings.
@@ -145,29 +189,17 @@ The number of encoded dimensions is the degree squared.
 }
 ```
 
-### Composite
+### TriangleWave
 
-Allows composing multiple encodings. The following example replicates the Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) encoding by composing the `TriangleWave` encoding for the first 3 (spatial) dimensions, the `OneBlob` encoding for the following 5 non-linear appearance dimensions, and the `Identity` for all remaining dimensions.
+Similar to the `Frequency` encoding, but replaces the sine function with a cheaper-to-compute triangle wave. Also omits the cosine function. Proposed in [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
+
+The number of encoded dimensions is the specified number of frequencies for each input dimension.
 
 ```json5
 {
-	"otype": "Composite",
-	"nested": [
-		{
-			"n_dims_to_encode": 3, // Spatial dims
-			"otype": "TriangleWave",
-			"n_frequencies": 12
-		},
-		{
-			"n_dims_to_encode": 5, // Non-linear appearance dims.
-			"otype": "OneBlob",
-			"n_bins": 4
-		},
-		{
-			// Number of remaining linear dims is automatically derived
-			"otype": "Identity"
-		}
-	]
+	"otype": "TriangleWave", // Component type.
+	"n_frequencies": 12      // Number of frequencies (triwave)
+	                         // per encoded dimension.
 }
 ```
 

@@ -109,6 +109,13 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 			nrc_composite,
 			n_dims_to_encode,
 		};
+	} else if (
+		equals_case_insensitive(encoding_type, "Grid") ||
+		equals_case_insensitive(encoding_type, "HashGrid") ||
+		equals_case_insensitive(encoding_type, "TiledGrid") ||
+		equals_case_insensitive(encoding_type, "DenseGrid")
+	) {
+		result = create_grid_encoding<T>(n_dims_to_encode, encoding);
 	} else {
 		throw std::runtime_error{std::string{"Invalid encoding type: "} + encoding_type};
 	}
