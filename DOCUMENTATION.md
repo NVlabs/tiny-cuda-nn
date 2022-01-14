@@ -118,7 +118,8 @@ The number of encoded dimensions is twice the specified number of frequencies fo
 
 ### Grid
 
-Encoding based on trainable multiresolution grids. The grids can be backed by hashtables, dense storage, or tiled storage.
+Encoding based on trainable multiresolution grids.
+Used for [Instant Neural Graphics Primitives [Müller et al. 2022]](https://nvlabs.github.io/instant-ngp/). The grids can be backed by hashtables, dense storage, or tiled storage.
 
 The number of encoded dimensions is `n_levels * n_features_per_level`.
 
