@@ -27,7 +27,7 @@ The following activation functions are supported:
 
 ### Fully Fused MLP
 
-Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 32, 64, 128, or 256.
+Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 16, 32, 64, 128, or 256.
 
 ```json5
 {
@@ -35,7 +35,7 @@ Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricte
 	"activation": "ReLU",        // Activation of hidden layers.
 	"output_activation": "None", // Activation of the output layer.
 	"n_neurons": 128,            // Neurons in each hidden layer.
-	                             // May only be 32, 64 or 128.
+	                             // May only be 16, 32, 64, 128 or 256.
 	"n_hidden_layers": 5,        // Number of hidden layers.
 	"feedback_alignment": false  // Use feedback alignment
 	                             // [Lillicrap et al. 2016].
