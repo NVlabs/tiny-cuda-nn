@@ -24,7 +24,7 @@ cmake_minimum_required(VERSION 3.18)
 
 PROJECT(
 	tiny-cuda-nn
-	VERSION 1.3
+	VERSION 1.4
 	DESCRIPTION "Lightning fast & tiny C++/CUDA neural network framework"
 	LANGUAGES CXX CUDA
 )
