@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -47,8 +47,22 @@
 
 TCNN_NAMESPACE_BEGIN
 
+static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
+
+// TCNN has the following behavior depending on GPU arch
+//
+// GPU Arch | FullyFusedMLP supported | CUTLASS SmArch supported |               Precision
+// ---------|-------------------------|--------------------------|-------------------------
+//   80, 86 |                     yes |                       80 |                  __half
+//       75 |                     yes |                       75 |                  __half
+//       70 |                      no |                       70 |                  __half
+//      <70 |                      no |                       70 | float (no tensor cores)
+
+using network_precision_t = std::conditional_t<MIN_GPU_ARCH < 70, float, __half>;
+
+// Optionally: set the precision to `float` to disable tensor cores and debug potential
+//             problems with mixed-precision training.
 // using network_precision_t = float;
-using network_precision_t = __half;
 
 // #define TCNN_VERBOSE_MEMORY_ALLOCS
 

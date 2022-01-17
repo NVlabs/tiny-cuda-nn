@@ -73,11 +73,13 @@ TCNN_NAMESPACE_BEGIN
 	}                                                                     \
 }
 
-#ifdef TCNN_AMPERE
-using SmArch = typename std::conditional<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>::type;
-#else
-using SmArch = cutlass::arch::Sm75;
-#endif
+using SmArch = std::conditional_t<MIN_GPU_ARCH >= 80,
+	std::conditional_t<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>,
+	std::conditional_t<MIN_GPU_ARCH >= 75,
+		cutlass::arch::Sm75,
+		cutlass::arch::Sm70
+	>
+>;
 
 using TypeAccumulator = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
 using TypeCompute = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;

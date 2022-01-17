@@ -289,7 +289,7 @@ private:
 	GPUMemory<T> m_owned_data;
 };
 
-template <typename T, MatrixLayout _layout>
+template <typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
 class GPUMatrix : public GPUMatrixDynamic<T> {
 public:
 	static const MatrixLayout static_layout = _layout;

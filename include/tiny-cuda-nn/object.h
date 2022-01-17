@@ -42,12 +42,6 @@ TCNN_NAMESPACE_BEGIN
 
 using json = nlohmann::json;
 
-template<typename T>
-class GPUMatrixDynamic;
-
-template<typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
-class GPUMatrix;
-
 class Object {
 public:
 	virtual ~Object() { }
