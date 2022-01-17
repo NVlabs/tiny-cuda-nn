@@ -1,5 +1,5 @@
 # Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without modification, are permitted
 # provided that the following conditions are met:
 #     * Redistributions of source code must retain the above copyright notice, this list of
@@ -10,7 +10,7 @@
 #     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
 #       to endorse or promote products derived from this software without specific prior written
 #       permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
 # IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
 # FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -108,13 +108,16 @@ if (MIN_GPU_ARCH LESS_EQUAL 70)
 		"to allow maximum performance"
 	)
 endif()
-add_definitions(-DTCNN_MIN_GPU_ARCH=${MIN_GPU_ARCH})
 
+list(APPEND TCNN_DEFINITIONS -DTCNN_MIN_GPU_ARCH=${MIN_GPU_ARCH})
 if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
 	# Only compile the shampoo optimizer if
 	# a new enough cuBLAS version is available.
-	add_definitions(-DTCNN_SHAMPOO)
+	list(APPEND TCNN_DEFINITIONS -DTCNN_SHAMPOO)
 endif()
+
+add_definitions(${TCNN_DEFINITIONS})
+set(TCNN_DEFINITIONS ${TCNN_DEFINITIONS} PARENT_SCOPE)
 
 if (MSVC)
 else()
