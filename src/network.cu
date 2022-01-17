@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -33,7 +33,10 @@
 
 #include <tiny-cuda-nn/networks/cutlass_mlp.h>
 #include <tiny-cuda-nn/networks/cutlass_resnet.h>
+
+#if TCNN_MIN_GPU_ARCH >= 70
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
+#endif
 
 
 TCNN_NAMESPACE_BEGIN
@@ -90,7 +93,8 @@ Network<T>* create_network(const json& network) {
 		if (!std::is_same<network_precision_t, __half>::value) {
 			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};
 		} else {
-#define TCNN_FULLY_FUSED_PARAMS \
+#if TCNN_MIN_GPU_ARCH >= 70
+#  define TCNN_FULLY_FUSED_PARAMS \
 	network["n_input_dims"], \
 	network["n_output_dims"], \
 	network.value("n_hidden_layers", 5u), \
@@ -107,7 +111,10 @@ Network<T>* create_network(const json& network) {
 				case 256: return new FullyFusedMLP<T, 256>{TCNN_FULLY_FUSED_PARAMS};
 				default: throw std::runtime_error{std::string{"FullyFusedMLP only supports 16, 32, 64, 128, and 256 neurons, but got: "} + std::to_string(n_neurons)};
 			}
-#undef TCNN_FULLY_FUSED_PARAMS
+#  undef TCNN_FULLY_FUSED_PARAMS
+#else //TCNN_MIN_GPU_ARCH >= 70
+			throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <70."};
+#endif //TCNN_MIN_GPU_ARCH >= 70
 		}
 	} else if (wantCutlassMlp) {
 		return new CutlassMLP<T>{
