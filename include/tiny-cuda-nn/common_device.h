@@ -592,7 +592,7 @@ __global__ void mult_scalar_kernel(const uint32_t num_elements, T* __restrict__ 
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
-	inout[i] *= factor;
+	inout[i] = (T)((float)inout[i] * factor);
 }
 
 template <typename T>

@@ -295,14 +295,17 @@ __global__ void kernel_grid_backward(
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
 		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
-		if (N_FEATURES_PER_THREAD == 1 || !std::is_same<GRAD_T, __half>::value) {
-			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
-				atomicAdd(&grid_gradient[index + f], (T)((float)grad[f] * weight));
-			}
-		} else {
+#if TCNN_MIN_GPU_ARCH >= 60 // atomicAdd(__half2) is only supported with compute capability 60 and above
+		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
 				__half2 v = {(__half)((float)grad[f] * weight), (__half)((float)grad[f+1] * weight)};
 				atomicAdd((__half2*)&grid_gradient[index + f], v);
+			}
+		} else
+#endif
+		{
+			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
+				atomicAdd(&grid_gradient[index + f], (T)((float)grad[f] * weight));
 			}
 		}
 	};
@@ -466,11 +469,17 @@ protected:
 template <typename T, uint32_t N_POS_DIMS=3, uint32_t N_FEATURES_PER_LEVEL=2>
 class GridEncodingTemplated : public GridEncoding<T> {
 public:
-	// The RTX 3090 GPU that we tested this on does not have an efficient
-	// 1D fp16 atomicAdd feature. Thus, we accumulate gradients at fp32
-	// if we're forced to use 1D atomicAdds. As soon as 2D or higher is
-	// possible, we can make use the efficient atomicAdd(half2) function.
+#if TCNN_MIN_GPU_ARCH >= 60
+	// The GPUs that we tested this on do not have an efficient 1D fp16
+	// atomicAdd feature. Thus, we accumulate gradients at fp32 if we're
+	// forced to use 1D atomicAdds. As soon as 2D or higher is possible,
+	// we can make use the efficient atomicAdd(half2) function.
 	using grad_t = std::conditional_t<N_FEATURES_PER_LEVEL == 1, float, T>;
+#else
+	// atomicAdd(__half2) is only supported with compute capability 60 and above.
+	// Since atomicAdd(__half) is relatively slow, accumulate in fp32 instead.
+	using grad_t = float;
+#endif
 
 	GridEncodingTemplated(
 		uint32_t n_features,

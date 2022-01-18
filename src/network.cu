@@ -80,7 +80,7 @@ Network<T>* create_network(const json& network) {
 	if (MIN_GPU_ARCH <= 70 || std::is_same<network_precision_t, float>::value) {
 		if (wantFullyFusedMlp && MIN_GPU_ARCH <= 70) {
 			std::cout
-				<< "Warning: FullyFusedMLP is not supported for the selected architecture " << MIN_GPU_ARCH << "."
+				<< "Warning: FullyFusedMLP is not supported for the selected architecture " << MIN_GPU_ARCH << ". "
 				<< "Falling back to CutlassMLP. For maximum performance, raise the target GPU architecture to 75+."
 				<< std::endl;
 		}
