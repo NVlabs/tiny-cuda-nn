@@ -75,6 +75,7 @@ jobs:
             cuda: "11.5.1"
             arch: 61
           - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
             cuda: "11.5.1"
             arch: 37
     env:
