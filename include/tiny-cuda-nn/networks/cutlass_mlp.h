@@ -151,6 +151,8 @@ private:
 	Activation m_activation;
 	Activation m_output_activation;
 
+	bool m_can_fuse_activation;
+
 	static const uint32_t tensorcore_width = 8;
 
 	// Streams and events
