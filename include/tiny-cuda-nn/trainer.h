@@ -129,7 +129,7 @@ public:
 	}
 
 	const GPUMatrix<COMPUTE_T>& forward(cudaStream_t stream, const GPUMatrix<T>& input) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			allocate_training_buffers(m_model->padded_output_width(), batch_size);
@@ -144,7 +144,7 @@ public:
 	}
 
 	const GPUMatrix<float>& evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = target.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			throw std::runtime_error{"Trainer: you must call `forward` before calling `evaluate_loss`"};
@@ -182,7 +182,7 @@ public:
 	}
 
 	void backward(cudaStream_t stream, const GPUMatrix<T>& input) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			throw std::runtime_error{"Trainer: you must call `forward` and `evaluate_loss` before calling `backward`"};
@@ -218,7 +218,7 @@ public:
 			throw std::runtime_error(std::string("Target does not have the correct number of dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(m_model->output_width()));
 		}
 
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		bool did_allocate = false;
 		if (m_training_prediction_tmp.n() != batch_size) {

@@ -129,7 +129,7 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
 	}
 
-	// Make sure our teporary buffers have the correct size for the given batch size
+	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 	if (m_inference_linear_tmp.n() != batch_size) {
 		allocate_inference_buffers(batch_size);
@@ -187,7 +187,7 @@ void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUM
 		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output->n()));
 	}
 
-	// Make sure our teporary buffers have the correct size for the given batch size
+	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 	if (m_forward_tmp.front().n() != batch_size) {
 		allocate_forward_buffers(batch_size);
@@ -256,7 +256,7 @@ void CutlassResNet<T, input_activation>::backward(
 		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
 	}
 
-	// Make sure our teporary buffers have the correct size for the given batch size
+	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
 	if (m_backward_tmp.front().n() != batch_size) {
 		allocate_backward_buffers(batch_size);

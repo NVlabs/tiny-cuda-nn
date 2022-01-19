@@ -124,7 +124,7 @@ public:
 		GPUMatrix<T>& d_dinput,
 		float backprop_scale = 128.0f // Prevents underflows during half-precision backprop. Same reason for loss_scale to exist.
 	) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_input_gradient_output.n() != batch_size) {
 			allocate_input_gradient_buffers(batch_size);
