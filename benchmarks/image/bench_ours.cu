@@ -183,94 +183,82 @@ __global__ void eval_image(uint32_t n_elements, cudaTextureObject_t texture, boo
 }
 
 int main(int argc, char* argv[]) {
-	if (!(__CUDACC_VER_MAJOR__ > 10 || (__CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2))) {
-		std::cout << "Turing Tensor Core operations must be compiled with CUDA 10.2 Toolkit or later." << std::endl;
-		return -1;
-	}
-
-	cudaDeviceProp props;
-
-	cudaError_t error = cudaGetDeviceProperties(&props, 0);
-	if (error != cudaSuccess) {
-		std::cout << "cudaGetDeviceProperties() returned an error: " << cudaGetErrorString(error) << std::endl;
-		return -1;
-	}
-
-	if (!((props.major * 10 + props.minor) >= 75)) {
-		std::cout << "Turing Tensor Core operations must be run on a machine with compute capability at least 75."
-					<< std::endl;
-		return -1;
-	}
-
-	if (argc < 3) {
-		std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr path-to-config.json" << std::endl;
-		std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
-		return 0;
-	}
-
-	// First step: load an image that we'd like to learn
-	int width, height;
-	GPUMemory<float> image = load_image(argv[1], width, height);
-
-	// Second step: create a cuda texture out of this image. It'll be used to generate training data efficiently on the fly
-	cudaResourceDesc resDesc;
-	memset(&resDesc, 0, sizeof(resDesc));
-	resDesc.resType = cudaResourceTypePitch2D;
-	resDesc.res.pitch2D.devPtr = image.data();
-	resDesc.res.pitch2D.desc = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-	resDesc.res.pitch2D.width = width;
-	resDesc.res.pitch2D.height = height;
-	resDesc.res.pitch2D.pitchInBytes = width * 4 * sizeof(float);
-
-	cudaTextureDesc texDesc;
-	memset(&texDesc, 0, sizeof(texDesc));
-	texDesc.filterMode = cudaFilterModeLinear;
-	texDesc.normalizedCoords = true;
-	texDesc.addressMode[0] = cudaAddressModeClamp;
-	texDesc.addressMode[1] = cudaAddressModeClamp;
-	texDesc.addressMode[2] = cudaAddressModeClamp;
-
-	cudaResourceViewDesc viewDesc;
-	memset(&viewDesc, 0, sizeof(viewDesc));
-	viewDesc.format = cudaResViewFormatFloat4;
-	viewDesc.width = width;
-	viewDesc.height = height;
-
-	cudaTextureObject_t texture;
-	CUDA_CHECK_THROW(cudaCreateTextureObject(&texture, &resDesc, &texDesc, &viewDesc));
-
-	default_rng_t rng{1337};
-
-	// Third step: sample a reference image to dump to disk. Visual comparison of this reference image and the learned
-	//             function will be eventually possible.
-
-	int sampling_width = 1024;
-	int sampling_height = 1024;
-
-	uint32_t n_coords = sampling_width * sampling_height;
-
-	GPUMemory<float> sampled_image(n_coords * 3);
-	GPUMemory<float> xs_and_ys(n_coords * 2);
-
-	std::vector<float> host_xs_and_ys(n_coords * 2);
-	for (int y = 0; y < sampling_height; ++y) {
-		for (int x = 0; x < sampling_width; ++x) {
-			int idx = (y * sampling_width + x) * 2;
-			host_xs_and_ys[idx+0] = (float)(x + 0.5) / (float)sampling_width;
-			host_xs_and_ys[idx+1] = (float)(y + 0.5) / (float)sampling_height;
-		}
-	}
-
-	xs_and_ys.copy_from_host(host_xs_and_ys.data());
-
-	bool filter = false;
-
-	eval_image<3><<<n_blocks_linear(n_coords), n_threads_linear>>>(n_coords, texture, filter, width, height, xs_and_ys.data(), sampled_image.data());
-
-	save_image(sampled_image, sampling_width, sampling_height, 3, 3, "reference.exr");
-
-	// Fourth step: train the model by sampling the above image and optimizing relative squared error using Adam.
 	try {
+		uint32_t compute_capability = cuda_compute_capability();
+		if (compute_capability < MIN_GPU_ARCH) {
+			std::cerr
+				<< "Warning: Insufficient compute capability " << compute_capability << " detected. "
+				<< "This program was compiled for >=" << MIN_GPU_ARCH << " and may thus behave unexpectedly." << std::endl;
+		}
+
+		if (argc < 3) {
+			std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr path-to-config.json" << std::endl;
+			std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
+			return 0;
+		}
+
+		// First step: load an image that we'd like to learn
+		int width, height;
+		GPUMemory<float> image = load_image(argv[1], width, height);
+
+		// Second step: create a cuda texture out of this image. It'll be used to generate training data efficiently on the fly
+		cudaResourceDesc resDesc;
+		memset(&resDesc, 0, sizeof(resDesc));
+		resDesc.resType = cudaResourceTypePitch2D;
+		resDesc.res.pitch2D.devPtr = image.data();
+		resDesc.res.pitch2D.desc = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
+		resDesc.res.pitch2D.width = width;
+		resDesc.res.pitch2D.height = height;
+		resDesc.res.pitch2D.pitchInBytes = width * 4 * sizeof(float);
+
+		cudaTextureDesc texDesc;
+		memset(&texDesc, 0, sizeof(texDesc));
+		texDesc.filterMode = cudaFilterModeLinear;
+		texDesc.normalizedCoords = true;
+		texDesc.addressMode[0] = cudaAddressModeClamp;
+		texDesc.addressMode[1] = cudaAddressModeClamp;
+		texDesc.addressMode[2] = cudaAddressModeClamp;
+
+		cudaResourceViewDesc viewDesc;
+		memset(&viewDesc, 0, sizeof(viewDesc));
+		viewDesc.format = cudaResViewFormatFloat4;
+		viewDesc.width = width;
+		viewDesc.height = height;
+
+		cudaTextureObject_t texture;
+		CUDA_CHECK_THROW(cudaCreateTextureObject(&texture, &resDesc, &texDesc, &viewDesc));
+
+		default_rng_t rng{1337};
+
+		// Third step: sample a reference image to dump to disk. Visual comparison of this reference image and the learned
+		//             function will be eventually possible.
+
+		int sampling_width = 1024;
+		int sampling_height = 1024;
+
+		uint32_t n_coords = sampling_width * sampling_height;
+
+		GPUMemory<float> sampled_image(n_coords * 3);
+		GPUMemory<float> xs_and_ys(n_coords * 2);
+
+		std::vector<float> host_xs_and_ys(n_coords * 2);
+		for (int y = 0; y < sampling_height; ++y) {
+			for (int x = 0; x < sampling_width; ++x) {
+				int idx = (y * sampling_width + x) * 2;
+				host_xs_and_ys[idx+0] = (float)(x + 0.5) / (float)sampling_width;
+				host_xs_and_ys[idx+1] = (float)(y + 0.5) / (float)sampling_height;
+			}
+		}
+
+		xs_and_ys.copy_from_host(host_xs_and_ys.data());
+
+		bool filter = false;
+
+		eval_image<3><<<n_blocks_linear(n_coords), n_threads_linear>>>(n_coords, texture, filter, width, height, xs_and_ys.data(), sampled_image.data());
+
+		save_image(sampled_image, sampling_width, sampling_height, 3, 3, "reference.exr");
+
+		// Fourth step: train the model by sampling the above image and optimizing relative squared error using Adam.
 		std::vector<uint32_t> batch_sizes = {1 << 14, 1 << 15, 1 << 16, 1 << 17, 1 << 18, 1 << 19, 1 << 20, 1 << 21};
 		std::vector<std::string> methods = {"cutlass", "fully_fused"};
 		json bench_result;

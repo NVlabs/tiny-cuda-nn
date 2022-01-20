@@ -80,6 +80,8 @@ enum class Activation {
 // Misc helpers //
 //////////////////
 
+uint32_t cuda_compute_capability(int device = 0);
+
 std::string to_lower(std::string str);
 std::string to_upper(std::string str);
 inline bool equals_case_insensitive(const std::string& str1, const std::string& str2) {
