@@ -726,14 +726,17 @@ public:
 		return N_FEATURES_PER_LEVEL;
 	}
 
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
-		m_grid_full_precision = params_full_precision;
+	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
 		m_grid = params;
 		m_grid_inference = inference_params;
 		m_grid_gradient = gradients;
+	}
+
+	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
+		set_params(params, inference_params, backward_params, gradients);
 
 		// Initialize the hashgrid from the GPU, because the number of parameters can be quite large.
-		generate_random_uniform<float>(rnd, n_params(), m_grid_full_precision, -1e-4f, 1e-4f);
+		generate_random_uniform<float>(rnd, n_params(), params_full_precision, -1e-4f, 1e-4f);
 
 		// Only needs temporary storage if gradients are computed with different precision from T.
 		if (!std::is_same<grad_t, T>::value) {
@@ -782,7 +785,7 @@ private:
 	// Storage of params
 	T* m_grid;
 	T* m_grid_inference;
-	float* m_grid_full_precision;
+
 	// Needed for full-precision atomic adds, which are much faster than single half-precision ones.
 	GPUMemory<grad_t> m_grid_gradient_tmp;
 	T* m_grid_gradient;

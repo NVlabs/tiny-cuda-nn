@@ -36,7 +36,6 @@
 
 TCNN_NAMESPACE_BEGIN
 
-
 template <typename T>
 __global__ void one_hot_batched_kernel(const uint32_t num_elements, const uint32_t width, const uint32_t one_hot_dim, T* out, float scale) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -61,6 +60,5 @@ void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float fact
 
 template void mult(cudaStream_t stream, const uint32_t num_elements, float* inout, float factor);
 template void mult(cudaStream_t stream, const uint32_t num_elements, __half* inout, float factor);
-
 
 TCNN_NAMESPACE_END

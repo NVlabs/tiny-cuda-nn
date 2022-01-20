@@ -383,18 +383,25 @@ void CutlassResNet<T, input_activation>::allocate_backward_buffers(uint32_t batc
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void CutlassResNet<T, input_activation>::set_params(T* params, T* inference_params, T* backward_params, T* gradients) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
 		m_weight_matrices[i].set_data(params + current_pos);
 		m_weight_matrices_inference[i].set_data(inference_params + current_pos);
-		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
 		m_gradient_matrices[i].set_data(gradients + current_pos);
 		current_pos += m_weight_matrices[i].n_elements();
 	}
+}
 
-	// Initialize the params
+template <typename T, Activation input_activation>
+void CutlassResNet<T, input_activation>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+	set_params(params, inference_params, backward_params, gradients);
+
+	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
+		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
+		current_pos += m_weight_matrices_full_precision[i].n_elements();
+
 		if (i == 0 && input_activation_value == Activation::Sine) {
 			m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
 		} else {

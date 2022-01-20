@@ -143,6 +143,25 @@ public:
 		}
 	}
 
+	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
+		size_t offset = 0;
+		m_network->set_params(
+			params + offset,
+			inference_params + offset,
+			backward_params + offset,
+			gradients + offset
+		);
+		offset += m_network->n_params();
+
+		m_encoding->set_params(
+			params + offset,
+			inference_params + offset,
+			backward_params + offset,
+			gradients + offset
+		);
+		offset += m_encoding->n_params();
+	}
+
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
 		size_t offset = 0;
 		m_network->initialize_params(
