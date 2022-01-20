@@ -59,6 +59,7 @@ class ParametricObject : public Object {
 public:
 	virtual ~ParametricObject() { }
 
+	virtual void set_params(PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* backward_params, PARAMS_T* gradients) = 0;
 	virtual void initialize_params(pcg32& rnd, float* params_full_precision, PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* backward_params, PARAMS_T* gradients, float scale = 1) = 0;
 	virtual size_t n_params() const = 0;
 
