@@ -986,7 +986,6 @@ void FullyFusedMLP<T, WIDTH>::initialize_params(pcg32& rnd, float* params_full_p
 	}
 }
 
-template class FullyFusedMLP<network_precision_t, 256>;
 template class FullyFusedMLP<network_precision_t, 128>;
 template class FullyFusedMLP<network_precision_t, 64>;
 template class FullyFusedMLP<network_precision_t, 32>;

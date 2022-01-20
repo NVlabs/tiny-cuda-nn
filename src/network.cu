@@ -108,8 +108,7 @@ Network<T>* create_network(const json& network) {
 				case 32:  return new FullyFusedMLP<T,  32>{TCNN_FULLY_FUSED_PARAMS};
 				case 64:  return new FullyFusedMLP<T,  64>{TCNN_FULLY_FUSED_PARAMS};
 				case 128: return new FullyFusedMLP<T, 128>{TCNN_FULLY_FUSED_PARAMS};
-				case 256: return new FullyFusedMLP<T, 256>{TCNN_FULLY_FUSED_PARAMS};
-				default: throw std::runtime_error{std::string{"FullyFusedMLP only supports 16, 32, 64, 128, and 256 neurons, but got: "} + std::to_string(n_neurons)};
+				default: throw std::runtime_error{std::string{"FullyFusedMLP only supports 16, 32, 64, and 128 neurons, but got "} + std::to_string(n_neurons) + ". Use CutlassMLP instead if this is a requirement."};
 			}
 #  undef TCNN_FULLY_FUSED_PARAMS
 #else //TCNN_MIN_GPU_ARCH >= 70
