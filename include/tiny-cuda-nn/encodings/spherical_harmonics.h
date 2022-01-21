@@ -155,7 +155,7 @@ __global__ void kernel_sh(
 		return;
 	}
 
-	uint32_t stride = sh_degree;
+	uint32_t stride = sh_degree * sh_degree;
 
 	float* dx = &dy_dx[i * stride * 3];
 	float* dy = dx + stride;
