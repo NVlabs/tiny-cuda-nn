@@ -295,7 +295,7 @@ __global__ void kernel_grid_backward(
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
 		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
-#if TCNN_MIN_GPU_ARCH >= 60 // atomicAdd(__half2) is only supported with compute capability 60 and above
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
 				__half2 v = {(__half)((float)grad[f] * weight), (__half)((float)grad[f+1] * weight)};
@@ -304,8 +304,13 @@ __global__ void kernel_grid_backward(
 		} else
 #endif
 		{
-			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
-				atomicAdd(&grid_gradient[index + f], (T)((float)grad[f] * weight));
+			if (std::is_same<GRAD_T, __half>::value) {
+				// Should never happen
+				//printf("Attempted to use atomicAdd(__half)\n")
+			} else {
+				for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
+					atomicAdd((float*)&grid_gradient[index + f], (float)grad[f] * weight);
+				}
 			}
 		}
 	};
@@ -477,7 +482,8 @@ public:
 	using grad_t = std::conditional_t<N_FEATURES_PER_LEVEL == 1, float, T>;
 #else
 	// atomicAdd(__half2) is only supported with compute capability 60 and above.
-	// Since atomicAdd(__half) is relatively slow, accumulate in fp32 instead.
+	// Since atomicAdd(__half) is relatively slow / doesn't exist for low compute
+	// capabilities, accumulate in fp32 instead.
 	using grad_t = float;
 #endif
 
