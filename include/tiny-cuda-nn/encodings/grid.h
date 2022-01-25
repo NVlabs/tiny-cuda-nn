@@ -295,7 +295,7 @@ __global__ void kernel_grid_backward(
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
 		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
-#if TCNN_MIN_GPU_ARCH >= 60 // atomicAdd(__half2) is only supported with compute capability 60 and above
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
 				__half2 v = {(__half)((float)grad[f] * weight), (__half)((float)grad[f+1] * weight)};
@@ -304,8 +304,13 @@ __global__ void kernel_grid_backward(
 		} else
 #endif
 		{
-			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
-				atomicAdd(&grid_gradient[index + f], (T)((float)grad[f] * weight));
+			if (std::is_same<GRAD_T, __half>::value) {
+				// Should never happen
+				//printf("Attempted to use atomicAdd(__half)\n")
+			} else {
+				for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
+					atomicAdd((float*)&grid_gradient[index + f], (float)grad[f] * weight);
+				}
 			}
 		}
 	};
@@ -469,7 +474,7 @@ protected:
 template <typename T, uint32_t N_POS_DIMS=3, uint32_t N_FEATURES_PER_LEVEL=2>
 class GridEncodingTemplated : public GridEncoding<T> {
 public:
-#if TCNN_MIN_GPU_ARCH >= 70
+#if TCNN_MIN_GPU_ARCH >= 60
 	// The GPUs that we tested this on do not have an efficient 1D fp16
 	// atomicAdd feature. Thus, we accumulate gradients at fp32 if we're
 	// forced to use 1D atomicAdds. As soon as 2D or higher is possible,
