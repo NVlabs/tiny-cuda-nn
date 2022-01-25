@@ -86,7 +86,7 @@ using TypeCompute = std::conditional_t<std::is_same<network_precision_t, float>:
 
 template <typename T>
 using MMAOp = typename std::conditional<
-	std::is_same<T, float>::value,
+	std::is_same<T, float>::value || MIN_GPU_ARCH < 70,
 	cutlass::arch::OpClassSimt,
 	cutlass::arch::OpClassTensorOp
 >::type;
@@ -112,19 +112,19 @@ using FullLayerK = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::ge
 using LastLayerK = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>;
 
 using FullLayer = typename std::conditional<
-	std::is_same<TypeCompute, float>::value,
+	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 32>, cutlass::gemm::GemmShape<64, 64, 32>>
 >::type;
 
 using FullLayerPreReLU = typename std::conditional<
-	std::is_same<TypeCompute, float>::value,
+	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8, true>, cutlass::gemm::GemmShape<32, 64, 8, true>>,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 32, true>, cutlass::gemm::GemmShape<64, 64, 32, true>>
 >::type;
 
 using LastLayer = typename std::conditional<
-	std::is_same<TypeCompute, float>::value,
+	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
 	typename std::conditional<
 		std::is_same<SmArch, cutlass::arch::Sm80>::value || std::is_same<SmArch, cutlass::arch::Sm75>::value,

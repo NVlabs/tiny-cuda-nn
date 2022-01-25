@@ -469,7 +469,7 @@ protected:
 template <typename T, uint32_t N_POS_DIMS=3, uint32_t N_FEATURES_PER_LEVEL=2>
 class GridEncodingTemplated : public GridEncoding<T> {
 public:
-#if TCNN_MIN_GPU_ARCH >= 60
+#if TCNN_MIN_GPU_ARCH >= 70
 	// The GPUs that we tested this on do not have an efficient 1D fp16
 	// atomicAdd feature. Thus, we accumulate gradients at fp32 if we're
 	// forced to use 1D atomicAdds. As soon as 2D or higher is possible,
@@ -477,7 +477,8 @@ public:
 	using grad_t = std::conditional_t<N_FEATURES_PER_LEVEL == 1, float, T>;
 #else
 	// atomicAdd(__half2) is only supported with compute capability 60 and above.
-	// Since atomicAdd(__half) is relatively slow, accumulate in fp32 instead.
+	// Since atomicAdd(__half) is relatively slow / doesn't exist for low compute
+	// capabilities, accumulate in fp32 instead.
 	using grad_t = float;
 #endif
 
