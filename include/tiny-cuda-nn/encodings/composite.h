@@ -63,7 +63,7 @@ public:
 		}
 
 		if (total_nested_dims_to_encode > n_dims_to_encode) {
-			throw std::runtime_error{"CompositeEncoding:' nested encodings must not encode more dims than composite"};
+			throw std::runtime_error{"CompositeEncoding: nested encodings must not encode more dims than composite"};
 		}
 
 		uint32_t unspecified_dims_to_encode = n_dims_to_encode - total_nested_dims_to_encode;
@@ -74,14 +74,16 @@ public:
 			if (nested[i].contains("n_dims_to_encode")) {
 				nested_dims_to_encode = nested[i]["n_dims_to_encode"];
 			} else {
-				if (unspecified_dims_to_encode == 0) {
+				if (unspecified_dims_to_encode == 0xFFFFFFFF) {
 					throw std::runtime_error{"CompositeEncoding: may only leave 'n_dims_to_encode' unspecified for a single nested encoding"};
 				}
 				nested_dims_to_encode = unspecified_dims_to_encode;
-				unspecified_dims_to_encode = 0;
+				unspecified_dims_to_encode = 0xFFFFFFFF;
 			}
 
-			m_nested.emplace_back(create_encoding<T>(nested_dims_to_encode, nested[i], 1));
+			if (nested_dims_to_encode > 0) {
+				m_nested.emplace_back(create_encoding<T>(nested_dims_to_encode, nested[i], 1));
+			}
 		}
 
 		// Fix alignment such that min_alignment of each individual encoding's output is ensured
