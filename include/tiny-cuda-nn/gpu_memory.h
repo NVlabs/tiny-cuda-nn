@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
+#include <tuple>
 #include <vector>
 
 
@@ -188,6 +189,27 @@ public:
 		if (size > m_size) {
 			resize(size);
 		}
+	}
+
+	static size_t align_to_cacheline(size_t bytes) {
+		return next_multiple(bytes, (size_t)128);
+	}
+
+	template <typename First, typename FirstSize>
+	std::tuple<First*> enlarge_and_distribute(size_t offset, FirstSize first_size) {
+		enlarge(offset + align_to_cacheline(first_size * sizeof(First)));
+		return std::make_tuple<First*>((First*)((char*)data() + offset));
+	}
+
+	template <typename First, typename ...Types, typename FirstSize, typename ...Sizes, std::enable_if_t<sizeof...(Types) != 0 && sizeof...(Types) == sizeof...(Sizes), int> = 0>
+	std::tuple<First*, Types*...> enlarge_and_distribute(size_t offset, FirstSize first_size, Sizes... sizes) {
+		auto nested = enlarge_and_distribute<Types...>(offset + align_to_cacheline(first_size * sizeof(First)), sizes...);
+		return std::tuple_cat(std::make_tuple<First*>((First*)((char*)data() + offset)), nested);
+	}
+
+	template <typename ...Types, typename ...Sizes, std::enable_if_t<sizeof...(Types) == sizeof...(Sizes), int> = 0>
+	std::tuple<Types*...> enlarge_and_distribute(Sizes... sizes) {
+		return enlarge_and_distribute<Types...>((size_t)0, sizes...);
 	}
 	/** @} */
 
