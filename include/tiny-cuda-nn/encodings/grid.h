@@ -549,6 +549,11 @@ public:
 		if (n_features % N_FEATURES_PER_LEVEL != 0) {
 			throw std::runtime_error{"GridEncoding: number of grid features must be a multiple of n_features_per_level"};
 		}
+
+		// Only needs temporary storage if gradients are computed with different precision from T.
+		if (!std::is_same<grad_t, T>::value) {
+			m_grid_gradient_tmp.resize(m_n_params);
+		}
 	}
 
 	void encode(
@@ -743,11 +748,6 @@ public:
 
 		// Initialize the hashgrid from the GPU, because the number of parameters can be quite large.
 		generate_random_uniform<float>(rnd, n_params(), params_full_precision, -1e-4f, 1e-4f);
-
-		// Only needs temporary storage if gradients are computed with different precision from T.
-		if (!std::is_same<grad_t, T>::value) {
-			m_grid_gradient_tmp.resize(n_params());
-		}
 	}
 
 	size_t n_params() const override {
