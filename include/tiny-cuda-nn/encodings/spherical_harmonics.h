@@ -69,7 +69,7 @@ __global__ void kernel_sh(
 	float z = data_in(i)[2] * 2.f - 1.f;
 
 	// Let compiler figure out how to sequence/reorder these calculations w.r.t. branches
-	float xy=x*y, xz=x*z, yz=y*z, x2=x*x, y2=y*y, z2=z*z, xyz=xy*z;
+	float xy=x*y, xz=x*z, yz=y*z, x2=x*x, y2=y*y, z2=z*z;
 	float x4=x2*x2, y4=y2*y2, z4=z2*z2;
 	float x6=x4*x2, y6=y4*y2, z6=z4*z2;
 

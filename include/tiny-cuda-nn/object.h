@@ -77,20 +77,20 @@ class DifferentiableObject : public ParametricObject<PARAMS_T> {
 public:
 	virtual ~DifferentiableObject() { }
 
-	virtual void inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) = 0;
-	void inference(const GPUMatrix<T>& input, GPUMatrix<float>& output) {
+	virtual void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) = 0;
+	void inference(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
 		inference(nullptr, input, output);
 	}
 
 	virtual void forward(
 		cudaStream_t stream,
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
 		bool use_inference_matrices = false,
 		bool prepare_input_gradients = false
 	) = 0;
 	void forward(
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
 		bool use_inference_matrices = false,
 		bool prepare_input_gradients = false
@@ -100,18 +100,18 @@ public:
 
 	virtual void backward(
 		cudaStream_t stream,
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		const GPUMatrixDynamic<COMPUTE_T>& output,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
-		GPUMatrix<T>* dL_dinput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) = 0;
 	void backward(
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		const GPUMatrixDynamic<COMPUTE_T>& output,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
-		GPUMatrix<T>* dL_dinput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) {

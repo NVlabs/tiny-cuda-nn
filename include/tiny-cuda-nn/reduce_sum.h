@@ -42,21 +42,6 @@ TCNN_NAMESPACE_BEGIN
 
 uint32_t reduce_sum_workspace_size(uint32_t n_elements);
 
-inline uint8_t* get_workspace_sum(size_t size, cudaStream_t stream) {
-	static std::map<cudaStream_t, GPUMemory<uint8_t>> workspaces;
-	GPUMemory<uint8_t>& workspace = workspaces[stream];
-	if (size > workspace.size()) {
-		size *= 2;
-#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-		std::cout << "reduce_sum: Allocating temporary workspace with size " << bytes_to_string(size) << "." << std::endl;
-#endif
-
-		// Allocate twice the requested size to make sure we're not constantly allocating small increments.
-		workspace.resize(size);
-	}
-	return workspace.data();
-}
-
 template <typename T>
 inline __device__ T warp_reduce(T val) {
 	#pragma unroll
@@ -157,12 +142,14 @@ void reduce_sum(T* device_pointer, float* workspace, uint32_t n_elements, cudaSt
 
 template <typename T, typename F>
 float reduce_sum(T* device_pointer, F fun, uint32_t n_elements, cudaStream_t stream) {
-	float* workspace = (float*)get_workspace_sum(reduce_sum_workspace_size(n_elements) * sizeof(float), stream);
-	CUDA_CHECK_THROW(cudaMemsetAsync(workspace, 0, sizeof(float), stream));
-	reduce_sum(device_pointer, fun, workspace, n_elements, stream);
+	auto workspace = borrow_workspace(stream, reduce_sum_workspace_size(n_elements) * sizeof(float));
+	float* workspace_data = (float*)workspace.data();
+
+	CUDA_CHECK_THROW(cudaMemsetAsync(workspace_data, 0, sizeof(float), stream));
+	reduce_sum(device_pointer, fun, workspace_data, n_elements, stream);
 
 	float sum;
-	CUDA_CHECK_THROW(cudaMemcpyAsync(&sum, workspace, sizeof(float), cudaMemcpyDeviceToHost, stream));
+	CUDA_CHECK_THROW(cudaMemcpyAsync(&sum, workspace_data, sizeof(float), cudaMemcpyDeviceToHost, stream));
 	CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 	return sum;
 }

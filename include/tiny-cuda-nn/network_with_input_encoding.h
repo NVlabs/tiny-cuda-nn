@@ -58,7 +58,7 @@ public:
 
 	virtual ~NetworkWithInputEncoding() { }
 
-	void inference(cudaStream_t stream, const GPUMatrix<float>& input, GPUMatrix<float>& output) override {
+	void inference(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<float>& output) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_inference_network_input.n() != batch_size) {
@@ -77,7 +77,7 @@ public:
 		m_network->inference(stream, m_inference_network_input, output);
 	}
 
-	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override {
+	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_inference_network_input.n() != batch_size) {
@@ -92,7 +92,7 @@ public:
 		return m_encoding->num_encoded_dims();
 	}
 
-	void forward(cudaStream_t stream, const GPUMatrix<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override {
+	void forward(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_forward_network_input.n() != batch_size) {
@@ -112,10 +112,10 @@ public:
 
 	void backward(
 		cudaStream_t stream,
-		const GPUMatrix<float>& input,
+		const GPUMatrixDynamic<float>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrix<float>* dL_dinput = nullptr,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) override {

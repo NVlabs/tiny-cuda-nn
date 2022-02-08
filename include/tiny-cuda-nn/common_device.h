@@ -513,8 +513,7 @@ __global__ void add(const uint32_t num_elements, const T1* data_in_1, const T2* 
 }
 
 template <typename T>
-__global__ void add(const uint32_t num_elements, const T* __restrict__ data_in, T* __restrict__ data_in_out)
-{
+__global__ void add(const uint32_t num_elements, const T* __restrict__ data_in, T* __restrict__ data_in_out) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
@@ -522,8 +521,7 @@ __global__ void add(const uint32_t num_elements, const T* __restrict__ data_in, 
 }
 
 template <typename T>
-__global__ void trim(const uint32_t num_elements, const uint32_t stride, const uint32_t dims, const T* __restrict__ data_in, T* __restrict__ data_out)
-{
+__global__ void trim(const uint32_t num_elements, const uint32_t stride, const uint32_t dims, const T* __restrict__ data_in, T* __restrict__ data_out) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
@@ -534,8 +532,7 @@ __global__ void trim(const uint32_t num_elements, const uint32_t stride, const u
 }
 
 template <typename T>
-__global__ void trim_and_cast(const uint32_t num_elements, const uint32_t stride, const uint32_t dims, const T* __restrict__ data_in, float* __restrict__ data_out)
-{
+__global__ void trim_and_cast(const uint32_t num_elements, const uint32_t stride, const uint32_t dims, const T* __restrict__ data_in, float* __restrict__ data_out) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
@@ -546,8 +543,7 @@ __global__ void trim_and_cast(const uint32_t num_elements, const uint32_t stride
 }
 
 template <typename T>
-__global__ void cast(const uint32_t num_elements, const float* __restrict__ full_precision, T* __restrict__ target)
-{
+__global__ void cast(const uint32_t num_elements, const float* __restrict__ full_precision, T* __restrict__ target) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
@@ -555,8 +551,7 @@ __global__ void cast(const uint32_t num_elements, const float* __restrict__ full
 }
 
 template <typename T>
-__global__ void cast_from(const uint32_t num_elements, const T* __restrict__ precision, float* __restrict__ full_precision)
-{
+__global__ void cast_from(const uint32_t num_elements, const T* __restrict__ precision, float* __restrict__ full_precision) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 

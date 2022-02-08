@@ -109,7 +109,7 @@ m_can_fuse_activation{activation != Activation::Sine}
 template <typename T>
 CutlassMLP<T>::~CutlassMLP() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		cutlass_free_workspace(m_training_splitk_streams[i]);
+		free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));
@@ -117,11 +117,16 @@ CutlassMLP<T>::~CutlassMLP() {
 }
 
 template <typename T>
-void CutlassMLP<T>::inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) {
+void CutlassMLP<T>::inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
 	inference_mixed_precision(stream, input, m_inference_output_tmp);
 
 	const uint32_t n_elements = (uint32_t)output.n_elements();
-	trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, m_inference_output_tmp.data(), output.data());
+	if (output.layout() == RM) {
+		// If the layout is row major, trimming away excess dimensions amounts to simply discarding the tail of the buffer.
+		cast_from<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_inference_output_tmp.data(), output.data());
+	} else {
+		trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, m_inference_output_tmp.data(), output.data());
+	}
 }
 
 template <typename CutlassLayer, typename T>
@@ -163,7 +168,7 @@ bool compute_inference_layer(
 }
 
 template <typename T>
-void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
+void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
@@ -213,7 +218,7 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 }
 
 template <typename T>
-void CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
+void CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
@@ -275,10 +280,10 @@ void CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUM
 template <typename T>
 void CutlassMLP<T>::backward(
 	cudaStream_t stream,
-	const GPUMatrix<T>& input,
+	const GPUMatrixDynamic<T>& input,
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
-	GPUMatrix<T>* dL_dinput,
+	GPUMatrixDynamic<T>* dL_dinput,
 	bool use_inference_matrices,
 	bool compute_param_gradients
 ) {
