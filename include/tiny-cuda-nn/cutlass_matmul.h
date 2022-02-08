@@ -346,37 +346,6 @@ using SplitKGemm = cutlass::gemm::device::GemmSplitKParallel<
 	EPILOGUE
 >;
 
-inline std::map<cudaStream_t, GPUMemory<uint8_t>>& cutlass_workspaces() {
-	static std::map<cudaStream_t, GPUMemory<uint8_t>> s_workspaces;
-	return s_workspaces;
-}
-
-inline uint8_t* cutlass_get_workspace(size_t size, cudaStream_t stream) {
-	GPUMemory<uint8_t>& workspace = cutlass_workspaces()[stream];
-	if (size > workspace.size()) {
-		size *= 2;
-#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-		std::cout << "CUTLASS GEMM: Allocating temporary workspace of " << bytes_to_string(size) << "." << std::endl;
-#endif
-
-		// Allocate twice the requested size to make sure we're not constantly allocating small increments.
-		workspace.resize(size);
-	}
-	return workspace.data();
-}
-
-inline void cutlass_free_workspace(cudaStream_t stream) {
-	if (cutlass_workspaces().count(stream) == 0) {
-		return;
-	}
-
-#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-	std::cout << "CUTLASS GEMM: Freeing temporary workspace of " << bytes_to_string(cutlass_workspaces().at(stream).size()) << "." << std::endl;
-#endif
-	cutlass_workspaces().erase(stream);
-}
-
-
 template <class Gemm>
 void fc_multiply_impl(cudaStream_t stream, const typename Gemm::Arguments& args) {
 	// Using the arguments, query for extra workspace required for matrix multiplication computation
@@ -386,7 +355,8 @@ void fc_multiply_impl(cudaStream_t stream, const typename Gemm::Arguments& args)
 	Gemm gemm_op;
 
 	// Initialize CUTLASS kernel with arguments and workspace pointer
-	cutlass::Status status = gemm_op.initialize(args, cutlass_get_workspace(workspace_size, stream), stream);
+	auto workspace = borrow_workspace(stream, workspace_size);
+	cutlass::Status status = gemm_op.initialize(args, workspace.data(), stream);
 	CUTLASS_CHECK(status);
 
 	// Launch initialized CUTLASS kernel
@@ -403,7 +373,8 @@ void fc_multiply_split_k_impl(cudaStream_t stream, const typename Gemm::Argument
 	Gemm gemm_op;
 
 	// Initialize CUTLASS kernel with arguments and workspace pointer
-	cutlass::Status status = gemm_op.initialize(args, cutlass_get_workspace(workspace_size, stream));
+	auto workspace = borrow_workspace(stream, workspace_size);
+	cutlass::Status status = gemm_op.initialize(args, workspace.data());
 	CUTLASS_CHECK(status);
 
 	// Launch initialized CUTLASS kernel

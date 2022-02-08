@@ -36,6 +36,7 @@
 #include <cuda.h>
 
 #include <atomic>
+#include <map>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -405,5 +406,81 @@ public:
 		return get_bytes();
 	}
 };
+
+class Workspace {
+public:
+	Workspace() = default;
+	Workspace(Workspace&& other) = default;
+	Workspace(const Workspace& other) = delete;
+
+	GPUMemory<uint8_t>& mem() {
+		return m_memory;
+	}
+
+	void borrow() {
+		if (m_in_use) {
+			throw std::runtime_error{"Attempted to borrow workspace that was already borrowed."};
+		}
+		m_in_use = true;
+	}
+
+	void release() {
+		if (!m_in_use) {
+			throw std::runtime_error{"Attempted to return workspace that was not borrowed."};
+		}
+		m_in_use = false;
+	}
+
+private:
+	GPUMemory<uint8_t> m_memory;
+	bool m_in_use = false;
+};
+
+class BorrowedWorkspace {
+public:
+	BorrowedWorkspace(Workspace* workspace) : m_workspace{workspace} {
+		m_workspace->borrow();
+	}
+
+	~BorrowedWorkspace() {
+		m_workspace->release();
+	}
+
+	BorrowedWorkspace(const BorrowedWorkspace& other) = delete;
+
+	BorrowedWorkspace(BorrowedWorkspace&& other) {
+		std::swap(m_workspace, other.m_workspace);
+	}
+
+	GPUMemory<uint8_t>& mem() {
+		return m_workspace->mem();
+	}
+
+	uint8_t* data() {
+		return m_workspace->mem().data();
+	}
+
+private:
+	Workspace* m_workspace = nullptr;
+};
+
+inline std::map<cudaStream_t, Workspace>& workspaces() {
+	static std::map<cudaStream_t, Workspace> s_workspaces;
+	return s_workspaces;
+}
+
+inline BorrowedWorkspace borrow_workspace(cudaStream_t stream) {
+	return BorrowedWorkspace{&workspaces()[stream]};
+}
+
+inline BorrowedWorkspace borrow_workspace(cudaStream_t stream, size_t n_bytes) {
+	auto workspace = borrow_workspace(stream);
+	workspace.mem().enlarge(n_bytes);
+	return workspace;
+}
+
+inline void free_workspace(cudaStream_t stream) {
+	workspaces().erase(stream);
+}
 
 TCNN_NAMESPACE_END

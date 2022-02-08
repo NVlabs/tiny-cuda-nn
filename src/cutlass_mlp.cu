@@ -109,7 +109,7 @@ m_can_fuse_activation{activation != Activation::Sine}
 template <typename T>
 CutlassMLP<T>::~CutlassMLP() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		cutlass_free_workspace(m_training_splitk_streams[i]);
+		free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));

@@ -99,7 +99,7 @@ m_output_activation{output_activation}
 template <typename T, Activation input_activation>
 CutlassResNet<T, input_activation>::~CutlassResNet() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		cutlass_free_workspace(m_training_splitk_streams[i]);
+		free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));
