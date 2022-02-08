@@ -77,6 +77,20 @@ public:
 	virtual void set_alignment(uint32_t alignment) = 0;
 	virtual uint32_t min_alignment() const = 0;
 
+	virtual bool supports_output_layout(MatrixLayout layout) const {
+		return layout == CM;
+	}
+
+	virtual void set_output_layout(MatrixLayout layout) {
+		if (layout == RM) {
+			throw std::runtime_error{"Encoding does not support row-major outputs."};
+		}
+	}
+
+	virtual MatrixLayout output_layout() const {
+		return CM;
+	}
+
 	// By default, an encoding has no parameters
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override { }
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }

@@ -438,18 +438,26 @@ private:
 
 class BorrowedWorkspace {
 public:
+	BorrowedWorkspace() = default;
 	BorrowedWorkspace(Workspace* workspace) : m_workspace{workspace} {
 		m_workspace->borrow();
 	}
 
 	~BorrowedWorkspace() {
-		m_workspace->release();
+		if (m_workspace) {
+			m_workspace->release();
+		}
 	}
 
 	BorrowedWorkspace(const BorrowedWorkspace& other) = delete;
 
-	BorrowedWorkspace(BorrowedWorkspace&& other) {
+	BorrowedWorkspace& operator=(BorrowedWorkspace&& other) {
 		std::swap(m_workspace, other.m_workspace);
+		return *this;
+	}
+
+	BorrowedWorkspace(BorrowedWorkspace&& other) {
+		*this = std::move(other);
 	}
 
 	GPUMemory<uint8_t>& mem() {

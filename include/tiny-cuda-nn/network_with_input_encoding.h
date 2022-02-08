@@ -47,6 +47,15 @@ public:
 		uint32_t alignment = network.contains("otype") && (equals_case_insensitive(network["otype"], "FullyFusedMLP") || equals_case_insensitive(network["otype"], "MegakernelMLP")) ? 16u : 8u;
 		encoding->set_alignment(alignment);
 
+		// Assume that row-major/SoA operations will be faster, so use it if supported.
+		if (encoding->supports_output_layout(RM)) {
+			encoding->set_output_layout(RM);
+		}
+
+		m_inference_network_input.set_layout(encoding->output_layout());
+		m_forward_network_input.set_layout(encoding->output_layout());
+		m_backward_dL_dnetwork_input.set_layout(encoding->output_layout());
+
 		json local_network_config = network;
 		local_network_config["n_input_dims"] = m_encoding->num_encoded_dims();
 		local_network_config["n_output_dims"] = n_output_dims;
@@ -125,7 +134,7 @@ public:
 			allocate_backward_buffers(batch_size);
 		}
 
-		GPUMatrix<T>* dL_dnetwork_input = nullptr;
+		GPUMatrixDynamic<T>* dL_dnetwork_input = nullptr;
 		if (m_encoding->n_params() > 0 || dL_dinput) {
 			dL_dnetwork_input = &m_backward_dL_dnetwork_input;
 		}
@@ -219,6 +228,10 @@ public:
 		return layer == 0 ? m_forward_network_input.data() : m_network->forward_activations(layer - 1);
 	}
 
+	uint32_t input_width() const {
+		return m_encoding->num_dims_to_encode();
+	}
+
 	const std::shared_ptr<Encoding<T>>& encoding() const {
 		return m_encoding.get();
 	}
@@ -265,16 +278,16 @@ private:
 
 	// Temporary buffers to hold inference data
 	GPUMemory<char> m_inference_buffer;
-	GPUMatrix<T> m_inference_network_input;
+	GPUMatrixDynamic<T> m_inference_network_input;
 
 	// Temporary buffers to hold forward data
 	GPUMemory<char> m_forward_buffer;
-	GPUMatrix<T> m_forward_network_input;
+	GPUMatrixDynamic<T> m_forward_network_input;
 	GPUMatrix<float> m_forward_encoding_forward_gradient; // Only needed when computing input gradients
 
 	// Temporary buffers to hold backward data
 	GPUMemory<char> m_backward_buffer;
-	GPUMatrix<T> m_backward_dL_dnetwork_input;
+	GPUMatrixDynamic<T> m_backward_dL_dnetwork_input;
 };
 
 TCNN_NAMESPACE_END
