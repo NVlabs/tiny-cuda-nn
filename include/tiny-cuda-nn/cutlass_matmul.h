@@ -560,8 +560,8 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	}
 }
 
-template <typename config, typename TypeA, typename TypeB, MatrixLayout LayoutB, typename TypeC, typename TypeD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+template <typename config, typename TypeA, typename TypeB, typename TypeC, typename TypeD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
 	if (A.layout() == CM) {
 		auto A_CM = GPUMatrix<TypeA, CM>{A};
 		fc_multiply_split_k<config>(stream, A_CM, B, C, D, split_k_slices);
@@ -571,8 +571,8 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, 
 	}
 }
 
-template <typename config, typename TypeA, typename TypeB, MatrixLayout LayoutB, typename TypeD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrix<TypeB, LayoutB>& B, GPUMatrixDynamic<TypeD>& D, int split_k_slices) {
+template <typename config, typename TypeA, typename TypeB, typename TypeD>
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrixDynamic<TypeB>& B, GPUMatrixDynamic<TypeD>& D, int split_k_slices) {
 	fc_multiply_split_k<config>(stream, A, B, D, D, split_k_slices);
 }
 

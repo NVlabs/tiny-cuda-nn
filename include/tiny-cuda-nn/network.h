@@ -50,8 +50,8 @@ class Network : public DifferentiableObject<T, PARAMS_T, PARAMS_T> {
 public:
 	virtual ~Network() { }
 
-	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) = 0;
-	void inference_mixed_precision(const GPUMatrix<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) {
+	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) = 0;
+	void inference_mixed_precision(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) {
 		inference_mixed_precision(nullptr, input, output, use_inference_matrices);
 	}
 

@@ -47,17 +47,17 @@ public:
 	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, bool use_feedback_alignment, Activation activation, Activation output_activation);
 	~FullyFusedMLP() override;
 
-	void inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) override;
-	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
+	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) override;
+	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
 
-	void forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
+	void forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
 
 	void backward(
 		cudaStream_t stream,
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrix<T>* dL_dinput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) override;

@@ -107,15 +107,20 @@ CutlassResNet<T, input_activation>::~CutlassResNet() {
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::inference(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrix<float>& output) {
+void CutlassResNet<T, input_activation>::inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
 	inference_mixed_precision(stream, input, m_inference_output_tmp);
 
 	const uint32_t n_elements = (uint32_t)output.n_elements();
-	trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, m_inference_output_tmp.data(), output.data());
+	if (output.layout() == RM) {
+		// If the layout is row major, trimming away excess dimensions amounts to simply discarding the tail of the buffer.
+		cast_from<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_inference_output_tmp.data(), output.data());
+	} else {
+		trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, m_inference_output_tmp.data(), output.data());
+	}
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
+void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
@@ -173,7 +178,7 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
+void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
@@ -245,10 +250,10 @@ void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUM
 template <typename T, Activation input_activation>
 void CutlassResNet<T, input_activation>::backward(
 	cudaStream_t stream,
-	const GPUMatrix<T>& input,
+	const GPUMatrixDynamic<T>& input,
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
-	GPUMatrix<T>* dL_dinput,
+	GPUMatrixDynamic<T>* dL_dinput,
 	bool use_inference_matrices,
 	bool compute_param_gradients
 ) {
