@@ -569,12 +569,10 @@ public:
 		}
 
 		GPUMemory<float>* positions = &m_positions[stream];
-		GPUMemory<T>* encoded_positions = &m_encoded_positions[stream];
+		positions->enlarge(num_elements * N_POS_DIMS);
 
-		if (positions->size() < num_elements * N_POS_DIMS) {
-			positions->resize(num_elements * N_POS_DIMS * 2);
-			encoded_positions->resize(num_elements * m_n_features * 2);
-		}
+		auto workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
+		auto encoded_positions = (vector_t<T, N_FEATURES_PER_LEVEL>*)workspace.data();
 
 		SyncedMultiStream synced_streams{stream, m_n_to_pad > 0 ? 2u : 1u};
 
@@ -615,7 +613,7 @@ public:
 			m_grid_type,
 			is_inference ? m_grid_inference : m_grid,
 			positions->data(),
-			(vector_t<T, N_FEATURES_PER_LEVEL>*)encoded_positions->data(),
+			encoded_positions,
 			dy_dx
 		);
 
@@ -624,7 +622,7 @@ public:
 		const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 		transpose_encoded_position<vector_t<T, N_FEATURES_PER_LEVEL>><<<blocks_transpose, threads_transpose, 0, synced_streams.get(0)>>>(
 			num_elements,
-			(const vector_t<T, N_FEATURES_PER_LEVEL>*)encoded_positions->data(),
+			encoded_positions,
 			PitchedPtr<vector_t<T, N_FEATURES_PER_LEVEL>>{outputs}
 		);
 	}
@@ -644,9 +642,11 @@ public:
 
 		{
 			GPUMemory<float>* positions = &m_positions[stream];
-			GPUMemory<T>* encoded_positions = &m_encoded_positions[stream];
 
-			if (positions->size() < num_elements || encoded_positions->size() < num_elements) {
+			auto workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
+			auto dL_dy_soa = (T*)workspace.data();
+
+			if (positions->size() < num_elements) {
 				throw std::runtime_error{"GridEncoding: backward(stream) called without calling encode(stream) beforehand."};
 			}
 
@@ -655,7 +655,7 @@ public:
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_gradients<vector_t<T, N_FEATURES_PER_LEVEL>><<<blocks_transpose, threads_transpose, 0, stream>>>(
 				num_elements,
-				(vector_t<T, N_FEATURES_PER_LEVEL>*)encoded_positions->data(),
+				(vector_t<T, N_FEATURES_PER_LEVEL>*)dL_dy_soa,
 				PitchedPtr<const vector_t<T, N_FEATURES_PER_LEVEL>>{dL_dy}
 			);
 
@@ -690,7 +690,7 @@ public:
 				m_grid_type,
 				grid_gradient,
 				positions->data(), // positions SoA
-				(const vector_t<T, N_FEATURES_PER_THREAD>*)encoded_positions->data() // gradients SoA
+				(const vector_t<T, N_FEATURES_PER_THREAD>*)dL_dy_soa // gradients SoA
 			);
 
 			if (!std::is_same<grad_t, T>::value) {
@@ -797,7 +797,6 @@ private:
 	T* m_grid_gradient;
 
 	mutable std::map<cudaStream_t, GPUMemory<float>> m_positions;
-	mutable std::map<cudaStream_t, GPUMemory<T>> m_encoded_positions;
 };
 
 template <typename T, uint32_t N_FEATURES_PER_LEVEL>
