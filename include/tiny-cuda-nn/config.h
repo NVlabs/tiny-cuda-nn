@@ -25,7 +25,7 @@
 
 /** @file   config.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  API interface to create everything needed for using the framework from
+ *  @brief  API to create everything needed for using the framework from
  *          a single json config.
  */
 
