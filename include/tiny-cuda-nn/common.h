@@ -359,13 +359,21 @@ using vector_halfp_t = vector_t<__half, N_HALFS>;
 template <typename T>
 struct PitchedPtr {
 	TCNN_HOST_DEVICE PitchedPtr() : ptr{nullptr}, stride_in_bytes{sizeof(T)} {}
-	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0) : ptr{ptr + offset}, stride_in_bytes{(uint32_t)(stride_in_elements * sizeof(T))} {}
+	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0, size_t extra_stride_bytes = 0) : ptr{ptr + offset}, stride_in_bytes{(uint32_t)(stride_in_elements * sizeof(T) + extra_stride_bytes)} {}
 
 	template <typename U>
 	TCNN_HOST_DEVICE explicit PitchedPtr(PitchedPtr<U> other) : ptr{(T*)other.ptr}, stride_in_bytes{other.stride_in_bytes} {}
 
 	TCNN_HOST_DEVICE T* operator()(uint32_t y) const {
 		return (T*)((const char*)ptr + y * stride_in_bytes);
+	}
+
+	TCNN_HOST_DEVICE void operator+=(uint32_t y) {
+		ptr = (T*)((const char*)ptr + y * stride_in_bytes);
+	}
+
+	TCNN_HOST_DEVICE void operator-=(uint32_t y) {
+		ptr = (T*)((const char*)ptr - y * stride_in_bytes);
 	}
 
 	TCNN_HOST_DEVICE explicit operator bool() const {
