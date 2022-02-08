@@ -42,6 +42,16 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef __CUDA_NO_HALF_OPERATORS__
+#undef __CUDA_NO_HALF_OPERATORS__
+#endif
+#ifdef __CUDA_NO_HALF_CONVERSIONS__
+#undef __CUDA_NO_HALF_CONVERSIONS__
+#endif
+#ifdef __CUDA_NO_HALF2_OPERATORS__
+#undef __CUDA_NO_HALF2_OPERATORS__
+#endif
+
 #include <cuda_fp16.h>
 
 
