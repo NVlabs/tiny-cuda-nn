@@ -78,17 +78,17 @@ public:
 	virtual uint32_t min_alignment() const = 0;
 
 	virtual bool supports_output_layout(MatrixLayout layout) const {
-		return layout == CM;
+		return layout == AoS;
 	}
 
 	virtual void set_output_layout(MatrixLayout layout) {
-		if (layout == RM) {
-			throw std::runtime_error{"Encoding does not support row-major outputs."};
+		if (layout == SoA) {
+			throw std::runtime_error{"Encoding does not support SoA outputs."};
 		}
 	}
 
 	virtual MatrixLayout output_layout() const {
-		return CM;
+		return AoS;
 	}
 
 	// By default, an encoding has no parameters

@@ -839,7 +839,7 @@ private:
 
 	mutable std::map<cudaStream_t, GPUMemory<float>> m_positions;
 
-	MatrixLayout m_output_layout = CM;
+	MatrixLayout m_output_layout = AoS;
 };
 
 template <typename T, uint32_t N_FEATURES_PER_LEVEL>

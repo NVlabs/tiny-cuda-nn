@@ -36,11 +36,15 @@
 TCNN_NAMESPACE_BEGIN
 
 enum class MatrixLayout {
-	RowMajor,
-	ColumnMajor,
+	RowMajor = 0,
+	SoA = 0, // For data matrices TCNN's convention is RowMajor == SoA (struct of arrays)
+	ColumnMajor = 1,
+	AoS = 1,
 };
 
 static constexpr MatrixLayout RM = MatrixLayout::RowMajor;
+static constexpr MatrixLayout SoA = MatrixLayout::SoA;
 static constexpr MatrixLayout CM = MatrixLayout::ColumnMajor;
+static constexpr MatrixLayout AoS = MatrixLayout::AoS;
 
 TCNN_NAMESPACE_END
