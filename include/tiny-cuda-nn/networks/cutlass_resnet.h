@@ -160,7 +160,7 @@ private:
 	GPUMemory<char> m_inference_buffer;
 	GPUMatrix<T> m_inference_linear_tmp;
 	std::array<GPUMatrix<T>, 2> m_inference_residual_tmp;
-	GPUMatrix<T> m_inference_output_tmp;
+	GPUMatrixDynamic<T> m_inference_output_tmp;
 
 	// Storage of forward pass data
 	GPUMemory<char> m_forward_buffer;

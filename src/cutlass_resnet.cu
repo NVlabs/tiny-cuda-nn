@@ -108,6 +108,7 @@ CutlassResNet<T, input_activation>::~CutlassResNet() {
 
 template <typename T, Activation input_activation>
 void CutlassResNet<T, input_activation>::inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
+	m_inference_output_tmp.set_layout(output.layout());
 	inference_mixed_precision(stream, input, m_inference_output_tmp);
 
 	const uint32_t n_elements = (uint32_t)output.n_elements();

@@ -171,7 +171,7 @@ private:
 	// Storage of inference temporary data
 	GPUMemory<char> m_inference_buffer;
 	GPUMatrix<T> m_inference_tmp;
-	GPUMatrix<T> m_inference_output_tmp;
+	GPUMatrixDynamic<T> m_inference_output_tmp;
 
 	// Storage of forward pass data
 	GPUMemory<char> m_forward_buffer = GPUMemory<char>(0);
