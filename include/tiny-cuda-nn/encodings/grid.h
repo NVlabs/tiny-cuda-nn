@@ -641,7 +641,7 @@ public:
 
 		if (m_output_layout == CM) {
 			// Third step: transpose result (was stored row major due to coalescing)
-			const dim3 threads_transpose = { m_n_levels, 8, 1 };
+			const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_encoded_position<T><<<blocks_transpose, threads_transpose, 0, synced_streams.get(0)>>>(
 				num_elements,
@@ -677,7 +677,7 @@ public:
 				workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
 
 				// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
-				const dim3 threads_transpose = { m_n_levels, 8, 1 };
+				const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
 				const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 				transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
 					num_elements,
