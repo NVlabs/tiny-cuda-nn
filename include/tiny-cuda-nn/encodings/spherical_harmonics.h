@@ -392,6 +392,7 @@ template <typename T>
 __global__ void kernel_sh_backward(
 	const uint32_t num_elements,
 	const uint32_t sh_degree,
+	const uint32_t num_to_pad,
 	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
 	PitchedPtr<float> dL_dx)
@@ -406,7 +407,7 @@ __global__ void kernel_sh_backward(
 
 	float result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(i)[j * outputs_per_input + k] * dy_dx[i * outputs_per_input * 3 + j * outputs_per_input + k];
+		result += (float)dL_dy(i)[num_to_pad + k] * dy_dx[i * outputs_per_input * 3 + j * outputs_per_input + k];
 	}
 
 	// Multiplication by 2 due to the conversion
@@ -478,6 +479,7 @@ public:
 		linear_kernel(kernel_sh_backward<T>, 0, stream,
 			num_elements * 3,
 			m_sh_degree,
+			m_n_to_pad,
 			dL_dy,
 			dy_dx,
 			dL_dx
