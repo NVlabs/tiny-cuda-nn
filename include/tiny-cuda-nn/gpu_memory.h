@@ -456,6 +456,8 @@ public:
 
 	~GPUMemoryArena() {
 		try {
+			total_n_bytes_allocated() -= m_size;
+
 			CUDA_CHECK_THROW(cudaDeviceSynchronize());
 			if (m_base_address) {
 				CU_CHECK_THROW(cuMemUnmap(m_base_address, m_size));
@@ -549,6 +551,8 @@ public:
 		CU_CHECK_THROW(cuMemSetAccess(m_base_address, m_size, &access_desc, 1));
 
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+		total_n_bytes_allocated() += n_bytes_to_allocate;
 	}
 
 	size_t size() const {
