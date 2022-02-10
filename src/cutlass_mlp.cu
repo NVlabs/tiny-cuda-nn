@@ -403,7 +403,7 @@ void CutlassMLP<T>::backward(
 		}
 	}
 
-	m_forward.clear();
+	forward_clear();
 }
 
 template <typename T>

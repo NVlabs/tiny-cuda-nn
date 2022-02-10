@@ -61,6 +61,7 @@ public:
 
 		this->forward(stream, input);
 		extract_dimension_pos_neg<PARAMS_T>(stream, output.n_elements(), dimension, width(layer), output.rows(), forward_activations(layer), output.data());
+		this->forward_clear();
 	}
 
 	virtual uint32_t width(uint32_t layer) const = 0;

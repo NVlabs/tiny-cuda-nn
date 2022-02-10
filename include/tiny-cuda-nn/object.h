@@ -98,6 +98,8 @@ public:
 		forward(nullptr, input, output, use_inference_matrices, prepare_input_gradients);
 	}
 
+	virtual void forward_clear() {}
+
 	virtual void backward(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
@@ -127,19 +129,19 @@ public:
 	) {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
-		if (m_input_gradient_output.n() != batch_size) {
-			allocate_input_gradient_buffers(batch_size);
-		}
+
+		GPUMatrix<COMPUTE_T> d_doutput = {padded_output_width(), batch_size, stream};
+		GPUMatrix<COMPUTE_T> output = {padded_output_width(), batch_size, stream};
 
 		if (dim >= padded_output_width()) {
 			throw std::runtime_error{"Invalid dimension to compute the input gradient for."};
 		}
 
 		// Set "loss gradient" at network outputs to 1 at the chosen dimension and 0 elsewhere.
-		one_hot_batched(stream, m_input_gradient_output.n_elements(), padded_output_width(), dim, m_input_gradient_d_doutput.data(), backprop_scale);
+		one_hot_batched(stream, output.n_elements(), padded_output_width(), dim, d_doutput.data(), backprop_scale);
 
-		forward(stream, input, &m_input_gradient_output, true /* inference matrices */, true /* prep forward buffers for input gradients */);
-		backward(stream, input, m_input_gradient_output, m_input_gradient_d_doutput, &d_dinput, true /* inference matrices */, false /* no param gradients */);
+		forward(stream, input, &output, true /* inference matrices */, true /* prep forward buffers for input gradients */);
+		backward(stream, input, output, d_doutput, &d_dinput, true /* inference matrices */, false /* no param gradients */);
 
 		mult(stream, d_dinput.n_elements(), d_dinput.data(), 1.0f / backprop_scale);
 	}
@@ -148,26 +150,6 @@ public:
 	virtual uint32_t output_width() const = 0;
 
 	virtual uint32_t required_input_alignment() const = 0;
-
-private:
-	void allocate_input_gradient_buffers(uint32_t batch_size) {
-		m_input_gradient_d_doutput.set_size(padded_output_width(), batch_size);
-		m_input_gradient_output.set_size(padded_output_width(), batch_size);
-
-		GPUMatrixBase::allocate_shared_memory(
-			m_input_gradient_buffer,
-			{
-				&m_input_gradient_d_doutput,
-				&m_input_gradient_output,
-			}
-		);
-	}
-
-	// Temporary buffers for computing input gradients.
-	// (Lazily allocated on demand.)
-	GPUMemory<char> m_input_gradient_buffer;
-	GPUMatrix<COMPUTE_T> m_input_gradient_d_doutput;
-	GPUMatrix<COMPUTE_T> m_input_gradient_output;
 };
 
 TCNN_NAMESPACE_END

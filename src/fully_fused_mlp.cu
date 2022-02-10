@@ -940,7 +940,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		}
 	}
 
-	m_forward.clear();
+	forward_clear();
 }
 
 template <typename T, int WIDTH>

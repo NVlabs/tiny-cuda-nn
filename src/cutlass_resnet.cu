@@ -345,7 +345,7 @@ void CutlassResNet<T, input_activation>::backward(
 		}
 	}
 
-	m_forward.clear();
+	forward_clear();
 }
 
 template <typename T, Activation input_activation>

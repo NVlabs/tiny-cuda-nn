@@ -55,6 +55,9 @@ public:
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
 
 	void forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
+	void forward_clear() override {
+		m_forward.clear();
+	}
 
 	void backward(
 		cudaStream_t stream,
