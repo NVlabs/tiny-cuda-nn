@@ -361,7 +361,7 @@ public:
 
 	GPUMatrix() : GPUMatrix(nullptr, 0, 0) {}
 
-	GPUMatrix<T>& operator=(GPUMatrixDynamic<T>&& other) {
+	GPUMatrix<T, static_layout>& operator=(GPUMatrixDynamic<T>&& other) {
 		*((GPUMatrixDynamic<T>*)this) = std::move(other);
 		if (static_layout != this->layout()) {
 			throw std::runtime_error{"GPUMatrix must be constructed from a GPUMatrixDynamic with matching layout."};
@@ -369,7 +369,16 @@ public:
 		return *this;
 	}
 
-	GPUMatrix(GPUMatrixDynamic<T>&& other) {
+	GPUMatrix(GPUMatrixDynamic<T>&& other) noexcept {
+		*this = std::move(other);
+	}
+
+	GPUMatrix<T, static_layout>& operator=(GPUMatrix<T, static_layout>&& other) noexcept {
+		*((GPUMatrixDynamic<T>*)this) = std::move(other);
+		return *this;
+	}
+
+	GPUMatrix(GPUMatrix<T, static_layout>&& other) noexcept {
 		*this = std::move(other);
 	}
 

@@ -83,9 +83,9 @@ public:
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 
-		m_forward.network_input = {m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
+		m_forward.network_input = GPUMatrixDynamic<T>{m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
 		if (prepare_input_gradients) {
-			m_forward.encoding_forward_gradient = {m_encoding->num_forward_gradient_dims(), input.n(), stream};
+			m_forward.encoding_forward_gradient = GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), input.n(), stream};
 		}
 
 		m_encoding->encode(
@@ -229,8 +229,8 @@ private:
 		GPUMatrix<float> encoding_forward_gradient;
 
 		void clear() {
-			network_input = {};
-			encoding_forward_gradient = {};
+			network_input = GPUMatrixDynamic<T>{};
+			encoding_forward_gradient = GPUMatrix<float>{};
 		}
 	} m_forward;
 };

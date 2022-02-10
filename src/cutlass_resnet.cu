@@ -350,7 +350,7 @@ void CutlassResNet<T, input_activation>::backward(
 
 template <typename T, Activation input_activation>
 void CutlassResNet<T, input_activation>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
-	m_forward.input = {m_network_width, batch_size, stream};
+	m_forward.input = GPUMatrix<T>{m_network_width, batch_size, stream};
 
 	m_forward.hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
