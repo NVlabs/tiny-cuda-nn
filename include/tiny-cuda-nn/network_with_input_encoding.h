@@ -117,7 +117,7 @@ public:
 			dL_dnetwork_input = {m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
 		}
 
-		m_network->backward(stream, m_forward.network_input, output, dL_doutput, &dL_dnetwork_input, use_inference_matrices, compute_param_gradients);
+		m_network->backward(stream, m_forward.network_input, output, dL_doutput, dL_dnetwork_input.data() ? &dL_dnetwork_input : nullptr, use_inference_matrices, compute_param_gradients);
 		if (dL_dnetwork_input.data()) {
 			m_encoding->backward(
 				stream,
