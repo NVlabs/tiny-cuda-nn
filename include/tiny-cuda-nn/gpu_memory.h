@@ -192,27 +192,6 @@ public:
 			resize(size);
 		}
 	}
-
-	static size_t align_to_cacheline(size_t bytes) {
-		return next_multiple(bytes, (size_t)128);
-	}
-
-	template <typename First, typename FirstSize>
-	std::tuple<First*> enlarge_and_distribute(size_t offset, FirstSize first_size) {
-		enlarge(offset + align_to_cacheline(first_size * sizeof(First)));
-		return std::make_tuple<First*>((First*)((char*)data() + offset));
-	}
-
-	template <typename First, typename ...Types, typename FirstSize, typename ...Sizes, std::enable_if_t<sizeof...(Types) != 0 && sizeof...(Types) == sizeof...(Sizes), int> = 0>
-	std::tuple<First*, Types*...> enlarge_and_distribute(size_t offset, FirstSize first_size, Sizes... sizes) {
-		auto nested = enlarge_and_distribute<Types...>(offset + align_to_cacheline(first_size * sizeof(First)), sizes...);
-		return std::tuple_cat(std::make_tuple<First*>((First*)((char*)data() + offset)), nested);
-	}
-
-	template <typename ...Types, typename ...Sizes, std::enable_if_t<sizeof...(Types) == sizeof...(Sizes), int> = 0>
-	std::tuple<Types*...> enlarge_and_distribute(Sizes... sizes) {
-		return enlarge_and_distribute<Types...>((size_t)0, sizes...);
-	}
 	/** @} */
 
 	/** @name Memset
@@ -641,6 +620,27 @@ inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t
 
 	auto& arena = gpu_memory_arenas()[stream];
 	return GPUMemoryArena::Allocation{stream, arena.allocate(n_bytes), &arena};
+}
+
+static size_t align_to_cacheline(size_t bytes) {
+	return next_multiple(bytes, (size_t)128);
+}
+
+template <typename First, typename FirstSize>
+std::tuple<First*> allocate_workspace_and_distribute(cudaStream_t stream, GPUMemoryArena::Allocation* alloc, size_t offset, FirstSize first_size) {
+	*alloc = allocate_workspace(stream, offset + align_to_cacheline(first_size * sizeof(First)));
+	return std::make_tuple<First*>((First*)(alloc->data() + offset));
+}
+
+template <typename First, typename ...Types, typename FirstSize, typename ...Sizes, std::enable_if_t<sizeof...(Types) != 0 && sizeof...(Types) == sizeof...(Sizes), int> = 0>
+std::tuple<First*, Types*...> allocate_workspace_and_distribute(cudaStream_t stream, GPUMemoryArena::Allocation* alloc, size_t offset, FirstSize first_size, Sizes... sizes) {
+	auto nested = allocate_workspace_and_distribute<Types...>(stream, alloc, offset + align_to_cacheline(first_size * sizeof(First)), sizes...);
+	return std::tuple_cat(std::make_tuple<First*>((First*)(alloc->data() + offset)), nested);
+}
+
+template <typename ...Types, typename ...Sizes, std::enable_if_t<sizeof...(Types) == sizeof...(Sizes), int> = 0>
+std::tuple<Types*...> allocate_workspace_and_distribute(cudaStream_t stream, GPUMemoryArena::Allocation* alloc, Sizes... sizes) {
+	return allocate_workspace_and_distribute<Types...>(stream, alloc, (size_t)0, sizes...);
 }
 
 inline void free_gpu_memory_arena(cudaStream_t stream) {
