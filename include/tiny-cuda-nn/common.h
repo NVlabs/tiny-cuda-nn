@@ -95,6 +95,7 @@ enum class Activation {
 //////////////////
 
 uint32_t cuda_compute_capability(int device = 0);
+size_t cuda_memory_granularity(int device = 0);
 
 std::string to_lower(std::string str);
 std::string to_upper(std::string str);
@@ -130,6 +131,10 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 // CUDA ERROR HANDLING (EXCEPTIONS) //
 //////////////////////////////////////
 
+#define STRINGIFY(x) #x
+#define STR(x) STRINGIFY(x)
+#define FILE_LINE __FILE__ ":" STR(__LINE__)
+
 /// Checks the result of a cuXXXXXX call and throws an error on failure
 #define CU_CHECK_THROW(x)                                                                          \
 	do {                                                                                           \
@@ -137,7 +142,18 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 		if (result != CUDA_SUCCESS) {                                                              \
 			const char *msg;                                                                       \
 			cuGetErrorName(result, &msg);                                                          \
-			throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + msg);  \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);  \
+		}                                                                                          \
+	} while(0)
+
+/// Checks the result of a cuXXXXXX call and prints an error on failure
+#define CU_CHECK_PRINT(x)                                                                          \
+	do {                                                                                           \
+		CUresult result = x;                                                                       \
+		if (result != CUDA_SUCCESS) {                                                              \
+			const char *msg;                                                                       \
+			cuGetErrorName(result, &msg);                                                          \
+			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;  \
 		}                                                                                          \
 	} while(0)
 
@@ -146,7 +162,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 	do {                                                                                                                  \
 		cudaError_t result = x;                                                                                           \
 		if (result != cudaSuccess)                                                                                        \
-			throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + cudaGetErrorString(result));  \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cudaGetErrorString(result));  \
 	} while(0)
 
 /// Checks the result of a cudaXXXXXX call and prints an error on failure
@@ -154,7 +170,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 	do {                                                                                                      \
 		cudaError_t result = x;                                                                               \
 		if (result != cudaSuccess)                                                                            \
-			std::cout << "CUDA Error: " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
+			std::cout << FILE_LINE " " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
 	} while(0)
 
 #if defined(__CUDA_ARCH__)

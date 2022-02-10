@@ -616,9 +616,9 @@ public:
 		const dim3 blocks_hashgrid = { div_round_up(num_elements, N_THREADS_HASHGRID), m_n_levels, 1 };
 
 		T* rm_encoded_positions = outputs.ptr;
-		BorrowedWorkspace workspace;
+		GPUMemoryArena::Allocation workspace;
 		if (m_output_layout == CM) {
-			workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
+			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 			rm_encoded_positions = (T*)workspace.data();
 		}
 
@@ -672,9 +672,9 @@ public:
 
 			const T* dL_dy_rm = dL_dy.ptr;
 
-			BorrowedWorkspace workspace;
+			GPUMemoryArena::Allocation workspace;
 			if (m_output_layout == CM) {
-				workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
+				workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 
 				// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
 				const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };

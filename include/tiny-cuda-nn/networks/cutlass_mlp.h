@@ -128,19 +128,18 @@ public:
 	}
 
 	uint32_t num_forward_activations() const override {
-		return (uint32_t)m_forward_tmp.size();
+		return m_can_fuse_activation ? m_n_hidden_layers : (m_n_hidden_layers * 2);
 	}
 
 	const T* forward_activations(uint32_t layer) const override {
-		return m_forward_tmp[layer].data();
+		if (m_forward.hidden.size() == 0) {
+			throw std::runtime_error{"Must call forward() before accessing activations."};
+		}
+		return m_forward.hidden.at(layer).data();
 	}
 
 private:
-	void allocate_inference_buffers(uint32_t batch_size);
-
-	void allocate_forward_buffers(uint32_t batch_size);
-
-	void allocate_backward_buffers(uint32_t batch_size);
+	void allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size);
 
 	uint32_t m_n_hidden_layers;
 	uint32_t m_n_hidden_matmuls;
@@ -163,19 +162,14 @@ private:
 	// Graphs
 	CudaGraph m_inference_graph;
 
-	// Storage of inference temporary data
-	GPUMemory<char> m_inference_buffer;
-	std::array<GPUMatrix<T>, 2> m_inference_tmp;
-	GPUMatrixDynamic<T> m_inference_output_tmp;
-
 	// Storage of forward pass data
-	GPUMemory<char> m_forward_buffer = GPUMemory<char>(0);
-	std::vector<GPUMatrix<T>> m_forward_tmp;
+	struct {
+		std::vector<GPUMatrix<T>> hidden;
 
-	// Storage of backward pass data
-	GPUMemory<char> m_backward_buffer = GPUMemory<char>(0);
-	std::vector<GPUMatrix<T>> m_backward_tmp;
-	GPUMatrixDynamic<T> m_backward_output_tmp;
+		void clear() {
+			hidden.clear();
+		}
+	} m_forward;
 
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;

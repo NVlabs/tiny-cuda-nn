@@ -142,7 +142,7 @@ void reduce_sum(T* device_pointer, float* workspace, uint32_t n_elements, cudaSt
 
 template <typename T, typename F>
 float reduce_sum(T* device_pointer, F fun, uint32_t n_elements, cudaStream_t stream) {
-	auto workspace = borrow_workspace(stream, reduce_sum_workspace_size(n_elements) * sizeof(float));
+	auto workspace = allocate_workspace(stream, reduce_sum_workspace_size(n_elements) * sizeof(float));
 	float* workspace_data = (float*)workspace.data();
 
 	CUDA_CHECK_THROW(cudaMemsetAsync(workspace_data, 0, sizeof(float), stream));

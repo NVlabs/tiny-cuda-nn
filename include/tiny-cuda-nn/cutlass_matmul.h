@@ -355,7 +355,7 @@ void fc_multiply_impl(cudaStream_t stream, const typename Gemm::Arguments& args)
 	Gemm gemm_op;
 
 	// Initialize CUTLASS kernel with arguments and workspace pointer
-	auto workspace = borrow_workspace(stream, workspace_size);
+	auto workspace = allocate_workspace(stream, workspace_size);
 	cutlass::Status status = gemm_op.initialize(args, workspace.data(), stream);
 	CUTLASS_CHECK(status);
 
@@ -373,7 +373,7 @@ void fc_multiply_split_k_impl(cudaStream_t stream, const typename Gemm::Argument
 	Gemm gemm_op;
 
 	// Initialize CUTLASS kernel with arguments and workspace pointer
-	auto workspace = borrow_workspace(stream, workspace_size);
+	auto workspace = allocate_workspace(stream, workspace_size);
 	cutlass::Status status = gemm_op.initialize(args, workspace.data());
 	CUTLASS_CHECK(status);
 
