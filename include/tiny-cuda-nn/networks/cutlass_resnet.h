@@ -165,7 +165,7 @@ private:
 
 		void clear() {
 			hidden.clear();
-			input = {};
+			input = GPUMatrix<T>{};
 		}
 	} m_forward;
 

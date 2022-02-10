@@ -266,7 +266,7 @@ void CutlassResNet<T, input_activation>::backward(
 
 	std::vector<GPUMatrix<T>> backward_tmp(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		backward_tmp[i] = {m_network_width, batch_size, stream};
+		backward_tmp[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
 	}
 
 	// Compute transfer of output activation in-place... it's treated specially for performance reasons
@@ -354,7 +354,7 @@ void CutlassResNet<T, input_activation>::allocate_forward_buffers(cudaStream_t s
 
 	m_forward.hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		m_forward.hidden[i] = {m_network_width, batch_size, stream};
+		m_forward.hidden[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
 	}
 }
 
