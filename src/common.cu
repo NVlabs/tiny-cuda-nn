@@ -31,6 +31,8 @@
 
 #include <tiny-cuda-nn/common.h>
 
+#include <cuda.h>
+
 #include <algorithm>
 #include <cctype>
 
@@ -46,6 +48,16 @@ uint32_t cuda_compute_capability(int device) {
 	cudaDeviceProp props;
 	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
 	return props.major * 10 + props.minor;
+}
+
+size_t cuda_memory_granularity(int device) {
+	size_t granularity;
+	CUmemAllocationProp prop = {};
+	prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+	prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+	prop.location.id = 0;
+	CU_CHECK_THROW(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+	return granularity;
 }
 
 std::string to_lower(std::string str) {

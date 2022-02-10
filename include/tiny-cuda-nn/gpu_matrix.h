@@ -82,6 +82,29 @@ public:
 
 	template <typename T, MatrixLayout layout>
 	static void allocate_shared_memory(GPUMemory<char>& memory, std::vector<GPUMatrix<T, layout>>& matrices);
+
+	static GPUMemoryArena::Allocation allocate_shared_memory(cudaStream_t stream, const std::vector<GPUMatrixBase*>& matrices) {
+		size_t total_n_bytes = 0;
+		for (auto* matrix : matrices) {
+			total_n_bytes += matrix->n_bytes();
+		}
+
+		auto alloc = allocate_workspace(stream, total_n_bytes);
+
+		size_t offset = 0;
+		for (auto* matrix : matrices) {
+			matrix->set_data(alloc.data() + offset);
+			offset += matrix->n_bytes();
+		}
+
+		return alloc;
+	}
+
+	template <typename T>
+	static GPUMemoryArena::Allocation allocate_shared_memory(cudaStream_t stream, std::vector<GPUMatrixDynamic<T>>& matrices);
+
+	template <typename T, MatrixLayout layout>
+	static GPUMemoryArena::Allocation allocate_shared_memory(cudaStream_t stream, std::vector<GPUMatrix<T, layout>>& matrices);
 };
 
 template <typename T>
@@ -89,24 +112,47 @@ class GPUMatrixDynamic : public GPUMatrixBase {
 public:
 	using Type = T;
 
-	// Owning its memory
+	// Owning its memory as a GPUMemory<T>
 	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM)
 	: m_owned_data{m * n}, m_rows{m}, m_cols{n}, m_layout{layout} {
 		m_data = m_owned_data.data();
 	}
 
+	// Owning its memory as an allocation from a stream's memory arena
+	GPUMatrixDynamic(uint32_t m, uint32_t n, cudaStream_t stream, MatrixLayout layout = CM)
+	: m_arena_data{allocate_workspace(stream, m * n * sizeof(T))}, m_rows{m}, m_cols{n}, m_layout{layout} {
+		m_data = (T*)m_arena_data.data();
+	}
+
 	// Pointing to external memory
 	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM)
-	: m_data{data}, m_rows{m}, m_cols{n}, m_layout{layout} {
-	}
+	: m_data{data}, m_rows{m}, m_cols{n}, m_layout{layout} {}
 
 	GPUMatrixDynamic() : GPUMatrixDynamic(nullptr, 0, 0) {}
 
-	GPUMatrixDynamic(GPUMatrixDynamic<T>&& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{std::move(other.m_owned_data)} { }
+	GPUMatrixDynamic<T>& operator=(GPUMatrixDynamic<T>&& other) {
+		std::swap(m_data, other.m_data);
+		std::swap(m_rows, other.m_rows);
+		std::swap(m_cols, other.m_cols);
+		std::swap(m_layout, other.m_layout);
+		std::swap(m_owned_data, other.m_owned_data);
+		std::swap(m_arena_data, other.m_arena_data);
+		return *this;
+	}
+
+	GPUMatrixDynamic(GPUMatrixDynamic<T>&& other) {
+		*this = std::move(other);
+	}
+
 	explicit GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{other.m_owned_data.copy()} {
-		// If we just copied over some owned data, then we want to point to our copy
 		if (m_owned_data.data()) {
 			m_data = m_owned_data.data();
+		}
+
+		if (other.m_arena_data.data()) {
+			m_arena_data = allocate_workspace(other.m_arena_data.stream(), n_bytes());
+			m_data = (T*)m_arena_data.data();
+			CUDA_CHECK_THROW(cudaMemcpyAsync(data(), other.data(), n_bytes(), cudaMemcpyDeviceToDevice, m_arena_data.stream()));
 		}
 	}
 
@@ -116,6 +162,11 @@ public:
 	void set_size(uint32_t rows, uint32_t cols) {
 		m_rows = rows;
 		m_cols = cols;
+	}
+
+	void set(T* data, uint32_t rows, uint32_t cols) {
+		set_data(data);
+		set_size(rows, cols);
 	}
 
 	uint32_t rows() const { return m_rows; }
@@ -136,11 +187,11 @@ public:
 	const T* data() const { return m_data; }
 
 	void memset(int value) {
-		CUDA_CHECK_THROW(cudaMemset(m_data, value, n_elements() * sizeof(T)));
+		CUDA_CHECK_THROW(cudaMemset(data(), value, n_bytes()));
 	}
 
 	void memset_async(cudaStream_t stream, int value) {
-		CUDA_CHECK_THROW(cudaMemsetAsync(m_data, value, n_elements() * sizeof(T), stream));
+		CUDA_CHECK_THROW(cudaMemsetAsync(data(), value, n_bytes(), stream));
 	}
 
 	// Various initializations
@@ -159,7 +210,7 @@ public:
 			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_fa_uniform_forward(pcg32& rnd, float scale = 1) {
@@ -177,7 +228,7 @@ public:
 			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_fa_uniform_backward(pcg32& rnd, float scale = 1) {
@@ -195,7 +246,7 @@ public:
 			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_siren_uniform(pcg32& rnd, float scale = 1) {
@@ -213,7 +264,7 @@ public:
 			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_siren_uniform_first(pcg32& rnd, float scale = 1) {
@@ -233,7 +284,7 @@ public:
 			new_data[i] = (T)(rnd.next_float() * 2.0f * scale - scale);
 		}
 
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_constant(float val) {
@@ -242,7 +293,7 @@ public:
 		}
 
 		std::vector<T> new_data(n_elements(), (T)val);
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_diagonal(float val = 1) {
@@ -259,7 +310,7 @@ public:
 			new_data[i + i*n()] = (T)val;
 		}
 
-		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_elements() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	const GPUMatrixDynamic<T> transposed() const {
@@ -287,6 +338,7 @@ private:
 	uint32_t m_rows, m_cols;
 	MatrixLayout m_layout;
 	GPUMemory<T> m_owned_data;
+	GPUMemoryArena::Allocation m_arena_data;
 };
 
 template <typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
@@ -295,9 +347,13 @@ public:
 	static const MatrixLayout static_layout = _layout;
 	static const MatrixLayout static_transposed_layout = _layout == RM ? CM : RM;
 
-	// Owning its memory
+	// Owning its memory as a GPUMemory<T>
 	GPUMatrix(uint32_t m, uint32_t n)
 	: GPUMatrixDynamic<T>{m, n, static_layout} { }
+
+	// Owning its memory as an allocation from a stream's memory arena
+	GPUMatrix(uint32_t m, uint32_t n, cudaStream_t stream)
+	: GPUMatrixDynamic<T>{m, n, stream, static_layout} { }
 
 	// Pointing to external memory
 	explicit GPUMatrix(T* data, uint32_t m, uint32_t n)
@@ -305,11 +361,25 @@ public:
 
 	GPUMatrix() : GPUMatrix(nullptr, 0, 0) {}
 
-	GPUMatrix(GPUMatrixDynamic<T>&& other)
-	: GPUMatrixDynamic<T>{other} {
+	GPUMatrix<T, static_layout>& operator=(GPUMatrixDynamic<T>&& other) {
+		*((GPUMatrixDynamic<T>*)this) = std::move(other);
 		if (static_layout != this->layout()) {
 			throw std::runtime_error{"GPUMatrix must be constructed from a GPUMatrixDynamic with matching layout."};
 		}
+		return *this;
+	}
+
+	GPUMatrix(GPUMatrixDynamic<T>&& other) noexcept {
+		*this = std::move(other);
+	}
+
+	GPUMatrix<T, static_layout>& operator=(GPUMatrix<T, static_layout>&& other) noexcept {
+		*((GPUMatrixDynamic<T>*)this) = std::move(other);
+		return *this;
+	}
+
+	GPUMatrix(GPUMatrix<T, static_layout>&& other) noexcept {
+		*this = std::move(other);
 	}
 
 	// Only copy by reference. This is to prevent accidental deep copies of owned data.
@@ -359,6 +429,24 @@ void GPUMatrixBase::allocate_shared_memory(GPUMemory<char>& memory, std::vector<
 		matrix_pointers.emplace_back(&matrix);
 	}
 	allocate_shared_memory(memory, matrix_pointers);
+}
+
+template <typename T>
+GPUMemoryArena::Allocation GPUMatrixBase::allocate_shared_memory(cudaStream_t stream, std::vector<GPUMatrixDynamic<T>>& matrices) {
+	std::vector<GPUMatrixBase*> matrix_pointers;
+	for (auto& matrix : matrices) {
+		matrix_pointers.emplace_back(&matrix);
+	}
+	return allocate_shared_memory(stream, matrix_pointers);
+}
+
+template <typename T, MatrixLayout layout>
+GPUMemoryArena::Allocation GPUMatrixBase::allocate_shared_memory(cudaStream_t stream, std::vector<GPUMatrix<T, layout>>& matrices) {
+	std::vector<GPUMatrixBase*> matrix_pointers;
+	for (auto& matrix : matrices) {
+		matrix_pointers.emplace_back(&matrix);
+	}
+	return allocate_shared_memory(stream, matrix_pointers);
 }
 
 TCNN_NAMESPACE_END

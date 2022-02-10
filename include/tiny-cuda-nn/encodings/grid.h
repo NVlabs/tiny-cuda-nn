@@ -427,7 +427,7 @@ template <typename T, uint32_t N_POS_DIMS>
 __global__ void kernel_grid_backward_input(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
-	PitchedPtr<const T> dL_dy,
+	const T* dL_dy_rm,
 	const float* __restrict__ dy_dx_pos,
 	const float* __restrict__ dy_dx_oneblob,
 	PitchedPtr<float> dL_dx
@@ -442,7 +442,7 @@ __global__ void kernel_grid_backward_input(
 
 	float result = 0;
 	for (int k = 0; k < num_grid_features; ++k) {
-		result += (float)dL_dy(i)[k] * dy_dx_pos[i * fan_out_grad + j * num_grid_features + k];
+		result += (float)dL_dy_rm[k * (num_elements / N_POS_DIMS) + i] * dy_dx_pos[i * fan_out_grad + j * num_grid_features + k];
 	}
 	dL_dx(i)[j] = result;
 }
@@ -616,9 +616,9 @@ public:
 		const dim3 blocks_hashgrid = { div_round_up(num_elements, N_THREADS_HASHGRID), m_n_levels, 1 };
 
 		T* rm_encoded_positions = outputs.ptr;
-		BorrowedWorkspace workspace;
+		GPUMemoryArena::Allocation workspace;
 		if (m_output_layout == CM) {
-			workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
+			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 			rm_encoded_positions = (T*)workspace.data();
 		}
 
@@ -664,69 +664,67 @@ public:
 			return;
 		}
 
-		{
-			GPUMemory<float>* positions = &m_positions[stream];
-			if (positions->size() < num_elements) {
-				throw std::runtime_error{"GridEncoding: backward(stream) called without calling encode(stream) beforehand."};
-			}
+		GPUMemory<float>* positions = &m_positions[stream];
+		if (positions->size() < num_elements) {
+			throw std::runtime_error{"GridEncoding: backward(stream) called without calling encode(stream) beforehand."};
+		}
 
-			const T* dL_dy_rm = dL_dy.ptr;
+		const T* dL_dy_rm = dL_dy.ptr;
 
-			BorrowedWorkspace workspace;
-			if (m_output_layout == CM) {
-				workspace = borrow_workspace(stream, num_elements * m_n_features * sizeof(T));
+		GPUMemoryArena::Allocation workspace;
+		if (m_output_layout == CM) {
+			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 
-				// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
-				const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
-				const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
-				transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
-					num_elements,
-					(T*)workspace.data(),
-					dL_dy
-				);
-
-				dL_dy_rm = (const T*)workspace.data();
-			}
-
-			// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
-			// If not, accumulate in a temporary buffer and cast later.
-			grad_t* grid_gradient;
-			if (!std::is_same<grad_t, T>::value) {
-				grid_gradient = (grad_t*)m_grid_gradient_tmp.data();
-			} else {
-				grid_gradient = (grad_t*)m_grid_gradient;
-			}
-
-			if (!accumulate_param_gradients) {
-				CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
-			}
-
-			static constexpr uint32_t N_THREADS_HASHGRID = 256;
-			static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
-
-			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
-
-			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+			// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
+			const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
+			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
+			transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
 				num_elements,
-				m_n_features,
-				m_hashmap_offsets_table.data(),
-				m_base_resolution,
-				std::log2(m_per_level_scale),
-				this->m_max_level,
-				this->m_max_level_gpu,
-				m_stochastic_interpolation,
-				m_interpolation_type,
-				m_grid_type,
-				grid_gradient,
-				positions->data(), // positions SoA
-				dL_dy_rm // gradients SoA
+				(T*)workspace.data(),
+				dL_dy
 			);
 
-			if (!std::is_same<grad_t, T>::value) {
-				parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
-					grad[i] = (T)grad_tmp[i];
-				});
-			}
+			dL_dy_rm = (const T*)workspace.data();
+		}
+
+		// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
+		// If not, accumulate in a temporary buffer and cast later.
+		grad_t* grid_gradient;
+		if (!std::is_same<grad_t, T>::value) {
+			grid_gradient = (grad_t*)m_grid_gradient_tmp.data();
+		} else {
+			grid_gradient = (grad_t*)m_grid_gradient;
+		}
+
+		if (!accumulate_param_gradients) {
+			CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
+		}
+
+		static constexpr uint32_t N_THREADS_HASHGRID = 256;
+		static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
+
+		const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
+
+		kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+			num_elements,
+			m_n_features,
+			m_hashmap_offsets_table.data(),
+			m_base_resolution,
+			std::log2(m_per_level_scale),
+			this->m_max_level,
+			this->m_max_level_gpu,
+			m_stochastic_interpolation,
+			m_interpolation_type,
+			m_grid_type,
+			grid_gradient,
+			positions->data(), // positions SoA
+			dL_dy_rm // gradients SoA
+		);
+
+		if (!std::is_same<grad_t, T>::value) {
+			parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
+				grad[i] = (T)grad_tmp[i];
+			});
 		}
 
 		// Can't compute input gradients if insufficient info is available
@@ -737,7 +735,7 @@ public:
 		linear_kernel(kernel_grid_backward_input<T, N_POS_DIMS>, 0, stream,
 			num_elements * num_dims_to_encode(),
 			m_n_features,
-			dL_dy,
+			dL_dy_rm,
 			dy_dx,
 			dy_dx + N_POS_DIMS * m_n_features * num_elements,
 			dL_dx

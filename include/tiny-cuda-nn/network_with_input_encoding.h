@@ -52,10 +52,6 @@ public:
 			encoding->set_output_layout(RM);
 		}
 
-		m_inference_network_input.set_layout(encoding->output_layout());
-		m_forward_network_input.set_layout(encoding->output_layout());
-		m_backward_dL_dnetwork_input.set_layout(encoding->output_layout());
-
 		json local_network_config = network;
 		local_network_config["n_input_dims"] = m_encoding->num_encoded_dims();
 		local_network_config["n_output_dims"] = n_output_dims;
@@ -68,33 +64,15 @@ public:
 	virtual ~NetworkWithInputEncoding() { }
 
 	void inference(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<float>& output) override {
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = input.n();
-		if (m_inference_network_input.n() != batch_size) {
-			allocate_inference_buffers(batch_size);
-		}
-
-		m_encoding->encode(
-			stream,
-			input.n(),
-			{input.data(), input.m()},
-			{m_inference_network_input.data(),
-			m_inference_network_input.m()},
-			nullptr,
-			true
-		);
-		m_network->inference(stream, m_inference_network_input, output);
+		GPUMatrixDynamic<T> network_input = {m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
+		m_encoding->encode(stream, input.n(), {input.data(), input.m()}, {network_input.data(), network_input.m()}, nullptr, true);
+		m_network->inference(stream, network_input, output);
 	}
 
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override {
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = input.n();
-		if (m_inference_network_input.n() != batch_size) {
-			allocate_inference_buffers(batch_size);
-		}
-
-		m_encoding->encode(stream, input.n(), {input.data(), input.m()}, {m_inference_network_input.data(), m_inference_network_input.m()}, nullptr, use_inference_matrices);
-		m_network->inference_mixed_precision(stream, m_inference_network_input, output, use_inference_matrices);
+		GPUMatrixDynamic<T> network_input = {m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
+		m_encoding->encode(stream, input.n(), {input.data(), input.m()}, {network_input.data(), network_input.m()}, nullptr, use_inference_matrices);
+		m_network->inference_mixed_precision(stream, network_input, output, use_inference_matrices);
 	}
 
 	uint32_t num_encoded_dims() const {
@@ -104,19 +82,25 @@ public:
 	void forward(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
-		if (m_forward_network_input.n() != batch_size) {
-			allocate_forward_buffers(batch_size);
+
+		m_forward.network_input = GPUMatrixDynamic<T>{m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
+		if (prepare_input_gradients) {
+			m_forward.encoding_forward_gradient = GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), input.n(), stream};
 		}
 
 		m_encoding->encode(
 			stream,
 			input.n(),
 			{input.data(), input.m()},
-			{m_forward_network_input.data(), m_forward_network_input.m()},
-			prepare_input_gradients ? m_forward_encoding_forward_gradient.data() : nullptr,
+			{m_forward.network_input.data(), m_forward.network_input.m()},
+			prepare_input_gradients ? m_forward.encoding_forward_gradient.data() : nullptr,
 			use_inference_matrices
 		);
-		m_network->forward(stream, m_forward_network_input, output, use_inference_matrices, prepare_input_gradients);
+		m_network->forward(stream, m_forward.network_input, output, use_inference_matrices, prepare_input_gradients);
+	}
+
+	void forward_clear() override {
+		m_forward.clear();
 	}
 
 	void backward(
@@ -128,28 +112,24 @@ public:
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) override {
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = input.n();
-		if (m_backward_dL_dnetwork_input.n() != batch_size) {
-			allocate_backward_buffers(batch_size);
-		}
-
-		GPUMatrixDynamic<T>* dL_dnetwork_input = nullptr;
+		GPUMatrixDynamic<T> dL_dnetwork_input;
 		if (m_encoding->n_params() > 0 || dL_dinput) {
-			dL_dnetwork_input = &m_backward_dL_dnetwork_input;
+			dL_dnetwork_input = {m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
 		}
 
-		m_network->backward(stream, m_forward_network_input, output, dL_doutput, dL_dnetwork_input, use_inference_matrices, compute_param_gradients);
-		if (dL_dnetwork_input) {
+		m_network->backward(stream, m_forward.network_input, output, dL_doutput, &dL_dnetwork_input, use_inference_matrices, compute_param_gradients);
+		if (dL_dnetwork_input.data()) {
 			m_encoding->backward(
 				stream,
 				input.n(),
-				{dL_dnetwork_input->data(), dL_dnetwork_input->m()},
-				dL_dinput ? m_forward_encoding_forward_gradient.data() : nullptr,
+				{dL_dnetwork_input.data(), dL_dnetwork_input.m()},
+				dL_dinput ? m_forward.encoding_forward_gradient.data() : nullptr,
 				dL_dinput ? PitchedPtr<float>{dL_dinput->data(), dL_dinput->m()} : PitchedPtr<float>{},
 				{input.data(), input.m()}
 			);
 		}
+
+		forward_clear();
 	}
 
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
@@ -225,7 +205,10 @@ public:
 	}
 
 	const T* forward_activations(uint32_t layer) const override {
-		return layer == 0 ? m_forward_network_input.data() : m_network->forward_activations(layer - 1);
+		if (!m_forward.network_input.data()) {
+			throw std::runtime_error{"Must call forward() before accessing activations."};
+		}
+		return layer == 0 ? m_forward.network_input.data() : m_network->forward_activations(layer - 1);
 	}
 
 	uint32_t input_width() const {
@@ -237,57 +220,19 @@ public:
 	}
 
 private:
-	void allocate_inference_buffers(uint32_t batch_size) {
-		m_inference_network_input.set_size(m_encoding->num_encoded_dims(), batch_size);
-
-		GPUMatrixBase::allocate_shared_memory(
-			m_inference_buffer,
-			{
-				&m_inference_network_input,
-			}
-		);
-	}
-
-	void allocate_forward_buffers(uint32_t batch_size) {
-		m_forward_network_input.set_size(m_encoding->num_encoded_dims(), batch_size);
-		m_forward_encoding_forward_gradient.set_size(m_encoding->num_forward_gradient_dims(), batch_size);
-
-		GPUMatrixBase::allocate_shared_memory(
-			m_forward_buffer,
-			{
-				&m_forward_network_input,
-				&m_forward_encoding_forward_gradient,
-			}
-		);
-	}
-
-	void allocate_backward_buffers(uint32_t batch_size) {
-		m_backward_dL_dnetwork_input.set_size(m_encoding->num_encoded_dims(), batch_size);
-
-		GPUMatrixBase::allocate_shared_memory(
-			m_backward_buffer,
-			{
-				&m_backward_dL_dnetwork_input,
-			}
-		);
-	}
-
-private:
 	std::unique_ptr<Network<T>> m_network;
 	std::shared_ptr<Encoding<T>> m_encoding;
 
-	// Temporary buffers to hold inference data
-	GPUMemory<char> m_inference_buffer;
-	GPUMatrixDynamic<T> m_inference_network_input;
+	// Storage of forward pass data
+	struct {
+		GPUMatrixDynamic<T> network_input;
+		GPUMatrix<float> encoding_forward_gradient;
 
-	// Temporary buffers to hold forward data
-	GPUMemory<char> m_forward_buffer;
-	GPUMatrixDynamic<T> m_forward_network_input;
-	GPUMatrix<float> m_forward_encoding_forward_gradient; // Only needed when computing input gradients
-
-	// Temporary buffers to hold backward data
-	GPUMemory<char> m_backward_buffer;
-	GPUMatrixDynamic<T> m_backward_dL_dnetwork_input;
+		void clear() {
+			network_input = GPUMatrixDynamic<T>{};
+			encoding_forward_gradient = GPUMatrix<float>{};
+		}
+	} m_forward;
 };
 
 TCNN_NAMESPACE_END
