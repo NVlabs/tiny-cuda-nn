@@ -151,6 +151,15 @@ __global__ void kernel_grid(
 			encoded_positions[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = (T)0.0f;
 		}
 
+		// Gradient is zero for zeroed-out dimensions.
+		if (dy_dx) {
+			#pragma unroll
+			for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+				const uint32_t fan_out_grad = num_grid_features * N_POS_DIMS;
+				*(vector_fullp_t<N_FEATURES_PER_LEVEL>*)&dy_dx[i * fan_out_grad + level * N_FEATURES_PER_LEVEL + grad_dim * num_grid_features] = {0};
+			}
+		}
+
 		return;
 	}
 
@@ -187,6 +196,15 @@ __global__ void kernel_grid(
 		#pragma unroll
 		for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
 			encoded_positions[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = result[f];
+		}
+
+		// Gradient is zero when there's no interpolation.
+		if (dy_dx) {
+			#pragma unroll
+			for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+				const uint32_t fan_out_grad = num_grid_features * N_POS_DIMS;
+				*(vector_fullp_t<N_FEATURES_PER_LEVEL>*)&dy_dx[i * fan_out_grad + level * N_FEATURES_PER_LEVEL + grad_dim * num_grid_features] = {0};
+			}
 		}
 
 		return;
