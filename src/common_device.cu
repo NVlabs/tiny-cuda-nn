@@ -31,7 +31,6 @@
 
 #include <tiny-cuda-nn/common_device.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 TCNN_NAMESPACE_END

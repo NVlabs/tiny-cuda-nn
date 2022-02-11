@@ -44,7 +44,6 @@
 
 #include <tiny-cuda-nn/gpu_matrix.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 static constexpr float PI = 3.14159265358979323846f;

@@ -40,7 +40,6 @@
 #include <array>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>

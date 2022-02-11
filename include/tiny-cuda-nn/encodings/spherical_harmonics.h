@@ -41,9 +41,7 @@
 #include <string>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
-
 
 template <typename T>
 __global__ void kernel_sh(

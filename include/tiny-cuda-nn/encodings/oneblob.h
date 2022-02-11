@@ -42,9 +42,7 @@
 #include <string>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
-
 
 template <typename F>
 __device__ inline float one_blob_subwarp_aligned(F kernel, const float* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
@@ -69,7 +67,6 @@ __device__ inline float one_blob_subwarp_aligned(F kernel, const float* __restri
 	return right_cdf - left_cdf;
 }
 
-
 template <typename F>
 __device__ inline float one_blob(F kernel, const float* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
 	const uint32_t n_bins = 1 << num_bins_log2;
@@ -84,7 +81,6 @@ __device__ inline float one_blob(F kernel, const float* __restrict__ data_in, co
 
 	return right_cdf - left_cdf;
 }
-
 
 template <typename T>
 __global__ void kernel_one_blob(

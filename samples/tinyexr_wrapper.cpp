@@ -28,7 +28,6 @@
 #define TINYEXR_IMPLEMENTATION
 #include <tinyexr/tinyexr.h>
 
-
 void save_exr(const float* data, int width, int height, int nChannels, int channelStride, const char* outfilename) {
 	EXRHeader header;
 	InitEXRHeader(&header);

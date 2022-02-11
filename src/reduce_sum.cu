@@ -30,7 +30,6 @@
 
 #include <tiny-cuda-nn/reduce_sum.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 __global__ void block_reduce1(

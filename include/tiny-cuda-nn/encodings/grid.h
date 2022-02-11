@@ -45,7 +45,6 @@
 #include <string>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
 
 enum GridType { Hash, Dense, Tiled };

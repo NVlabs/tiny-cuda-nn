@@ -39,7 +39,6 @@
 #include <tiny-cuda-nn/losses/relative_l2_luminance.h>
 #include <tiny-cuda-nn/losses/cross_entropy.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>

@@ -34,7 +34,6 @@
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/object.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>

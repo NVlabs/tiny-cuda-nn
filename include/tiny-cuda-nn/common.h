@@ -28,7 +28,6 @@
  *  @brief  Common utilities that are needed by pretty much every component of this framework.
  */
 
-
 #pragma once
 
 // A macro is used such that external tools won't end up indenting entire files,
@@ -53,7 +52,6 @@
 #endif
 
 #include <cuda_fp16.h>
-
 
 TCNN_NAMESPACE_BEGIN
 

@@ -32,7 +32,6 @@
 
 #include <tiny-cuda-nn/common.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 enum class MatrixLayout {

@@ -28,14 +28,12 @@
  *  @brief  Common utilities that are needed by pretty much every component of this framework.
  */
 
-
 #include <tiny-cuda-nn/common.h>
 
 #include <cuda.h>
 
 #include <algorithm>
 #include <cctype>
-
 
 TCNN_NAMESPACE_BEGIN
 

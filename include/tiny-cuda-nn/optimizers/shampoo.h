@@ -46,9 +46,7 @@
 #include <string>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
-
 
 #define CUBLAS_CHECK_THROW(x)                                                                                           \
 	do {                                                                                                                \

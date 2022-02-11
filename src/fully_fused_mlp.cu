@@ -36,7 +36,6 @@
 
 #include <mma.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 void check_shmem_error(cudaError_t error) {

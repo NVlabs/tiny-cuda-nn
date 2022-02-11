@@ -46,7 +46,6 @@
 #include <iostream>
 #include <random>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T, typename PARAMS_T, typename COMPUTE_T=T>

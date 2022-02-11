@@ -37,7 +37,6 @@
 
 #include <pcg32/pcg32.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 using json = nlohmann::json;

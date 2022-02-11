@@ -33,7 +33,6 @@
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/common_device.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>

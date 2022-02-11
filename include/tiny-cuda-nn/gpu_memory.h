@@ -44,7 +44,6 @@
 #include <unordered_map>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
 
 #define DEBUG_GUARD_SIZE 0

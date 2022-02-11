@@ -35,7 +35,6 @@
 
 #include <pcg32/pcg32.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 #define IQ_DEFAULT_STATE  0x853c49e6748fea9bULL

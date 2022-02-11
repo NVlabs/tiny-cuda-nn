@@ -37,7 +37,6 @@
 #include <iostream>
 #include <map>
 
-
 TCNN_NAMESPACE_BEGIN
 
 uint32_t reduce_sum_workspace_size(uint32_t n_elements);

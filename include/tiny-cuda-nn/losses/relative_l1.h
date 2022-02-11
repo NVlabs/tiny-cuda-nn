@@ -35,7 +35,6 @@
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/loss.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>

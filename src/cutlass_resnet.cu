@@ -33,7 +33,6 @@
 
 #include <tiny-cuda-nn/cutlass_matmul.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T, Activation input_activation>

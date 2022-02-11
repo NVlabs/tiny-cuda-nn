@@ -35,7 +35,6 @@
 
 #include <stdint.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 enum InterpolationType {

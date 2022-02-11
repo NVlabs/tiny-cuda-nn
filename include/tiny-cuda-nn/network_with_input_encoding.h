@@ -37,7 +37,6 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/network.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>

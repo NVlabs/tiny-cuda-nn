@@ -33,7 +33,6 @@
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/object.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 enum class WeightUsage {

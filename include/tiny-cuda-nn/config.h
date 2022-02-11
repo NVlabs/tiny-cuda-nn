@@ -40,7 +40,6 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/trainer.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 struct TrainableModel {

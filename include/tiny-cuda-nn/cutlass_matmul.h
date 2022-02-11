@@ -50,7 +50,6 @@
 #include <map>
 #include <type_traits>
 
-
 TCNN_NAMESPACE_BEGIN
 
 #define CUTLASS_CHECK(status)                                                                      \

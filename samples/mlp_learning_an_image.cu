@@ -45,11 +45,8 @@
 #include <thread>
 #include <vector>
 
-
 using namespace tcnn;
 using precision_t = network_precision_t;
-
-
 
 GPUMemory<float> load_image(const std::string& filename, int& width, int& height) {
 	float* out; // width * height * RGBA

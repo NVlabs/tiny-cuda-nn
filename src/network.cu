@@ -38,7 +38,6 @@
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
 #endif
 
-
 TCNN_NAMESPACE_BEGIN
 
 Activation string_to_activation(std::string activation_name) {
@@ -67,7 +66,6 @@ void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements,
 }
 
 template void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const network_precision_t* encoded, float* output);
-
 
 template <typename T>
 Network<T>* create_network(const json& network) {
