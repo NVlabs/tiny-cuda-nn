@@ -644,7 +644,6 @@ public:
 			});
 
 			CUDA_CHECK_THROW(cudaMemcpyAsync(delta.data(), sum_tmp, n_matrices * sizeof(ROOT_TYPE), cudaMemcpyDeviceToHost, stream));
-			CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 
 			if (std::any_of(std::begin(delta), std::end(delta), [](ROOT_TYPE v) { return !std::isfinite(v); })) {
 				std::cout << "Failed to converge! " << delta[0] << std::endl;
