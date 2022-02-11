@@ -137,7 +137,7 @@ __global__ void kernel_grid(
 	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_elements) return;
 
-	uint32_t level = blockIdx.y; // <- the level is the same for all threads.
+	const uint32_t level = blockIdx.y; // <- the level is the same for all threads
 
 	if (max_level_gpu) {
 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
@@ -154,9 +154,8 @@ __global__ void kernel_grid(
 		// Gradient is zero for zeroed-out dimensions.
 		if (dy_dx) {
 			#pragma unroll
-			for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-				const uint32_t fan_out_grad = num_grid_features * N_POS_DIMS;
-				*(vector_fullp_t<N_FEATURES_PER_LEVEL>*)&dy_dx[i * fan_out_grad + level * N_FEATURES_PER_LEVEL + grad_dim * num_grid_features] = {0};
+			for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
+				((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = {0};
 			}
 		}
 
@@ -201,9 +200,8 @@ __global__ void kernel_grid(
 		// Gradient is zero when there's no interpolation.
 		if (dy_dx) {
 			#pragma unroll
-			for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-				const uint32_t fan_out_grad = num_grid_features * N_POS_DIMS;
-				*(vector_fullp_t<N_FEATURES_PER_LEVEL>*)&dy_dx[i * fan_out_grad + level * N_FEATURES_PER_LEVEL + grad_dim * num_grid_features] = {0};
+			for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
+				((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = {0};
 			}
 		}
 
@@ -246,10 +244,10 @@ __global__ void kernel_grid(
 
 	// Gradient
 	if (dy_dx) {
+		vector_fullp_t<N_POS_DIMS> grads[N_FEATURES_PER_LEVEL] = {};
+
 		#pragma unroll
 		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-			vector_fullp_t<N_FEATURES_PER_LEVEL> grad = {0};
-
 			#pragma unroll
 			for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
 				float weight = scale;
@@ -275,12 +273,14 @@ __global__ void kernel_grid(
 
 				#pragma unroll
 				for (uint32_t feature = 0; feature < N_FEATURES_PER_LEVEL; ++feature) {
-					((float*)&grad)[feature] += weight * ((float)((T*)&val_right)[feature] - (float)((T*)&val_left)[feature]) * pos_derivative[grad_dim];
+					grads[feature][grad_dim] += weight * ((float)val_right[feature] - (float)val_left[feature]) * pos_derivative[grad_dim];
 				}
 			}
+		}
 
-			const uint32_t fan_out_grad = num_grid_features * N_POS_DIMS;
-			*(vector_fullp_t<N_FEATURES_PER_LEVEL>*)&dy_dx[i * fan_out_grad + level * N_FEATURES_PER_LEVEL + grad_dim * num_grid_features] = grad;
+		#pragma unroll
+		for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
+			((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = grads[f];
 		}
 	}
 }
@@ -445,23 +445,25 @@ __global__ void kernel_grid_backward_input(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
 	const T* dL_dy_rm,
-	const float* __restrict__ dy_dx_pos,
-	const float* __restrict__ dy_dx_oneblob,
+	const float* __restrict__ dy_dx,
 	PitchedPtr<float> dL_dx
 ) {
-	const uint32_t input_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (input_index >= num_elements) return;
+	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
 
-	const uint32_t fan_out_grad = num_grid_features * N_POS_DIMS;
+	vector_fullp_t<N_POS_DIMS> result = {0};
 
-	const uint32_t i = input_index / N_POS_DIMS; // i is the record we are looking at ....
-	const uint32_t j = input_index - i * N_POS_DIMS; // j is the input channel....
-
-	float result = 0;
 	for (int k = 0; k < num_grid_features; ++k) {
-		result += (float)dL_dy_rm[k * (num_elements / N_POS_DIMS) + i] * dy_dx_pos[i * fan_out_grad + j * num_grid_features + k];
+		float dL_dy_local = (float)dL_dy_rm[i + k * num_elements];
+		auto dy_dx_local = ((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+
+		#pragma unroll
+		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+			result[dim] += dL_dy_local * dy_dx_local[dim];
+		}
 	}
-	dL_dx(i)[j] = result;
+
+	*(vector_fullp_t<N_POS_DIMS>*)dL_dx(i) = result;
 }
 
 template <typename T>
@@ -750,11 +752,10 @@ public:
 		}
 
 		linear_kernel(kernel_grid_backward_input<T, N_POS_DIMS>, 0, stream,
-			num_elements * num_dims_to_encode(),
+			num_elements,
 			m_n_features,
 			dL_dy_rm,
 			dy_dx,
-			dy_dx + N_POS_DIMS * m_n_features * num_elements,
 			dL_dx
 		);
 	}

@@ -370,7 +370,7 @@ inline std::string bytes_to_string(size_t bytes) {
 }
 
 template <typename T, uint32_t N_ELEMS>
-struct alignas(sizeof(T) * N_ELEMS) vector_t {
+struct vector_t {
 	TCNN_HOST_DEVICE T& operator[](uint32_t idx) {
 		return data[idx];
 	}
