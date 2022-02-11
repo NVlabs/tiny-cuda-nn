@@ -32,6 +32,8 @@
 
 #include <tiny-cuda-nn/common.h>
 
+#include <stack>
+
 TCNN_NAMESPACE_BEGIN
 
 // Synchronization helpers
@@ -126,30 +128,50 @@ private:
 	cudaEvent_t m_event;
 };
 
-inline MultiStream* get_multi_stream(cudaStream_t stream, size_t n_streams) {
-	static std::map<cudaStream_t, MultiStream> multi_streams;
-	auto& result = multi_streams[stream];
-	result.resize(n_streams);
-	return &result;
+inline std::map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& multi_streams() {
+	static std::map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
+	return s_multi_streams;
+}
+
+inline std::shared_ptr<MultiStream> reserve_multi_stream(cudaStream_t parent_stream, size_t n_streams) {
+	auto& stack = multi_streams()[parent_stream];
+	if (stack.empty()) {
+		stack.push(std::make_shared<MultiStream>());
+	}
+	auto result = stack.top();
+	stack.pop();
+
+	result->resize(n_streams);
+	return result;
+}
+
+inline void return_multi_stream(cudaStream_t parent_stream, std::shared_ptr<MultiStream> multi_stream) {
+	if (multi_streams().count(parent_stream) == 0) {
+		throw std::runtime_error{"Attempted to return multi stream to the wrong parent stream."};
+	}
+
+	auto& stack = multi_streams()[parent_stream];
+	stack.push(multi_stream);
 }
 
 // RAII wrapper around MultiStream
 struct SyncedMultiStream {
 public:
-	SyncedMultiStream(cudaStream_t stream, size_t n_streams) : m_main_stream{stream}, m_n_stream{n_streams} {
-		if (n_streams == 0) {
+	SyncedMultiStream(cudaStream_t stream, size_t n_streams) : m_main_stream{stream}, m_n_streams{n_streams} {
+		if (m_n_streams == 0) {
 			throw std::runtime_error{"SyncedMultiStream: must request at least one stream"};
-		} else if (n_streams == 1) {
+		} else if (m_n_streams == 1) {
 			return;
 		}
 
-		m_multi_stream = get_multi_stream(stream, n_streams);
-		m_multi_stream->wait_for(stream);
+		m_multi_stream = reserve_multi_stream(m_main_stream, m_n_streams-1);
+		m_multi_stream->wait_for(m_main_stream);
 	}
 
 	~SyncedMultiStream() {
 		if (m_multi_stream) {
 			m_multi_stream->signal(m_main_stream);
+			return_multi_stream(m_main_stream, m_multi_stream);
 		}
 	}
 
@@ -158,29 +180,25 @@ public:
 	SyncedMultiStream(SyncedMultiStream&& other) {
 		std::swap(m_multi_stream, other.m_multi_stream);
 		std::swap(m_main_stream, other.m_main_stream);
-		std::swap(m_n_stream, other.m_n_stream);
+		std::swap(m_n_streams, other.m_n_streams);
 	}
 
 	cudaStream_t get(size_t idx) {
-		if (m_n_stream == 1) {
-			if (idx == 0) {
-				return m_main_stream;
-			} else {
-				throw std::runtime_error{"SyncedMultiStream: invalid stream index requested (single multistream)"};
+		if (idx == 0) {
+			return m_main_stream;
+		} else {
+			if (!m_multi_stream) {
+				throw std::runtime_error{"SyncedMultiStream: invalid multistream"};
 			}
-		}
 
-		if (!m_multi_stream) {
-			throw std::runtime_error{"SyncedMultiStream: invalid multistream"};
+			return m_multi_stream->get(idx-1);
 		}
-
-		return m_multi_stream->get(idx);
 	}
 
 private:
-	MultiStream* m_multi_stream = nullptr;
+	std::shared_ptr<MultiStream> m_multi_stream = nullptr;
 	cudaStream_t m_main_stream = nullptr;
-	size_t m_n_stream;
+	size_t m_n_streams;
 };
 
 TCNN_NAMESPACE_END
