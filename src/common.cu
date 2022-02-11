@@ -42,6 +42,12 @@ static_assert(
 	"tiny-cuda-nn requires at least CUDA 10.2"
 );
 
+int cuda_device() {
+	int device;
+	CUDA_CHECK_THROW(cudaGetDevice(&device));
+	return device;
+}
+
 uint32_t cuda_compute_capability(int device) {
 	cudaDeviceProp props;
 	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));

@@ -92,8 +92,17 @@ enum class Activation {
 // Misc helpers //
 //////////////////
 
-uint32_t cuda_compute_capability(int device = 0);
-size_t cuda_memory_granularity(int device = 0);
+int cuda_device();
+
+uint32_t cuda_compute_capability(int device);
+inline uint32_t cuda_compute_capability() {
+	return cuda_compute_capability(cuda_device());
+}
+
+size_t cuda_memory_granularity(int device);
+inline size_t cuda_memory_granularity() {
+	return cuda_memory_granularity(cuda_device());
+}
 
 std::string to_lower(std::string str);
 std::string to_upper(std::string str);

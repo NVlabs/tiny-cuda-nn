@@ -514,19 +514,19 @@ public:
 		CUmemAllocationProp prop = {};
 		prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 		prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-		prop.location.id = 0;
+		prop.location.id = cuda_device();
 
 		m_handles.emplace_back();
 		CU_CHECK_THROW(cuMemCreate(&m_handles.back(), n_bytes_to_allocate, &prop, 0));
 
 		CUmemAccessDesc access_desc = {};
 		access_desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-		access_desc.location.id = 0;
+		access_desc.location.id = prop.location.id;
 		access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 
 		CU_CHECK_THROW(cuMemMap(m_base_address + m_size, n_bytes_to_allocate, 0, m_handles.back(), 0));
+		CU_CHECK_THROW(cuMemSetAccess(m_base_address + m_size, n_bytes_to_allocate, &access_desc, 1));
 		m_size += n_bytes_to_allocate;
-		CU_CHECK_THROW(cuMemSetAccess(m_base_address, m_size, &access_desc, 1));
 
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
