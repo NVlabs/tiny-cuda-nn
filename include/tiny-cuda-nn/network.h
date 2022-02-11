@@ -42,7 +42,7 @@ enum class WeightUsage {
 };
 
 template <typename T>
-void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, float* output);
+void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, MatrixLayout layout, float* output);
 
 template <typename T, typename PARAMS_T=T>
 class Network : public DifferentiableObject<T, PARAMS_T, PARAMS_T> {
@@ -59,13 +59,14 @@ public:
 		dimension = std::min(dimension, width(layer)-1);
 
 		this->forward(stream, input);
-		extract_dimension_pos_neg<PARAMS_T>(stream, output.n_elements(), dimension, width(layer), output.rows(), forward_activations(layer), output.data());
+		auto vals = forward_activations(layer);
+		extract_dimension_pos_neg<PARAMS_T>(stream, output.n_elements(), dimension, width(layer), output.rows(), vals.first, vals.second, output.data());
 		this->forward_clear();
 	}
 
 	virtual uint32_t width(uint32_t layer) const = 0;
 	virtual uint32_t num_forward_activations() const = 0;
-	virtual const PARAMS_T* forward_activations(uint32_t layer) const = 0;
+	virtual std::pair<const PARAMS_T*, MatrixLayout> forward_activations(uint32_t layer) const = 0;
 };
 
 template <typename T>

@@ -130,11 +130,11 @@ public:
 		return m_n_blocks * m_n_matrices_per_block + 1;
 	}
 
-	const T* forward_activations(uint32_t layer) const override {
+	std::pair<const T*, MatrixLayout> forward_activations(uint32_t layer) const override {
 		if (m_forward.hidden.size() == 0) {
 			throw std::runtime_error{"Must call forward() before accessing activations."};
 		}
-		return m_forward.hidden.at(layer).data();
+		return {m_forward.hidden.at(layer).data(), CM};
 	}
 
 private:

@@ -133,11 +133,11 @@ public:
 		return m_can_fuse_activation ? m_n_hidden_layers : (m_n_hidden_layers * 2);
 	}
 
-	const T* forward_activations(uint32_t layer) const override {
+	std::pair<const T*, MatrixLayout> forward_activations(uint32_t layer) const override {
 		if (m_forward.hidden.size() == 0) {
 			throw std::runtime_error{"Must call forward() before accessing activations."};
 		}
-		return m_forward.hidden.at(layer).data();
+		return {m_forward.hidden.at(layer).data(), CM};
 	}
 
 private:

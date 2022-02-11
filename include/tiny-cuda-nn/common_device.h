@@ -558,22 +558,24 @@ __global__ void cast_from(const uint32_t num_elements, const T* __restrict__ pre
 }
 
 template <typename T>
-__global__ void extract_dimension_pos_neg_kernel(const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* __restrict__ encoded, float* __restrict__ output) {
+__global__ void extract_dimension_pos_neg_kernel(const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* __restrict__ encoded, const MatrixLayout layout, float* __restrict__ output) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
 	const uint32_t elem_idx = i / fan_out;
 	const uint32_t dim_idx = i % fan_out;
 
+	const uint32_t encoded_idx = layout == MatrixLayout::AoS ? (elem_idx * fan_in + dim) : (elem_idx + dim * num_elements / fan_out);
+
 	if (fan_out == 1) {
-		output[i] = (float)encoded[elem_idx * fan_in + dim];
+		output[i] = (float)encoded[encoded_idx];
 		return;
 	}
 
 	if (dim_idx == 0) {
-		output[i] = fmaxf(-(float)encoded[elem_idx * fan_in + dim], 0.0f);
+		output[i] = fmaxf(-(float)encoded[encoded_idx], 0.0f);
 	} else if (dim_idx == 1) {
-		output[i] = fmaxf((float)encoded[elem_idx * fan_in + dim], 0.0f);
+		output[i] = fmaxf((float)encoded[encoded_idx], 0.0f);
 	} else if (dim_idx == 2) {
 		output[i] = 0;
 	} else {

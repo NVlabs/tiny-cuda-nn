@@ -203,11 +203,11 @@ public:
 		return m_network->num_forward_activations() + 1;
 	}
 
-	const T* forward_activations(uint32_t layer) const override {
+	std::pair<const T*, MatrixLayout> forward_activations(uint32_t layer) const override {
 		if (!m_forward.network_input.data()) {
 			throw std::runtime_error{"Must call forward() before accessing activations."};
 		}
-		return layer == 0 ? m_forward.network_input.data() : m_network->forward_activations(layer - 1);
+		return layer == 0 ? std::make_pair<const T*, MatrixLayout>(m_forward.network_input.data(), m_encoding->output_layout()) : m_network->forward_activations(layer - 1);
 	}
 
 	uint32_t input_width() const {
