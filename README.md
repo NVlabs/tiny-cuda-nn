@@ -25,15 +25,19 @@ nlohmann::json config = {
 		{"learning_rate", 1e-3},
 	}},
 	{"encoding", {
-		{"otype", "OneBlob"},
-		{"n_bins", 32},
+		{"otype", "HashGrid"},
+		{"n_levels", 16},
+		{"n_features_per_level", 2},
+		{"log2_hashmap_size", 19},
+		{"base_resolution", 16},
+		{"per_level_scale", 2.0},
 	}},
 	{"network", {
 		{"otype", "FullyFusedMLP"},
-		{"n_neurons", 64},
-		{"n_hidden_layers", 5},
 		{"activation", "ReLU"},
 		{"output_activation", "None"},
+		{"n_neurons", 64},
+		{"n_hidden_layers", 2},
 	}},
 };
 
