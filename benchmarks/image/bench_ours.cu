@@ -39,7 +39,7 @@
 
 #include <tiny-cuda-nn/trainer.h>
 
-#include <tinyexr/tinyexr.h>
+#include <stbi/stbi_wrapper.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -56,87 +56,9 @@ using namespace tcnn;
 using precision_t = network_precision_t;
 
 
-bool SaveEXR(const float* data, int width, int height, int nChannels, int channelStride, const char* outfilename) {
-	EXRHeader header;
-	InitEXRHeader(&header);
-
-	EXRImage image;
-	InitEXRImage(&image);
-
-	image.num_channels = nChannels;
-
-	std::vector<std::vector<float>> images(nChannels);
-	std::vector<float*> image_ptr(nChannels);
-	for (int i = 0; i < nChannels; ++i) {
-		images[i].resize(width * height);
-	}
-
-	for (int i = 0; i < nChannels; ++i) {
-		image_ptr[i] = images[nChannels - i - 1].data();
-	}
-
-	for (size_t i = 0; i < (size_t)width * height; i++) {
-		for (int c = 0; c < nChannels; ++c) {
-			images[c][i] = data[channelStride*i+c];
-		}
-	}
-
-	image.images = (unsigned char**)image_ptr.data();
-	image.width = width;
-	image.height = height;
-
-	header.num_channels = nChannels;
-	header.channels = (EXRChannelInfo *)malloc(sizeof(EXRChannelInfo) * header.num_channels);
-	// Must be (A)BGR order, since most of EXR viewers expect this channel order.
-	strncpy(header.channels[0].name, "B", 255); header.channels[0].name[strlen("B")] = '\0';
-	if (nChannels > 1) {
-		strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
-	}
-	if (nChannels > 2) {
-		strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
-	}
-	if (nChannels > 3) {
-		strncpy(header.channels[3].name, "A", 255); header.channels[3].name[strlen("A")] = '\0';
-	}
-
-	header.pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
-	header.requested_pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
-	for (int i = 0; i < header.num_channels; i++) {
-		header.pixel_types[i] = TINYEXR_PIXELTYPE_FLOAT; // pixel type of input image
-		header.requested_pixel_types[i] = TINYEXR_PIXELTYPE_HALF; // pixel type of output image to be stored in .EXR
-	}
-
-	const char* err = NULL; // or nullptr in C++11 or later.
-	int ret = SaveEXRImageToFile(&image, &header, outfilename, &err);
-	if (ret != TINYEXR_SUCCESS) {
-		fprintf(stderr, "Save EXR err: %s\n", err);
-		FreeEXRErrorMessage(err); // free's buffer for an error message
-		return ret;
-	}
-	printf("Saved exr file. [ %s ] \n", outfilename);
-
-	free(header.channels);
-	free(header.pixel_types);
-	free(header.requested_pixel_types);
-	return true;
-}
-
-
 GPUMemory<float> load_image(const std::string& filename, int& width, int& height) {
-	float* out; // width * height * RGBA
-	const char* err = nullptr;
-
-	int ret = LoadEXR(&out, &width, &height, filename.c_str(), &err);
-
-	if (ret != TINYEXR_SUCCESS) {
-		if (err) {
-			std::string error_message = std::string("Failed to load EXR image: ") + err;
-			FreeEXRErrorMessage(err);
-			throw std::runtime_error(error_message);
-		} else {
-			throw std::runtime_error("Failed to load EXR image");
-		}
-	}
+	// width * height * RGBA
+	float* out = load_stbi(&width, &height, filename.c_str());
 
 	GPUMemory<float> result(width * height * 4);
 	result.copy_from_host(out);
@@ -146,16 +68,25 @@ GPUMemory<float> load_image(const std::string& filename, int& width, int& height
 }
 
 template <typename T>
-void save_image(const GPUMemory<T>& image, int width, int height, int n_channels, int channel_stride, const std::string& filename) {
-	std::vector<T> host_data(image.size());
-	image.copy_to_host(host_data.data());
+__global__ void to_ldr(const uint64_t num_elements, const uint32_t n_channels, const uint32_t stride, const T* __restrict__ in, uint8_t* __restrict__ out) {
+	const uint64_t i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i >= num_elements) return;
 
-	std::vector<float> float_host_data(host_data.size());
-	for (size_t i = 0; i < host_data.size(); ++i) {
-		float_host_data[i] = (float)host_data[i];
-	}
+	const uint64_t pixel = i / n_channels;
+	const uint32_t channel = i - pixel * n_channels;
 
-	SaveEXR(float_host_data.data(), width, height, n_channels, channel_stride, filename.c_str());
+	out[i] = (uint8_t)(powf(fmaxf(fminf(in[pixel * stride + channel], 1.0f), 0.0f), 1.0f/2.2f) * 255.0f + 0.5f);
+}
+
+template <typename T>
+void save_image(const T* image, int width, int height, int n_channels, int channel_stride, const std::string& filename) {
+	GPUMemory<uint8_t> image_ldr(width * height * n_channels);
+	linear_kernel(to_ldr<T>, 0, nullptr, width * height * n_channels, n_channels, channel_stride, image, image_ldr.data());
+
+	std::vector<uint8_t> image_ldr_host(width * height * n_channels);
+	CUDA_CHECK_THROW(cudaMemcpy(image_ldr_host.data(), image_ldr.data(), image_ldr.size(), cudaMemcpyDeviceToHost));
+
+	save_stbi(image_ldr_host.data(), width, height, n_channels, filename.c_str());
 }
 
 template <uint32_t stride>
@@ -192,8 +123,8 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (argc < 3) {
-			std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr path-to-config.json" << std::endl;
-			std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
+			std::cout << "USAGE: " << argv[0] << " " << "path-to-image.jpg path-to-config.json" << std::endl;
+			std::cout << "A sample image is provided in 'data/images'." << std::endl;
 			return 0;
 		}
 
@@ -256,7 +187,7 @@ int main(int argc, char* argv[]) {
 
 		eval_image<3><<<n_blocks_linear(n_coords), n_threads_linear>>>(n_coords, texture, filter, width, height, xs_and_ys.data(), sampled_image.data());
 
-		save_image(sampled_image, sampling_width, sampling_height, 3, 3, "reference.exr");
+		save_image(sampled_image.data(), sampling_width, sampling_height, 3, 3, "reference.jpg");
 
 		// Fourth step: train the model by sampling the above image and optimizing relative squared error using Adam.
 		std::vector<uint32_t> batch_sizes = {1 << 14, 1 << 15, 1 << 16, 1 << 17, 1 << 18, 1 << 19, 1 << 20, 1 << 21};
@@ -362,7 +293,7 @@ int main(int argc, char* argv[]) {
 				encoding->encode(inference_stream, n_coords, {xs_and_ys.data(), num_dims_encoded}, {eval_obe_out.data(), num_output_dims});
 				network->inference(inference_stream, eval_obe_out, prediction);
 
-				save_image(prediction_data, sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".exr");
+				save_image(prediction_data.data(), sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".jpg");
 
 				std::cout << "Finished training benchmark. Mean throughput is " << mean_training_throughput << "/s. Waiting 10 seconds for GPU to cool down." << std::endl;
 				std::this_thread::sleep_for(std::chrono::seconds{10});
