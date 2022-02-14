@@ -72,4 +72,7 @@ public:
 template <typename T>
 Network<T, T>* create_network(const json& network);
 
+std::string select_network(const json& network);
+uint32_t minimum_alignment(const json& network);
+
 TCNN_NAMESPACE_END

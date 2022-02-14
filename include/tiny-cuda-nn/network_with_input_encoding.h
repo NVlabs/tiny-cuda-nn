@@ -43,8 +43,7 @@ template <typename T>
 class NetworkWithInputEncoding : public Network<float, T> {
 public:
 	NetworkWithInputEncoding(std::shared_ptr<Encoding<T>> encoding, uint32_t n_output_dims, const json& network) : m_encoding{encoding} {
-		uint32_t alignment = network.contains("otype") && (equals_case_insensitive(network["otype"], "FullyFusedMLP") || equals_case_insensitive(network["otype"], "MegakernelMLP")) ? 16u : 8u;
-		encoding->set_alignment(alignment);
+		encoding->set_alignment(minimum_alignment(network));
 
 		// Assume that row-major/SoA operations will be faster, so use it if supported.
 		if (encoding->supports_output_layout(RM)) {
