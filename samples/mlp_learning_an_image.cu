@@ -288,7 +288,10 @@ int main(int argc, char* argv[]) {
 
 				if (visualize_learned_func) {
 					network->inference(inference_stream, inference_batch, prediction);
-					save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, std::to_string(i) + ".jpg");
+					auto filename = std::to_string(i) + ".jpg";
+					std::cout << "Writing '" << filename << "'... ";
+					save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, filename);
+					std::cout << "done." << std::endl;
 				}
 
 				// Don't count visualizing as part of timing

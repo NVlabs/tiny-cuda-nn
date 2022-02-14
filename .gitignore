@@ -1,6 +1,6 @@
-build*
-/tmp
-/.vscode
-__pycache__
 .DS_Store
 *.egg-info
+__pycache__
+build*
+dist
+/.vscode

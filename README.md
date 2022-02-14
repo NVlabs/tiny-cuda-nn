@@ -117,9 +117,49 @@ tiny-cuda-nn$ cmake --build build --config RelWithDebInfo -j 16
 ```
 
 
+## PyTorch extension
+
+__tiny-cuda-nn__ comes with a [PyTorch](https://github.com/pytorch/pytorch) extension that allows using the fast MLPs and input encodings from within a [Python](https://www.python.org/) context.
+These bindings can be significantly faster than full Python implementations; in particular for the [multiresolution hash encoding](https://raw.githubusercontent.com/NVlabs/tiny-cuda-nn/master/data/readme/multiresolution-hash-encoding-diagram.png).
+
+> The overheads of Python/PyTorch can nonetheless be extensive.
+> For example, the bundled `mlp_learning_an_image` example is __~3x slower__ through PyTorch versus native CUDA.
+
+
+Begin by setting up a Python 3.X environment with a recent, CUDA-enabled version of PyTorch. Then, invoke the following commands:
+```sh
+tiny-cuda-nn$ cd bindings/torch
+tiny-cuda-nn/bindings/torch$ python setup.py install
+```
+
+Upon success, you can use __tiny-cuda-nn__ models as in the following example:
+```py
+import commentjson as json
+import tinycudann as tcnn
+import torch
+
+with open("data/config_hash.json") as f:
+	config = json.load(f)
+
+# Option 1: efficient Encoding+Network combo.
+model = tcnn.NetworkWithInputEncoding(
+	n_input_dims, n_output_dims,
+	config["encoding"], config["network"]
+)
+
+# Option 2: separate modules. Slower but more flexible.
+encoding = tcnn.Encoding(n_input_dims, config["encoding"])
+network = tcnn.Network(n_input_dims, n_output_dims, config["network"])
+model = torch.nn.Sequential(encoding, network)
+```
+
+See `samples/mlp_learning_an_image_pytorch.py` for an example.
+
+
+
 ## Components
 
-Following is a summary of the components of this framework. See [the JSON documentation](DOCUMENTATION.md) for how to configure each.
+Following is a summary of the components of this framework. [The JSON documentation](DOCUMENTATION.md) lists configuration options.
 
 
 | Networks | &nbsp; | &nbsp;
