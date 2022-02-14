@@ -25,7 +25,7 @@
 # @file   mlp_learning_an_image_pytorch.py
 # @author Thomas Müller, NVIDIA
 # @brief  Replicates the behavior of the CUDA mlp_learning_an_image.cu sample
-#         using tiny-cuda-nn's PyTorch extension. Runs ~3x slower than native.
+#         using tiny-cuda-nn's PyTorch extension. Runs ~2x slower than native.
 
 import argparse
 import commentjson as json
@@ -65,7 +65,7 @@ class Image(torch.nn.Module):
 	def forward(self, xs):
 		with torch.no_grad():
 			# Bilinearly filtered lookup from the image. Not super fast,
-			# but less than ~20-30% of the overall runtime of this example.
+			# but less than ~20% of the overall runtime of this example.
 			shape = self.data.shape
 
 			xs = xs * torch.tensor([shape[1], shape[0]], device=xs.device).float()
@@ -99,7 +99,7 @@ if __name__ == "__main__":
 	print("================================================================")
 	print("This script replicates the behavior of the native CUDA example  ")
 	print("mlp_learning_an_image.cu using tiny-cuda-nn's PyTorch extension.")
-	print("This extension >> runs ~3x slower than native << as of now.     ")
+	print("This extension >> runs ~2x slower than native << as of now.     ")
 	print("================================================================")
 
 	device = torch.device("cuda")
@@ -152,10 +152,11 @@ if __name__ == "__main__":
 
 	print(f"Beginning optimization with {args.n_steps} training steps.")
 
+	traced_image = torch.jit.trace(image, torch.rand([batch_size, 2], device=device, dtype=torch.float32))
+
 	for i in range(args.n_steps):
 		batch = torch.rand([batch_size, 2], device=device, dtype=torch.float32)
-		targets = image(batch)
-
+		targets = traced_image(batch)
 		output = model(batch)
 
 		relative_l2_error = (output - targets.to(output.dtype))**2 / (output.detach()**2 + 0.01)

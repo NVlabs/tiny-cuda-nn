@@ -123,8 +123,7 @@ __tiny-cuda-nn__ comes with a [PyTorch](https://github.com/pytorch/pytorch) exte
 These bindings can be significantly faster than full Python implementations; in particular for the [multiresolution hash encoding](https://raw.githubusercontent.com/NVlabs/tiny-cuda-nn/master/data/readme/multiresolution-hash-encoding-diagram.png).
 
 > The overheads of Python/PyTorch can nonetheless be extensive.
-> For example, the bundled `mlp_learning_an_image` example is __~3x slower__ through PyTorch than native CUDA.
-
+> For example, the bundled `mlp_learning_an_image` example is __~2x slower__ through PyTorch than native CUDA.
 
 Begin by setting up a Python 3.X environment with a recent, CUDA-enabled version of PyTorch. Then, invoke the following commands:
 ```sh
