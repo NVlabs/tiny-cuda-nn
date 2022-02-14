@@ -826,7 +826,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	bool use_inference_matrices,
 	bool compute_param_gradients
 ) {
-	if (m_forward.hidden.size() == 0) {
+	if (m_n_hidden_layers > 0 && m_forward.hidden.size() == 0) {
 		throw std::runtime_error{"Must call forward() before calling backward()."};
 	}
 
