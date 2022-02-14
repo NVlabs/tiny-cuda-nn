@@ -144,7 +144,7 @@ int main(int argc, char* argv[]) {
 
 		cudaTextureDesc texDesc;
 		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.filterMode = cudaFilterModeLinear;
+		texDesc.filterMode = cudaFilterModePoint;
 		texDesc.normalizedCoords = true;
 		texDesc.addressMode[0] = cudaAddressModeClamp;
 		texDesc.addressMode[1] = cudaAddressModeClamp;

@@ -20,95 +20,31 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# @file   bench-tensorflow.cu
+# @file   bench_tensorflow.py
 # @author Thomas Müller, NVIDIA
 # @brief  Generates performance data for comparison with our fully fused network.
 
-
-import os
-import glob
-
-import tensorflow.compat.v1 as tf
-import tensorflow_probability as tfp
-import numpy as np
-import math
-import pyexr as exr
+import argparse
 import commentjson as json
-
+import glob
+import math
+import numpy as np
+import os
 import PIL.Image
 PIL.Image.MAX_IMAGE_PIXELS = 10000000000
-
+import pyexr as exr
+import sys
+import tensorflow.compat.v1 as tf
+import tensorflow_probability as tfp
 import time
 
-import argparse
+SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts")
+sys.path.insert(0, SCRIPTS_DIR)
 
-SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+from common import read_image, write_image, ROOT_DIR
+
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 IMAGES_DIR = os.path.join(DATA_DIR, "images")
-
-
-def write_image_pillow(img_file, img, quality):
-	img_array = (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-	im = PIL.Image.fromarray(img_array)
-	if os.path.splitext(img_file)[1] == ".jpg":
-		im = im.convert("RGB") # Bake the alpha channel
-	im.save(img_file, quality=quality, subsampling=0)
-
-def read_image_pillow(img_file):
-	img = PIL.Image.open(img_file, "r")
-	if os.path.splitext(img_file)[1] == ".jpg":
-		img = img.convert("RGB")
-	else:
-		img = img.convert("RGBA")
-	img = np.asarray(img).astype(np.float32)
-	return img / 255.0
-
-def srgb_to_linear(img):
-	limit = 0.04045
-	return np.where(img > limit, np.power((img + 0.055) / 1.055, 2.4), img / 12.92)
-
-def linear_to_srgb(img):
-	limit = 0.0031308
-	return np.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img)
-
-def read_image(file):
-	if os.path.splitext(file)[1] == ".exr":
-		img = exr.read(file).astype(np.float32)
-	elif os.path.splitext(file)[1] == ".bin":
-		with open(file, "rb") as f:
-			bytes = f.read()
-			h, w = struct.unpack("ii", bytes[:8])
-			img = np.frombuffer(bytes, dtype=np.float16, count=h*w*4, offset=8).astype(np.float32).reshape([h, w, 4])
-	else:
-		img = read_image_pillow(file)
-		if img.shape[2] == 4:
-			img[...,0:3] = srgb_to_linear(img[...,0:3])
-			# Premultiply alpha
-			img[...,0:3] *= img[...,3:4]
-		else:
-			img = srgb_to_linear(img)
-	return img
-
-def write_image(file, img, quality=100):
-	if os.path.splitext(file)[1] == ".exr":
-		img = exr.write(file, img)
-	elif os.path.splitext(file)[1] == ".bin":
-		if img.shape[2] < 4:
-			img = np.dstack((img, np.ones([img.shape[0], img.shape[1], 4 - img.shape[2]])))
-		with open(file, "wb") as f:
-			f.write(struct.pack("ii", img.shape[0], img.shape[1]))
-			f.write(img.astype(np.float16).tobytes())
-	else:
-		if img.shape[2] == 4:
-			img = np.copy(img)
-			# Unmultiply alpha
-			img[...,0:3] = np.divide(img[...,0:3], img[...,3:4], out=np.zeros_like(img[...,0:3]), where=img[...,3:4] != 0)
-			img[...,0:3] = linear_to_srgb(img[...,0:3])
-		else:
-			img = linear_to_srgb(img)
-		write_image_pillow(file, img, quality)
-
 
 class Function:
 	def __init__(self, domain, n_channels, n_dims, wraparound_dims, n_conditionals, n_raw_conditionals):
@@ -122,11 +58,10 @@ class Function:
 	def __call__(self, xs):
 		raise NotImplementedError
 
-
 class Image(Function):
 	def __init__(self, filename):
 		self.filename = filename
-		paths = glob.glob(os.path.join(SCRIPT_DIR, "images", self.filename + ".*"))
+		paths = glob.glob(os.path.join(IMAGES_DIR, self.filename + ".*"))
 		if not paths:
 			raise ValueError(f"Invalid image name '{filename}''")
 		path = paths[0] # Use first path that exists
@@ -152,75 +87,71 @@ class Image(Function):
 		], axis=-1)
 		return tf.gather_nd(self.data_tf, indices_clipped)
 
-
 class OneBlob:
-    def __init__(self, n_bins, n_levels):
-        self.n_bins = n_bins
-        self.n_levels = n_levels
-        self.radius = 0.5 / n_bins
+	def __init__(self, n_bins, n_levels):
+		self.n_bins = n_bins
+		self.n_levels = n_levels
+		self.radius = 0.5 / n_bins
 
-    def __call__(self, inputs, wraparound, name, dtype=None):
-        def gaussian_cdf_approx(x, radius):
-            return 0.5 * (1 + tf.tanh(1.12 * x / (math.sqrt(2.) * radius)))
+	def __call__(self, inputs, wraparound, name, dtype=None):
+		def gaussian_cdf_approx(x, radius):
+			return 0.5 * (1 + tf.tanh(1.12 * x / (math.sqrt(2.) * radius)))
 
-        def gaussian_cdf(x, radius):
-            return 0.5 * (1 + tf.erf(x / (math.sqrt(2.) * radius)))
+		def gaussian_cdf(x, radius):
+			return 0.5 * (1 + tf.erf(x / (math.sqrt(2.) * radius)))
 
-        dims = inputs.shape[-1]
-        with tf.name_scope(name):
-            # When there are no input dims, there is nothing to encode.
-            # This special case is needed because tf.reshape does strange
-            # things when 0-dims are involved.
-            if dims == 0:
-                return inputs
-            results = []
-            boundaries = tf.linspace(0., 1., self.n_bins + 1)
-            boundaries = tf.reshape(boundaries, [1 for _ in inputs.shape] + [-1])
+		dims = inputs.shape[-1]
+		with tf.name_scope(name):
+			# When there are no input dims, there is nothing to encode.
+			# This special case is needed because tf.reshape does strange
+			# things when 0-dims are involved.
+			if dims == 0:
+				return inputs
+			results = []
+			boundaries = tf.linspace(0., 1., self.n_bins + 1)
+			boundaries = tf.reshape(boundaries, [1 for _ in inputs.shape] + [-1])
 
-            for level in range(self.n_levels):
-                with tf.name_scope(f"level{level}"):
-                    scale = self.n_bins**level
+			for level in range(self.n_levels):
+				with tf.name_scope(f"level{level}"):
+					scale = self.n_bins**level
 
-                    # We use the absolute value here just in case the inputs are erroneously negative.
-                    # Even a negative epsilon would totally wreck the following code.
-                    if level == 0:
-                        scaled = tf.abs(inputs)
-                    else:
-                        scaled = tf.abs(inputs * scale) % 1
+					# We use the absolute value here just in case the inputs are erroneously negative.
+					# Even a negative epsilon would totally wreck the following code.
+					if level == 0:
+						scaled = tf.abs(inputs)
+					else:
+						scaled = tf.abs(inputs * scale) % 1
 
-                    diffs = boundaries - scaled[..., tf.newaxis]
-                    cdfs = gaussian_cdf_approx(diffs, self.radius)
-                    result = cdfs[...,1:] - cdfs[...,:-1]
+					diffs = boundaries - scaled[..., tf.newaxis]
+					cdfs = gaussian_cdf_approx(diffs, self.radius)
+					result = cdfs[...,1:] - cdfs[...,:-1]
 
-                    # print_op = tf.print("result: ", result)
+					# print_op = tf.print("result: ", result)
 
-                    # In the outermost level we don't want to carry over...
-                    # otherwise we introduce ambiguities.
-                    if level != 0 or wraparound:
-                        cdfs_right = gaussian_cdf_approx(diffs + 1., self.radius)
-                        cdfs_left = gaussian_cdf_approx(diffs - 1., self.radius)
-                        result = result + cdfs_right[...,1:] - cdfs_right[...,:-1] + cdfs_left[...,1:] - cdfs_left[...,:-1]
+					# In the outermost level we don't want to carry over...
+					# otherwise we introduce ambiguities.
+					if level != 0 or wraparound:
+						cdfs_right = gaussian_cdf_approx(diffs + 1., self.radius)
+						cdfs_left = gaussian_cdf_approx(diffs - 1., self.radius)
+						result = result + cdfs_right[...,1:] - cdfs_right[...,:-1] + cdfs_left[...,1:] - cdfs_left[...,:-1]
 
-                    # with tf.control_dependencies([print_op]):
-                    result = result / scale
+					# with tf.control_dependencies([print_op]):
+					result = result / scale
 
-                    results.append(result)
+					results.append(result)
 
-            result = tf.concat(results, axis=-1)
-            result = tf.reshape(result, [-1, self.n_bins * self.n_levels * dims])
-            return result
-
+			result = tf.concat(results, axis=-1)
+			result = tf.reshape(result, [-1, self.n_bins * self.n_levels * dims])
+			return result
 
 def get_args():
 	parser = argparse.ArgumentParser(description="Image benchmark using TensorFlow.")
 
-	parser.add_argument("-c", "--config", default="config_hash.json", type=str, help="JSON config filename")
+	parser.add_argument("-c", "--config", default="config_oneblob.json", type=str, help="JSON config filename")
 	parser.add_argument("-i", "--image", default="albert", type=str, help="Image to match")
 
 	args = parser.parse_args()
 	return args
-
-
 
 def linear_layer(inputs, units, dtype, name, use_biases=True):
 	# inputs: 2d Tensor, shape=(batch, in_units).
@@ -241,7 +172,6 @@ def linear_layer(inputs, units, dtype, name, use_biases=True):
 
 	return tf.cast(result, tf.float32)
 
-
 def activation(tensor, kind):
 	kind = kind.lower()
 	if kind == "relu":
@@ -259,20 +189,18 @@ def activation(tensor, kind):
 	else:
 		assert(False)
 
-
 def compute_gradients(loss, variables, loss_scale):
-    with tf.name_scope("gradient_computation"):
-        gradients = tf.gradients(loss * loss_scale, variables)
-        # Create zero gradients for None entries
-        zeros = [tf.zeros_like(var) for var in variables]
-        gradients = [grad / loss_scale if grad is not None else None for grad in gradients]
-        finites = [tf.reduce_all(tf.is_finite(grad)) if grad is not None else None for grad in gradients]
-        gradients = [tf.where(finite, grad, zero) if grad is not None else None for finite, grad, zero in zip(finites, gradients, zeros)]
+	with tf.name_scope("gradient_computation"):
+		gradients = tf.gradients(loss * loss_scale, variables)
+		# Create zero gradients for None entries
+		zeros = [tf.zeros_like(var) for var in variables]
+		gradients = [grad / loss_scale if grad is not None else None for grad in gradients]
+		finites = [tf.reduce_all(tf.is_finite(grad)) if grad is not None else None for grad in gradients]
+		gradients = [tf.where(finite, grad, zero) if grad is not None else None for finite, grad, zero in zip(finites, gradients, zeros)]
 
-        all_finite = tf.reduce_all([f for f in finites if f is not None])
+		all_finite = tf.reduce_all([f for f in finites if f is not None])
 
-    return gradients, all_finite
-
+	return gradients, all_finite
 
 def get_train_op(config, variables, gradients, optimizer, clip_norm=0):
 	if clip_norm > 0:
@@ -286,7 +214,6 @@ def get_train_op(config, variables, gradients, optimizer, clip_norm=0):
 		train_op = tf.no_op(name="apply_gradients")
 
 	return train_op, gradients_norm
-
 
 def make_graph():
 	uniform = tfp.distributions.Uniform()
@@ -311,7 +238,6 @@ def make_graph():
 	train_op, _ = get_train_op(config, variables, gradients, optimizer)
 
 	return train_op, loss, input_tensor, output_tensor
-
 
 if __name__ == "__main__":
 	tf.disable_eager_execution()
@@ -429,5 +355,3 @@ if __name__ == "__main__":
 
 		with open("bench_result_tensorflow.json", "w") as f:
 			json.dump(bench_result, f)
-
-
