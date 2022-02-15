@@ -612,9 +612,15 @@ public:
 
 		// Take care of padding on the auxiliary stream
 		if (m_n_to_pad > 0) {
-			parallel_for_gpu_aos(synced_streams.get(1), num_elements, m_n_to_pad, [n_output_dims=m_n_output_dims, outputs] __device__ (size_t elem, size_t dim) {
-				outputs(elem)[n_output_dims + dim] = 0;
-			});
+			if (m_output_layout == AoS) {
+				parallel_for_gpu_aos(synced_streams.get(1), num_elements, m_n_to_pad, [n_output_dims=m_n_output_dims, outputs] __device__ (size_t elem, size_t dim) {
+					outputs(elem)[n_output_dims + dim] = 0;
+				});
+			} else {
+				parallel_for_gpu_aos(synced_streams.get(1), num_elements, m_n_to_pad, [num_elements, n_output_dims=m_n_output_dims, outputs_soa=outputs.ptr] __device__ (size_t elem, size_t dim) {
+					outputs_soa[elem + (n_output_dims + dim) * num_elements] = 0;
+				});
+			}
 		}
 
 		// Idea: each block only takes care of _one_ hash level (but may iterate over multiple input elements).
