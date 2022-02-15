@@ -640,11 +640,11 @@ public:
 		static constexpr uint32_t N_THREADS_HASHGRID = 512;
 		const dim3 blocks_hashgrid = { div_round_up(num_elements, N_THREADS_HASHGRID), m_n_levels, 1 };
 
-		T* rm_encoded_positions = outputs.ptr;
+		T* encoded_positions_soa = outputs.ptr;
 		GPUMemoryArena::Allocation workspace;
-		if (m_output_layout == CM) {
+		if (m_output_layout == AoS) {
 			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
-			rm_encoded_positions = (T*)workspace.data();
+			encoded_positions_soa = (T*)workspace.data();
 		}
 
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
@@ -660,7 +660,7 @@ public:
 			m_grid_type,
 			is_inference ? m_grid_inference : m_grid,
 			positions->data(),
-			rm_encoded_positions,
+			encoded_positions_soa,
 			dy_dx
 		);
 
@@ -670,7 +670,7 @@ public:
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_encoded_position<T><<<blocks_transpose, threads_transpose, 0, synced_streams.get(0)>>>(
 				num_elements,
-				rm_encoded_positions,
+				encoded_positions_soa,
 				outputs
 			);
 		}

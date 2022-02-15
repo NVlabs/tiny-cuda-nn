@@ -79,7 +79,7 @@ public:
 	Module(uint32_t n_input_dims, const nlohmann::json& encoding)
 	: Module{tcnn::cpp::create_encoding(n_input_dims, encoding)} {}
 
-	torch::Tensor fwd(torch::Tensor input, torch::Tensor params) {
+	std::tuple<tcnn::cpp::Context, torch::Tensor> fwd(torch::Tensor input, torch::Tensor params) {
 		// Check for correct types
 		if (input.scalar_type() != torch::kFloat32) {
 			throw std::runtime_error{"Module::fwd: invalid input type"};
@@ -103,19 +103,19 @@ public:
 		uint32_t batch_size = input.size(0);
 		torch::Tensor output = torch::empty({ batch_size, n_output_dims() }, torch::TensorOptions().dtype(c10_output_precision()).device(torch::kCUDA));
 
+		tcnn::cpp::Context ctx;
 		if (!input.requires_grad() && !params.requires_grad()) {
 			m_module->inference(m_fwd_stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params));
 		} else {
-			m_module->forward(m_fwd_stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params), input.requires_grad());
-			m_fwd_was_called = true;
+			ctx = m_module->forward(m_fwd_stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params), input.requires_grad());
 		}
 
-		return output;
+		return { std::move(ctx), output };
 	}
 
-	std::tuple<torch::Tensor, torch::Tensor> bwd(torch::Tensor input, torch::Tensor params, torch::Tensor output, torch::Tensor dL_doutput) {
-		if (!m_fwd_was_called) {
-			throw std::runtime_error{"Must call Module::fwd before Module::bwd"};
+	std::tuple<torch::Tensor, torch::Tensor> bwd(const tcnn::cpp::Context& ctx, torch::Tensor input, torch::Tensor params, torch::Tensor output, torch::Tensor dL_doutput) {
+		if (!ctx.ctx) {
+			throw std::runtime_error{"Module::bwd: called with invalid context. fwd likely (mistakenly) ran in inference mode."};
 		}
 
 		// Check for correct types
@@ -169,10 +169,9 @@ public:
 		}
 		torch::Tensor dL_dparams = torch::empty({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(torch::kCUDA));
 
-		m_module->backward(stream, batch_size, input.requires_grad() ? dL_dinput.data_ptr<float>() : nullptr, void_data_ptr(dL_doutput), void_data_ptr(dL_dparams), input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params));
-		m_fwd_was_called = false;
+		m_module->backward(stream, ctx, batch_size, input.requires_grad() ? dL_dinput.data_ptr<float>() : nullptr, void_data_ptr(dL_doutput), void_data_ptr(dL_dparams), input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params));
 
-		return std::tuple<torch::Tensor, torch::Tensor>(dL_dinput, dL_dparams);
+		return { dL_dinput, dL_dparams };
 	}
 
 	torch::Tensor initial_params(size_t seed) {
@@ -213,7 +212,6 @@ private:
 	std::unique_ptr<tcnn::cpp::Module> m_module;
 
 	cudaStream_t m_fwd_stream = nullptr;
-	bool m_fwd_was_called = false;
 };
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -223,24 +221,29 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 		.export_values()
 		;
 
+	// Encapsulates an abstract context of an operation
+	// (commonly the forward pass) to be passed on to other
+	// operations (commonly the backward pass).
+	py::class_<tcnn::cpp::Context>(m, "Context");
+
 	// The python bindings expose TCNN's C++ API through
 	// a single "Module" class that can act as the encoding,
 	// the neural network, or a combined encoding + network
 	// under the hood. The bindings don't need to concern
 	// themselves with these implementation details, though.
-	pybind11::class_<Module>(m, "Module")
+	py::class_<Module>(m, "Module")
 		.def(
-			pybind11::init<uint32_t, uint32_t, const nlohmann::json&, const nlohmann::json&>(),
+			py::init<uint32_t, uint32_t, const nlohmann::json&, const nlohmann::json&>(),
 			"Constructor for Encoding+Network combo",
 			py::arg("n_input_dims"), py::arg("n_output_dims"), py::arg("encoding_config"), py::arg("network_config")
 		)
 		.def(
-			pybind11::init<uint32_t, uint32_t, const nlohmann::json&>(),
+			py::init<uint32_t, uint32_t, const nlohmann::json&>(),
 			"Constructor for just the Network",
 			py::arg("n_input_dims"), py::arg("n_output_dims"), py::arg("network_config")
 		)
 		.def(
-			pybind11::init<uint32_t, const nlohmann::json&>(),
+			py::init<uint32_t, const nlohmann::json&>(),
 			"Constructor for just the Encoding",
 			py::arg("n_input_dims"), py::arg("encoding_config")
 		)

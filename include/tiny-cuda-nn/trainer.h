@@ -134,7 +134,7 @@ public:
 			allocate_training_buffers(m_model->padded_output_width(), batch_size);
 		}
 
-		m_model->forward(stream, input, &m_training_prediction_tmp);
+		m_training_ctx = m_model->forward(stream, input, &m_training_prediction_tmp);
 		return m_training_prediction_tmp;
 	}
 
@@ -181,13 +181,18 @@ public:
 	}
 
 	void backward(cudaStream_t stream, const GPUMatrix<T>& input) {
+		if (!m_training_ctx) {
+			throw std::runtime_error{"Trainer: must call forward() before calling backward()"};
+		}
+
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			throw std::runtime_error{"Trainer: you must call `forward` and `evaluate_loss` before calling `backward`"};
 		}
 
-		m_model->backward(stream, input, m_training_prediction_tmp, m_training_loss_gradient_tmp);
+		m_model->backward(stream, *m_training_ctx, input, m_training_prediction_tmp, m_training_loss_gradient_tmp);
+		m_training_ctx.reset();
 	}
 
 	void backward(const GPUMatrix<T>& input) {
@@ -339,6 +344,7 @@ private:
 	GPUMatrix<COMPUTE_T> m_training_prediction_tmp;
 	GPUMatrix<COMPUTE_T> m_training_loss_gradient_tmp;
 	GPUMatrix<float> m_training_loss_tmp;
+	std::unique_ptr<Context> m_training_ctx;
 
 	pcg32 m_rng;
 };
