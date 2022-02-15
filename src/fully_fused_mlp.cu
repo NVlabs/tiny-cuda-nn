@@ -778,7 +778,7 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, con
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
+std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
@@ -794,31 +794,34 @@ void FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrixDynami
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
-	allocate_forward_buffers(stream, batch_size);
+	auto forward = allocate_forward_buffers(stream, batch_size);
 
 	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Forward;
 
 	// ASSUMPTION: weight matrices & forward_tmp matrices are contiguous in memory
 	switch (m_activation) {
-		case Activation::None:        mlp_fused_forward<WIDTH, T, Activation::None, false>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, m_forward.hidden.at(0), output, m_n_hidden_matmuls); break;
-		case Activation::Exponential: mlp_fused_forward<WIDTH, T, Activation::Exponential, false>(stream, m_output_activation, input_weight_matrix(weight_usage), input, m_forward.hidden.at(0), output, m_n_hidden_matmuls); break;
-		case Activation::Sigmoid:     mlp_fused_forward<WIDTH, T, Activation::Sigmoid, false>(    stream, m_output_activation, input_weight_matrix(weight_usage), input, m_forward.hidden.at(0), output, m_n_hidden_matmuls); break;
-		case Activation::ReLU:        mlp_fused_forward<WIDTH, T, Activation::ReLU, false>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, m_forward.hidden.at(0), output, m_n_hidden_matmuls); break;
-		case Activation::Squareplus:  mlp_fused_forward<WIDTH, T, Activation::Squareplus, false>( stream, m_output_activation, input_weight_matrix(weight_usage), input, m_forward.hidden.at(0), output, m_n_hidden_matmuls); break;
-		case Activation::Softplus:    mlp_fused_forward<WIDTH, T, Activation::Softplus, false>(   stream, m_output_activation, input_weight_matrix(weight_usage), input, m_forward.hidden.at(0), output, m_n_hidden_matmuls); break;
+		case Activation::None:        mlp_fused_forward<WIDTH, T, Activation::None, false>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, forward->hidden.at(0), output, m_n_hidden_matmuls); break;
+		case Activation::Exponential: mlp_fused_forward<WIDTH, T, Activation::Exponential, false>(stream, m_output_activation, input_weight_matrix(weight_usage), input, forward->hidden.at(0), output, m_n_hidden_matmuls); break;
+		case Activation::Sigmoid:     mlp_fused_forward<WIDTH, T, Activation::Sigmoid, false>(    stream, m_output_activation, input_weight_matrix(weight_usage), input, forward->hidden.at(0), output, m_n_hidden_matmuls); break;
+		case Activation::ReLU:        mlp_fused_forward<WIDTH, T, Activation::ReLU, false>(       stream, m_output_activation, input_weight_matrix(weight_usage), input, forward->hidden.at(0), output, m_n_hidden_matmuls); break;
+		case Activation::Squareplus:  mlp_fused_forward<WIDTH, T, Activation::Squareplus, false>( stream, m_output_activation, input_weight_matrix(weight_usage), input, forward->hidden.at(0), output, m_n_hidden_matmuls); break;
+		case Activation::Softplus:    mlp_fused_forward<WIDTH, T, Activation::Softplus, false>(   stream, m_output_activation, input_weight_matrix(weight_usage), input, forward->hidden.at(0), output, m_n_hidden_matmuls); break;
 		default: throw std::runtime_error{"Unsupported activation."};
 	}
 
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
 	if (output && m_output_width > 16) {
-		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), m_forward.hidden.back(), *output);
+		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), forward->hidden.back(), *output);
 	}
+
+	return forward;
 }
 
 template <typename T, int WIDTH>
 void FullyFusedMLP<T, WIDTH>::backward(
 	cudaStream_t stream,
+	const Context& ctx,
 	const GPUMatrixDynamic<T>& input,
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
@@ -826,10 +829,6 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	bool use_inference_matrices,
 	bool compute_param_gradients
 ) {
-	if (m_n_hidden_layers > 0 && m_forward.hidden.size() == 0) {
-		throw std::runtime_error{"Must call forward() before calling backward()."};
-	}
-
 	if (dL_doutput.m() != m_padded_output_width) {
 		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
 	}
@@ -860,6 +859,8 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Backward;
 
 	{
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+
 		int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
 
 		const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
@@ -873,7 +874,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
 
 			// Compute weight gradients
-			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, m_forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor);
+			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor);
 
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 		}
@@ -881,20 +882,20 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		// If the output width is larger than 16 dims, we use cutlass to backpropagate through the last layer
 		// rather than fusing it with our kernel.
 		if (m_output_width > 16) {
-			fc_multiply<FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), tmp_dL_doutput, m_forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+			fc_multiply<FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
 		}
 
 		// Only let the fully fused kernel compute gradients w.r.t. the input, if the input layer has the same size & layout as the other layers
-		auto dL_dinput_fused = input.m() == m_forward.hidden.at(0).m() && input.layout() == CM ? dL_dinput : nullptr;
+		auto dL_dinput_fused = input.m() == forward.hidden.at(0).m() && input.layout() == CM ? dL_dinput : nullptr;
 
 		// ASSUMPTION: weight matrices & forward_tmp matrices are contiguous in memory
 		switch (m_activation) {
-			case Activation::None:        mlp_fused_backward<WIDTH, T, Activation::None>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), m_forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Exponential: mlp_fused_backward<WIDTH, T, Activation::Exponential>(stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), m_forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Sigmoid:     mlp_fused_backward<WIDTH, T, Activation::Sigmoid>(    stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), m_forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::ReLU:        mlp_fused_backward<WIDTH, T, Activation::ReLU>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), m_forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Squareplus:  mlp_fused_backward<WIDTH, T, Activation::Squareplus>( stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), m_forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Softplus:    mlp_fused_backward<WIDTH, T, Activation::Softplus>(   stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), m_forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+			case Activation::None:        mlp_fused_backward<WIDTH, T, Activation::None>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+			case Activation::Exponential: mlp_fused_backward<WIDTH, T, Activation::Exponential>(stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+			case Activation::Sigmoid:     mlp_fused_backward<WIDTH, T, Activation::Sigmoid>(    stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+			case Activation::ReLU:        mlp_fused_backward<WIDTH, T, Activation::ReLU>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+			case Activation::Squareplus:  mlp_fused_backward<WIDTH, T, Activation::Squareplus>( stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+			case Activation::Softplus:    mlp_fused_backward<WIDTH, T, Activation::Softplus>(   stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
 			default: throw std::runtime_error{"Unsupported activation."};
 		}
 
@@ -908,7 +909,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 			if (compute_param_gradients) {
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
 				cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), m_forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor);
+				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor);
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 			}
 
@@ -943,15 +944,19 @@ void FullyFusedMLP<T, WIDTH>::backward(
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
+std::unique_ptr<FullyFusedMLP<T, WIDTH>::ForwardContext> FullyFusedMLP<T, WIDTH>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
+	auto forward = std::make_unique<ForwardContext>();
+
 	// Use GPUMatrixBase::allocate_shared_memory to ensure the matrices occupy contiguous memory.
 	// (Needed in the fully-fused kernels.)
-	m_forward.hidden.resize(num_forward_activations());
+	forward->hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		m_forward.hidden[i].set_size(m_network_width, batch_size);
+		forward->hidden[i].set_size(m_network_width, batch_size);
 	}
 
-	m_forward.alloc = GPUMatrixBase::allocate_shared_memory(stream, m_forward.hidden);
+	forward->alloc = GPUMatrixBase::allocate_shared_memory(stream, forward->hidden);
+
+	return forward;
 }
 
 template <typename T, int WIDTH>

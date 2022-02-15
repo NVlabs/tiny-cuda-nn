@@ -13,9 +13,10 @@ class _module_func(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, native_tcnn_module, input, params, loss_scale):
 		# params is just a dummy param for autograd, we got an internal pointer in native_tcnn_module
-		output = native_tcnn_module.fwd(input, params)
+		native_ctx, output = native_tcnn_module.fwd(input, params)
 		ctx.save_for_backward(input, params, output)
 		ctx.native_tcnn_module = native_tcnn_module
+		ctx.native_ctx = native_ctx
 		ctx.loss_scale = loss_scale
 		return output
 
@@ -24,7 +25,7 @@ class _module_func(torch.autograd.Function):
 		input, weights, output = ctx.saved_tensors
 		with torch.no_grad():
 			scaled_grad = doutput * ctx.loss_scale
-			input_grad, weight_grad = ctx.native_tcnn_module.bwd(input, weights, output, scaled_grad)
+			input_grad, weight_grad = ctx.native_tcnn_module.bwd(ctx.native_ctx, input, weights, output, scaled_grad)
 		return None, None if input_grad is None else (input_grad / ctx.loss_scale), weight_grad / ctx.loss_scale, None
 
 class Module(torch.nn.Module):
@@ -33,7 +34,7 @@ class Module(torch.nn.Module):
 
 		self.native_tcnn_module = self._native_tcnn_module()
 
-		initial_params = self.native_tcnn_module.initial_params(seed).cuda()
+		initial_params = self.native_tcnn_module.initial_params(seed)
 		self.params = torch.nn.Parameter(initial_params, requires_grad=True)
 		self.register_parameter(name="params", param=self.params)
 

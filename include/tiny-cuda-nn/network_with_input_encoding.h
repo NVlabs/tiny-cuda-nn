@@ -77,32 +77,33 @@ public:
 		return m_encoding->num_encoded_dims();
 	}
 
-	void forward(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override {
+	std::unique_ptr<Context> forward(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 
-		m_forward.network_input = GPUMatrixDynamic<T>{m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
+		auto forward = std::make_unique<ForwardContext>();
+
+		forward->network_input = GPUMatrixDynamic<T>{m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
 		if (prepare_input_gradients) {
-			m_forward.encoding_forward_gradient = GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), input.n(), stream};
+			forward->encoding_forward_gradient = GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), input.n(), stream};
 		}
 
 		m_encoding->encode(
 			stream,
 			input.n(),
 			{input.data(), input.m()},
-			{m_forward.network_input.data(), m_forward.network_input.m()},
-			prepare_input_gradients ? m_forward.encoding_forward_gradient.data() : nullptr,
+			{forward->network_input.data(), forward->network_input.m()},
+			prepare_input_gradients ? forward->encoding_forward_gradient.data() : nullptr,
 			use_inference_matrices
 		);
-		m_network->forward(stream, m_forward.network_input, output, use_inference_matrices, prepare_input_gradients);
-	}
+		forward->network_ctx = m_network->forward(stream, forward->network_input, output, use_inference_matrices, prepare_input_gradients);
 
-	void forward_clear() override {
-		m_forward.clear();
+		return forward;
 	}
 
 	void backward(
 		cudaStream_t stream,
+		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
@@ -115,19 +116,19 @@ public:
 			dL_dnetwork_input = {m_encoding->num_encoded_dims(), input.n(), stream, m_encoding->output_layout()};
 		}
 
-		m_network->backward(stream, m_forward.network_input, output, dL_doutput, dL_dnetwork_input.data() ? &dL_dnetwork_input : nullptr, use_inference_matrices, compute_param_gradients);
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+
+		m_network->backward(stream, *forward.network_ctx, forward.network_input, output, dL_doutput, dL_dnetwork_input.data() ? &dL_dnetwork_input : nullptr, use_inference_matrices, compute_param_gradients);
 		if (dL_dnetwork_input.data()) {
 			m_encoding->backward(
 				stream,
 				input.n(),
 				{dL_dnetwork_input.data(), dL_dnetwork_input.m()},
-				dL_dinput ? m_forward.encoding_forward_gradient.data() : nullptr,
+				dL_dinput ? forward.encoding_forward_gradient.data() : nullptr,
 				dL_dinput ? PitchedPtr<float>{dL_dinput->data(), dL_dinput->m()} : PitchedPtr<float>{},
 				{input.data(), input.m()}
 			);
 		}
-
-		forward_clear();
 	}
 
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
@@ -202,11 +203,9 @@ public:
 		return m_network->num_forward_activations() + 1;
 	}
 
-	std::pair<const T*, MatrixLayout> forward_activations(uint32_t layer) const override {
-		if (!m_forward.network_input.data()) {
-			throw std::runtime_error{"Must call forward() before accessing activations."};
-		}
-		return layer == 0 ? std::make_pair<const T*, MatrixLayout>(m_forward.network_input.data(), m_encoding->output_layout()) : m_network->forward_activations(layer - 1);
+	std::pair<const T*, MatrixLayout> forward_activations(const Context& ctx, uint32_t layer) const override {
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+		return layer == 0 ? std::make_pair<const T*, MatrixLayout>(forward.network_input.data(), m_encoding->output_layout()) : m_network->forward_activations(*forward.network_ctx, layer - 1);
 	}
 
 	uint32_t input_width() const {
@@ -221,16 +220,11 @@ private:
 	std::unique_ptr<Network<T>> m_network;
 	std::shared_ptr<Encoding<T>> m_encoding;
 
-	// Storage of forward pass data
-	struct {
+	struct ForwardContext : public Context {
 		GPUMatrixDynamic<T> network_input;
 		GPUMatrix<float> encoding_forward_gradient;
-
-		void clear() {
-			network_input = GPUMatrixDynamic<T>{};
-			encoding_forward_gradient = GPUMatrix<float>{};
-		}
-	} m_forward;
+		std::unique_ptr<Context> network_ctx;
+	};
 };
 
 TCNN_NAMESPACE_END

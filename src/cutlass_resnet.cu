@@ -175,7 +175,7 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
+std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
 	// Various error checks
 	if (input.m() != m_input_width) {
 		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
@@ -191,29 +191,29 @@ void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUM
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
-	allocate_forward_buffers(stream, batch_size);
+	auto forward = allocate_forward_buffers(stream, batch_size);
 
-	const uint32_t n_elements = (uint32_t)m_forward.hidden.front().n_elements();
+	const uint32_t n_elements = (uint32_t)forward->hidden.front().n_elements();
 
 	// Run the actual network
 	{
-		auto& input_target = input_activation_value == Activation::None ? m_forward.hidden.front() : m_forward.input;
+		auto& input_target = input_activation_value == Activation::None ? forward->hidden.front() : forward->input;
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_matrices), input, input_target);
-		activation_gpu(stream, input_activation_value, input_target, m_forward.hidden.front());
+		activation_gpu(stream, input_activation_value, input_target, forward->hidden.front());
 
 		// Res blocks
 		for (uint32_t i = 0; i < m_n_blocks; ++i) {
 			uint32_t idx = i * m_n_matrices_per_block + 1;
 
 			if (m_n_matrices_per_block == 1) {
-				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), m_forward.hidden.at(idx-1), m_forward.hidden.at(idx));
-				add<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_forward.hidden.at(idx-1).data(), m_forward.hidden.at(idx).data());
+				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), forward->hidden.at(idx-1), forward->hidden.at(idx));
+				add<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, forward->hidden.at(idx-1).data(), forward->hidden.at(idx).data());
 			} else {
-				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), m_forward.hidden.at(idx-1), m_forward.hidden.at(idx), Activation::ReLU);
+				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), forward->hidden.at(idx-1), forward->hidden.at(idx), Activation::ReLU);
 
 				for (uint32_t matrix_idx = 1; matrix_idx < m_n_matrices_per_block - 1; ++matrix_idx) {
 					uint32_t fwd_idx = idx + matrix_idx;
-					fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, i, matrix_idx), m_forward.hidden.at(fwd_idx-1), m_forward.hidden.at(fwd_idx), Activation::ReLU);
+					fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, i, matrix_idx), forward->hidden.at(fwd_idx-1), forward->hidden.at(fwd_idx), Activation::ReLU);
 				}
 
 				uint32_t matrix_idx = m_n_matrices_per_block - 1;
@@ -221,9 +221,9 @@ void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUM
 				fc_multiply<FullLayer>(
 					stream,
 					weight_matrix_at(use_inference_matrices, i, matrix_idx),
-					m_forward.hidden.at(fwd_idx-1),
-					m_forward.hidden.at(idx-1),
-					m_forward.hidden.at(fwd_idx),
+					forward->hidden.at(fwd_idx-1),
+					forward->hidden.at(idx-1),
+					forward->hidden.at(fwd_idx),
 					Activation::None,
 					false, // no transfer
 					true // sums up the residual and linear parts
@@ -233,18 +233,21 @@ void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUM
 			// Retroactively apply ReLU to input. It's needed for backprop later.
 			// We schedule it to the appropriate splitk stream, because only the later splitk operation depends on
 			// the ReLU'd values to be present
-			activation_gpu(m_training_splitk_streams.at(idx-1), Activation::ReLU, m_forward.hidden.at(idx-1), m_forward.hidden.at(idx-1));
+			activation_gpu(m_training_splitk_streams.at(idx-1), Activation::ReLU, forward->hidden.at(idx-1), forward->hidden.at(idx-1));
 		}
 
 		if (output) {
-			fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), m_forward.hidden.back(), *output, m_output_activation);
+			fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), forward->hidden.back(), *output, m_output_activation);
 		}
 	}
+
+	return forward;
 }
 
 template <typename T, Activation input_activation>
 void CutlassResNet<T, input_activation>::backward(
 	cudaStream_t stream,
+	const Context& ctx,
 	const GPUMatrixDynamic<T>& input,
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
@@ -252,10 +255,6 @@ void CutlassResNet<T, input_activation>::backward(
 	bool use_inference_matrices,
 	bool compute_param_gradients
 ) {
-	if (m_forward.hidden.size() == 0) {
-		throw std::runtime_error{"Must call forward() before calling backward()."};
-	}
-
 	if (dL_doutput.m() != m_padded_output_width) {
 		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
 	}
@@ -281,6 +280,8 @@ void CutlassResNet<T, input_activation>::backward(
 	// - RELU: pre_activation_gradinet = post_activation_gradient if val > 0 else 0
 
 	{
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+
 		const uint32_t n_elements = (uint32_t)backward_tmp.front().n_elements();
 
 		int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
@@ -291,7 +292,7 @@ void CutlassResNet<T, input_activation>::backward(
 			// Output layer
 			cudaEventRecord(m_training_splitk_events.back(), stream);
 			cudaStreamWaitEvent(m_training_splitk_streams.back(), m_training_splitk_events.back(), 0);
-			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.back(), tmp_dL_doutput, m_forward.hidden.back().transposed(), output_gradient_matrix(), split_k_factor);
+			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.back(), tmp_dL_doutput, forward.hidden.back().transposed(), output_gradient_matrix(), split_k_factor);
 			cudaEventRecord(m_training_splitk_events.back(), m_training_splitk_streams.back());
 		}
 
@@ -309,17 +310,17 @@ void CutlassResNet<T, input_activation>::backward(
 				if (compute_param_gradients) {
 					cudaEventRecord(m_training_splitk_events.at(fwd_idx), stream);
 					cudaStreamWaitEvent(m_training_splitk_streams.at(fwd_idx), m_training_splitk_events.at(fwd_idx), 0);
-					fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(fwd_idx), backward_tmp.at(fwd_idx), m_forward.hidden.at(fwd_idx-1).transposed(), gradient_matrix_at(block_idx, matrix_idx), split_k_factor);
+					fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(fwd_idx), backward_tmp.at(fwd_idx), forward.hidden.at(fwd_idx-1).transposed(), gradient_matrix_at(block_idx, matrix_idx), split_k_factor);
 					cudaEventRecord(m_training_splitk_events.at(fwd_idx), m_training_splitk_streams.at(fwd_idx));
 				}
 
-				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, block_idx, matrix_idx).transposed(), backward_tmp.at(fwd_idx), m_forward.hidden.at(fwd_idx-1), backward_tmp.at(fwd_idx-1), Activation::ReLU, true);
+				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, block_idx, matrix_idx).transposed(), backward_tmp.at(fwd_idx), forward.hidden.at(fwd_idx-1), backward_tmp.at(fwd_idx-1), Activation::ReLU, true);
 			}
 
 			add<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, backward_tmp.at(idx+m_n_matrices_per_block-1).data(), backward_tmp.at(idx-1).data());
 		}
 
-		activation_backward_gpu(stream, input_activation_value, m_forward.input, backward_tmp.front());
+		activation_backward_gpu(stream, input_activation_value, forward.input, backward_tmp.front());
 
 		if (compute_param_gradients) {
 			cudaEventRecord(m_training_splitk_events.front(), stream);
@@ -348,13 +349,16 @@ void CutlassResNet<T, input_activation>::backward(
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
-	m_forward.input = GPUMatrix<T>{m_network_width, batch_size, stream};
+std::unique_ptr<CutlassResNet<T, input_activation>::ForwardContext> CutlassResNet<T, input_activation>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
+	auto forward = std::make_unique<ForwardContext>();
 
-	m_forward.hidden.resize(num_forward_activations());
+	forward->input = GPUMatrix<T>{m_network_width, batch_size, stream};
+	forward->hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		m_forward.hidden[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
+		forward->hidden[i] = GPUMatrix<T>{m_network_width, batch_size, stream};
 	}
+
+	return forward;
 }
 
 template <typename T, Activation input_activation>

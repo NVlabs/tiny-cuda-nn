@@ -37,6 +37,8 @@
 
 #include <pcg32/pcg32.h>
 
+#include <memory>
+
 TCNN_NAMESPACE_BEGIN
 
 using json = nlohmann::json;
@@ -81,26 +83,27 @@ public:
 		inference(nullptr, input, output);
 	}
 
-	virtual void forward(
+	virtual std::unique_ptr<Context> forward(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
 		bool use_inference_matrices = false,
 		bool prepare_input_gradients = false
 	) = 0;
-	void forward(
+	std::unique_ptr<Context> forward(
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
 		bool use_inference_matrices = false,
 		bool prepare_input_gradients = false
 	) {
-		forward(nullptr, input, output, use_inference_matrices, prepare_input_gradients);
+		return forward(nullptr, input, output, use_inference_matrices, prepare_input_gradients);
 	}
 
 	virtual void forward_clear() {}
 
 	virtual void backward(
 		cudaStream_t stream,
+		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrixDynamic<COMPUTE_T>& output,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
@@ -109,6 +112,7 @@ public:
 		bool compute_param_gradients = true
 	) = 0;
 	void backward(
+		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrixDynamic<COMPUTE_T>& output,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,

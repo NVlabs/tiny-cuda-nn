@@ -55,16 +55,16 @@ public:
 		m_network->inference_mixed_precision(stream, input_matrix, output_matrix);
 	}
 
-	void forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
+	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
 		m_network->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
 
-		m_network->forward(stream, input_matrix, &output_matrix, false, prepare_input_gradients);
+		return { m_network->forward(stream, input_matrix, &output_matrix, false, prepare_input_gradients) };
 	}
 
-	void backward(cudaStream_t stream, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void* output, const void* params) override {
+	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void* output, const void* params) override {
 		m_network->set_params((network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)dL_dparams);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
@@ -73,7 +73,7 @@ public:
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> dL_doutput_matrix((network_precision_t*)dL_doutput, m_network->padded_output_width(), n_elements);
 
-		m_network->backward(stream, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr);
+		m_network->backward(stream, *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr);
 	}
 
 	uint32_t n_input_dims() const override {
@@ -118,33 +118,35 @@ public:
 		m_encoding->encode(stream, n_elements, pitched_input, pitched_output, nullptr, true);
 	}
 
-	void forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
+	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
 		m_encoding->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
 
 		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
 		PitchedPtr<network_precision_t> pitched_output((network_precision_t*)output, m_encoding->num_encoded_dims());
 
+		auto forward = std::make_unique<ForwardContext>();
 		if (prepare_input_gradients) {
-			m_forward_gradient = prepare_input_gradients ? GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), n_elements, stream} : GPUMatrix<float>{};
+			forward->dy_dx = prepare_input_gradients ? GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), n_elements, stream} : GPUMatrix<float>{};
 		}
 
-		m_encoding->encode(stream, n_elements, pitched_input, pitched_output, m_forward_gradient.data(), false);
+		m_encoding->encode(stream, n_elements, pitched_input, pitched_output, forward->dy_dx.data(), false);
+
+		return { std::move(forward) };
 	}
 
-	void backward(cudaStream_t stream, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void*, const void* params) override {
+	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void*, const void* params) override {
 		m_encoding->set_params((network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)dL_dparams);
 
 		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
 		PitchedPtr<float> pitched_dL_dinput(dL_dinput, m_encoding->num_dims_to_encode());
 		PitchedPtr<const network_precision_t> pitched_dL_doutput((network_precision_t*)dL_doutput, m_encoding->num_encoded_dims());
 
-		if (dL_dinput && !m_forward_gradient.data()) {
+		const auto& forward = dynamic_cast<const ForwardContext&>(*ctx.ctx);
+		if (dL_dinput && !forward.dy_dx.data()) {
 			throw std::runtime_error{"Encoding: forward(prepare_input_gradients) must be called before backward(dL_dinput)"};
 		}
 
-		m_encoding->backward(stream, n_elements, pitched_dL_doutput, m_forward_gradient.data(), pitched_dL_dinput, pitched_input);
-
-		m_forward_gradient = GPUMatrix<float>{};
+		m_encoding->backward(stream, n_elements, pitched_dL_doutput, forward.dy_dx.data(), pitched_dL_dinput, pitched_input);
 	}
 
 	uint32_t n_input_dims() const override {
@@ -169,9 +171,11 @@ public:
 	}
 
 private:
-	std::shared_ptr<tcnn::Encoding<network_precision_t>> m_encoding;
+	struct ForwardContext : public tcnn::Context {
+		GPUMatrix<float> dy_dx;
+	};
 
-	GPUMatrix<float> m_forward_gradient;
+	std::shared_ptr<tcnn::Encoding<network_precision_t>> m_encoding;
 };
 
 Module* create_encoding(uint32_t n_input_dims, const json& encoding) {

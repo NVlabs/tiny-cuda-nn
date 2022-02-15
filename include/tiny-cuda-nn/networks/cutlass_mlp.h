@@ -56,13 +56,11 @@ public:
 	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) override;
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
 
-	void forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
-	void forward_clear() override {
-		m_forward.clear();
-	}
+	std::unique_ptr<Context> forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
 
 	void backward(
 		cudaStream_t stream,
+		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
@@ -133,15 +131,17 @@ public:
 		return m_can_fuse_activation ? m_n_hidden_layers : (m_n_hidden_layers * 2);
 	}
 
-	std::pair<const T*, MatrixLayout> forward_activations(uint32_t layer) const override {
-		if (m_forward.hidden.size() == 0) {
-			throw std::runtime_error{"Must call forward() before accessing activations."};
-		}
-		return {m_forward.hidden.at(layer).data(), CM};
+	std::pair<const T*, MatrixLayout> forward_activations(const Context& ctx, uint32_t layer) const override {
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+		return {forward.hidden.at(layer).data(), CM};
 	}
 
 private:
-	void allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size);
+	struct ForwardContext : public Context {
+		std::vector<GPUMatrix<T>> hidden;
+	};
+
+	std::unique_ptr<ForwardContext> allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size);
 
 	uint32_t m_n_hidden_layers;
 	uint32_t m_n_hidden_matmuls;
@@ -163,15 +163,6 @@ private:
 
 	// Graphs
 	CudaGraph m_inference_graph;
-
-	// Storage of forward pass data
-	struct {
-		std::vector<GPUMatrix<T>> hidden;
-
-		void clear() {
-			hidden.clear();
-		}
-	} m_forward;
 
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;
