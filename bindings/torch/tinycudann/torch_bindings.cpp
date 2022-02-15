@@ -66,6 +66,7 @@ void* void_data_ptr(torch::Tensor& tensor) {
 class Module {
 public:
 	Module(tcnn::cpp::Module* module) : m_module{module} {}
+	virtual ~Module() {}
 
 	// Helper constructor to create a NetworkWithInputEncoding module
 	Module(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json& encoding, const nlohmann::json& network)
@@ -98,16 +99,16 @@ public:
 			throw std::runtime_error{"Module::fwd: invalid number of params"};
 		}
 
-		m_fwd_stream = at::cuda::getCurrentCUDAStream();
+		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
 		uint32_t batch_size = input.size(0);
 		torch::Tensor output = torch::empty({ batch_size, n_output_dims() }, torch::TensorOptions().dtype(c10_output_precision()).device(torch::kCUDA));
 
 		tcnn::cpp::Context ctx;
 		if (!input.requires_grad() && !params.requires_grad()) {
-			m_module->inference(m_fwd_stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params));
+			m_module->inference(stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params));
 		} else {
-			ctx = m_module->forward(m_fwd_stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params), input.requires_grad());
+			ctx = m_module->forward(stream, batch_size, input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params), input.requires_grad());
 		}
 
 		return { std::move(ctx), output };
@@ -154,14 +155,6 @@ public:
 		}
 
 		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
-		if (stream != m_fwd_stream) {
-			// TODO: this entire problem can be worked around by creating our own stream
-			//       and syncing it with whichever streams are provided by torch. Let's
-			//       hold off with that for now and fix it if fwd/bwd calls ever happen
-			//       from disparate streams.
-			throw std::runtime_error{"Module::bwd must be called with the same CUDA stream as Module::fwd"};
-		}
 
 		torch::Tensor dL_dinput;
 		if (input.requires_grad()) {
@@ -210,8 +203,6 @@ public:
 
 private:
 	std::unique_ptr<tcnn::cpp::Module> m_module;
-
-	cudaStream_t m_fwd_stream = nullptr;
 };
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

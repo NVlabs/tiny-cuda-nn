@@ -30,8 +30,8 @@
 
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/cpp_api.h>
-
 #include <tiny-cuda-nn/encoding.h>
+#include <tiny-cuda-nn/multi_stream.h>
 #include <tiny-cuda-nn/network_with_input_encoding.h>
 
 namespace tcnn { namespace cpp {
@@ -44,15 +44,16 @@ public:
 	: Module{TCNN_PRECISION}, m_network{std::make_shared<tcnn::NetworkWithInputEncoding<network_precision_t>>(n_input_dims, n_output_dims, encoding, network)}
 	{}
 
-	virtual ~NetworkWithInputEncoding() {}
-
 	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
 		m_network->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
 
-		m_network->inference_mixed_precision(stream, input_matrix, output_matrix);
+		// Run on our own custom stream to ensure CUDA graph capture is possible.
+		// (Significant possible speedup.)
+		SyncedMultiStream synced_stream{stream, 2};
+		m_network->inference_mixed_precision(synced_stream.get(1), input_matrix, output_matrix);
 	}
 
 	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
@@ -61,7 +62,10 @@ public:
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
 
-		return { m_network->forward(stream, input_matrix, &output_matrix, false, prepare_input_gradients) };
+		// Run on our own custom stream to ensure CUDA graph capture is possible.
+		// (Significant possible speedup.)
+		SyncedMultiStream synced_stream{stream, 2};
+		return { m_network->forward(synced_stream.get(1), input_matrix, &output_matrix, false, prepare_input_gradients) };
 	}
 
 	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void* output, const void* params) override {
@@ -73,7 +77,10 @@ public:
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
 		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> dL_doutput_matrix((network_precision_t*)dL_doutput, m_network->padded_output_width(), n_elements);
 
-		m_network->backward(stream, *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr);
+		// Run on our own custom stream to ensure CUDA graph capture is possible.
+		// (Significant possible speedup.)
+		SyncedMultiStream synced_stream{stream, 2};
+		m_network->backward(synced_stream.get(1), *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr);
 	}
 
 	uint32_t n_input_dims() const override {
@@ -106,8 +113,6 @@ public:
 	Encoding(uint32_t n_input_dims, const json& encoding)
 	: Module{TCNN_PRECISION}, m_encoding{tcnn::create_encoding<network_precision_t>(n_input_dims, encoding, 0)}
 	{}
-
-	virtual ~Encoding() {}
 
 	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
 		m_encoding->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);

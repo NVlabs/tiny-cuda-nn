@@ -141,8 +141,8 @@ public:
 		// Set "loss gradient" at network outputs to 1 at the chosen dimension and 0 elsewhere.
 		one_hot_batched(stream, output.n_elements(), padded_output_width(), dim, d_doutput.data(), backprop_scale);
 
-		forward(stream, input, &output, true /* inference matrices */, true /* prep forward buffers for input gradients */);
-		backward(stream, input, output, d_doutput, &d_dinput, true /* inference matrices */, false /* no param gradients */);
+		auto ctx = forward(stream, input, &output, true /* inference matrices */, true /* prep forward buffers for input gradients */);
+		backward(stream, *ctx, input, output, d_doutput, &d_dinput, true /* inference matrices */, false /* no param gradients */);
 
 		mult(stream, d_dinput.n_elements(), d_dinput.data(), 1.0f / backprop_scale);
 	}

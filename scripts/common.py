@@ -22,39 +22,25 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os
-from pathlib import Path, PurePosixPath
+import imageio
 import numpy as np
-import pyexr as exr
-from scipy.ndimage.filters import convolve1d
+import os
 import struct
 
-import PIL.Image
-PIL.Image.MAX_IMAGE_PIXELS = 10000000000
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-SCRIPTS_DIR = ROOT_DIR/"scripts"
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 def mse2psnr(x):
     return -10.*np.log(x)/np.log(10.)
 
-def sanitize_path(path):
-	return str(PurePosixPath(path.relative_to(ROOT_DIR)))
+def write_image_imageio(img_file, img, quality):
+	img = (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+	imageio.imwrite(img_file, img, quality=quality, subsampling=0)
 
-def write_image_pillow(img_file, img, quality):
-	img_array = (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-	im = PIL.Image.fromarray(img_array)
-	if os.path.splitext(img_file)[1] == ".jpg":
-		im = im.convert("RGB") # Bake the alpha channel
-	im.save(img_file, quality=quality, subsampling=0)
-
-def read_image_pillow(img_file):
-	img = PIL.Image.open(img_file, "r")
-	if os.path.splitext(img_file)[1] == ".jpg":
-		img = img.convert("RGB")
-	else:
-		img = img.convert("RGBA")
+def read_image_imageio(img_file):
+	img = imageio.imread(img_file)
 	img = np.asarray(img).astype(np.float32)
+	if len(img.shape) == 2:
+		img = img[:,:,np.newaxis]
 	return img / 255.0
 
 def srgb_to_linear(img):
@@ -66,15 +52,13 @@ def linear_to_srgb(img):
 	return np.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img)
 
 def read_image(file):
-	if os.path.splitext(file)[1] == ".exr":
-		img = exr.read(file).astype(np.float32)
-	elif os.path.splitext(file)[1] == ".bin":
+	if os.path.splitext(file)[1] == ".bin":
 		with open(file, "rb") as f:
 			bytes = f.read()
 			h, w = struct.unpack("ii", bytes[:8])
 			img = np.frombuffer(bytes, dtype=np.float16, count=h*w*4, offset=8).astype(np.float32).reshape([h, w, 4])
 	else:
-		img = read_image_pillow(file)
+		img = read_image_imageio(file)
 		if img.shape[2] == 4:
 			img[...,0:3] = srgb_to_linear(img[...,0:3])
 			# Premultiply alpha
@@ -100,14 +84,14 @@ def write_image(file, img, quality=95):
 			img[...,0:3] = linear_to_srgb(img[...,0:3])
 		else:
 			img = linear_to_srgb(img)
-		write_image_pillow(file, img, quality)
+		write_image_imageio(file, img, quality)
 
 def write_image_gamma(file, img, gamma, quality=95):
 	if os.path.splitext(file)[1] == ".exr":
 		img = exr.write(file, img)
 	else:
 		img = img**(1.0/gamma) # this will break alpha channels
-		write_image_pillow(file, img, quality)
+		write_image_imageio(file, img, quality)
 
 def trim(error, skip=0.000001):
 	error = np.sort(error.flatten())
@@ -118,25 +102,6 @@ def trim(error, skip=0.000001):
 def luminance(a):
 	a = np.maximum(0, a)**0.4545454545
 	return 0.2126 * a[:,:,0] + 0.7152 * a[:,:,1] + 0.0722 * a[:,:,2]
-
-def SSIM(a, b):
-	def blur(a):
-		k = np.array([0.120078, 0.233881, 0.292082, 0.233881, 0.120078])
-		x = convolve1d(a, k, axis=0)
-		return convolve1d(x, k, axis=1)
-	a = luminance(a)
-	b = luminance(b)
-	mA = blur(a)
-	mB = blur(b)
-	sA = blur(a*a) - mA**2
-	sB = blur(b*b) - mB**2
-	sAB = blur(a*b) - mA*mB
-	c1 = 0.01**2
-	c2 = 0.03**2
-	p1 = (2.0*mA*mB + c1)/(mA*mA + mB*mB + c1)
-	p2 = (2.0*sAB + c2)/(sA + sB + c2)
-	error = p1 * p2
-	return error
 
 def L1(img, ref):
 	return np.abs(img - ref)
@@ -175,8 +140,6 @@ def compute_error_img(metric, img, ref):
 		return trim(RSE(img, ref))
 	elif metric == "MRScE":
 		return RSE(np.clip(img, 0, 100), np.clip(ref, 0, 100))
-	elif metric == "SSIM":
-		return SSIM(np.clip(img, 0.0, 1.0), np.clip(ref, 0.0, 1.0))
 
 	raise ValueError(f"Unknown metric: {metric}.")
 
