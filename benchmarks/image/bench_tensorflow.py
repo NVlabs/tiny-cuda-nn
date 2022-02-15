@@ -30,9 +30,6 @@ import glob
 import math
 import numpy as np
 import os
-import PIL.Image
-PIL.Image.MAX_IMAGE_PIXELS = 10000000000
-import pyexr as exr
 import sys
 import tensorflow.compat.v1 as tf
 import tensorflow_probability as tfp

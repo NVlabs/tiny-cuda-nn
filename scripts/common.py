@@ -68,9 +68,7 @@ def read_image(file):
 	return img
 
 def write_image(file, img, quality=95):
-	if os.path.splitext(file)[1] == ".exr":
-		img = exr.write(file, img)
-	elif os.path.splitext(file)[1] == ".bin":
+	if os.path.splitext(file)[1] == ".bin":
 		if img.shape[2] < 4:
 			img = np.dstack((img, np.ones([img.shape[0], img.shape[1], 4 - img.shape[2]])))
 		with open(file, "wb") as f:
