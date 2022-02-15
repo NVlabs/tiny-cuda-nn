@@ -99,8 +99,6 @@ public:
 		return forward(nullptr, input, output, use_inference_matrices, prepare_input_gradients);
 	}
 
-	virtual void forward_clear() {}
-
 	virtual void backward(
 		cudaStream_t stream,
 		const Context& ctx,

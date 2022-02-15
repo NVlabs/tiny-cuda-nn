@@ -402,12 +402,10 @@ void CutlassMLP<T>::backward(
 			cudaStreamWaitEvent(stream, event, 0);
 		}
 	}
-
-	forward_clear();
 }
 
 template <typename T>
-std::unique_ptr<CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
+std::unique_ptr<typename CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
 	auto forward = std::make_unique<ForwardContext>();
 
 	forward->hidden.resize(num_forward_activations());

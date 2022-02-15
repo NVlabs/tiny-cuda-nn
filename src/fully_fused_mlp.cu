@@ -939,12 +939,10 @@ void FullyFusedMLP<T, WIDTH>::backward(
 			cudaStreamWaitEvent(stream, event, 0);
 		}
 	}
-
-	forward_clear();
 }
 
 template <typename T, int WIDTH>
-std::unique_ptr<FullyFusedMLP<T, WIDTH>::ForwardContext> FullyFusedMLP<T, WIDTH>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
+std::unique_ptr<typename FullyFusedMLP<T, WIDTH>::ForwardContext> FullyFusedMLP<T, WIDTH>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
 	auto forward = std::make_unique<ForwardContext>();
 
 	// Use GPUMatrixBase::allocate_shared_memory to ensure the matrices occupy contiguous memory.

@@ -344,12 +344,10 @@ void CutlassResNet<T, input_activation>::backward(
 			cudaStreamWaitEvent(stream, event, 0);
 		}
 	}
-
-	forward_clear();
 }
 
 template <typename T, Activation input_activation>
-std::unique_ptr<CutlassResNet<T, input_activation>::ForwardContext> CutlassResNet<T, input_activation>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
+std::unique_ptr<typename CutlassResNet<T, input_activation>::ForwardContext> CutlassResNet<T, input_activation>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
 	auto forward = std::make_unique<ForwardContext>();
 
 	forward->input = GPUMatrix<T>{m_network_width, batch_size, stream};
