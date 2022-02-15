@@ -29,11 +29,8 @@
 
 import argparse
 import commentjson as json
-import glob
 import numpy as np
 import os
-import PIL.Image
-PIL.Image.MAX_IMAGE_PIXELS = 10000000000
 import sys
 import torch
 import time
