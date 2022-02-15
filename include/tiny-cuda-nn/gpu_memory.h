@@ -32,6 +32,7 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
+#include <tiny-cuda-nn/cuda_graph.h>
 
 #include <cuda.h>
 
@@ -506,8 +507,6 @@ public:
 			return;
 		}
 
-		CUDA_CHECK_THROW(cudaDeviceSynchronize());
-
 		size_t n_bytes_to_allocate = n_bytes - m_size;
 		n_bytes_to_allocate = next_multiple(n_bytes_to_allocate, cuda_memory_granularity());
 
@@ -528,9 +527,14 @@ public:
 		CU_CHECK_THROW(cuMemSetAccess(m_base_address + m_size, n_bytes_to_allocate, &access_desc, 1));
 		m_size += n_bytes_to_allocate;
 
-		CUDA_CHECK_THROW(cudaDeviceSynchronize());
-
 		total_n_bytes_allocated() += n_bytes_to_allocate;
+
+		// Need to synchronize the device to make sure memory is available to all streams.
+		if (current_capture()) {
+			current_capture()->schedule_synchronize();
+		} else {
+			CUDA_CHECK_THROW(cudaDeviceSynchronize());
+		}
 	}
 
 	size_t size() const {

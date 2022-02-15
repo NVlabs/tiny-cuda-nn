@@ -34,7 +34,21 @@
 
 #include <cuda.h>
 
+#include <deque>
+#include <functional>
+
 TCNN_NAMESPACE_BEGIN
+
+class CudaGraph;
+
+inline std::deque<CudaGraph*>& current_captures() {
+	static std::deque<CudaGraph*> s_current_captures;
+	return s_current_captures;
+}
+
+inline CudaGraph* current_capture() {
+	return current_captures().empty() ? nullptr : current_captures().front();
+}
 
 class CudaGraph {
 public:
@@ -49,13 +63,28 @@ public:
 		}
 	}
 
-	template <typename F>
-	void capture_and_execute(cudaStream_t stream, bool skip_capture, F fun) {
+	void capture_and_execute(cudaStream_t stream, bool skip_capture, std::function<void()> fun) {
+		// If the caller is already capturing, no need for a nested capture.
 		cudaStreamCaptureStatus captureStatus;
-		CUDA_CHECK_THROW(cudaStreamIsCapturing(stream, &captureStatus));
-		skip_capture |= captureStatus == cudaStreamCaptureStatusActive; // If the caller is already capturing, no need for a nested capture.
+		if (stream == nullptr || stream == cudaStreamLegacy) {
+			skip_capture = true;
+		} else {
+			CUDA_CHECK_THROW(cudaStreamIsCapturing(stream, &captureStatus));
+			skip_capture |= captureStatus != cudaStreamCaptureStatusNone;
+
+			cudaError_t capture_result = cudaStreamIsCapturing(cudaStreamLegacy, &captureStatus);
+			if (capture_result == cudaErrorStreamCaptureImplicit) {
+				skip_capture = true;
+			} else {
+				CUDA_CHECK_THROW(capture_result);
+			}
+			skip_capture |= captureStatus != cudaStreamCaptureStatusNone;
+		}
+
+		// Actually capture & run the graph
 		if (!skip_capture) {
-			CUDA_CHECK_THROW(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+			CUDA_CHECK_THROW(cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed));
+			current_captures().push_back(this);
 		}
 
 		fun();
@@ -66,6 +95,16 @@ public:
 				m_graph = nullptr;
 			}
 			CUDA_CHECK_THROW(cudaStreamEndCapture(stream, &m_graph));
+			if (current_captures().back() != this) {
+				throw std::runtime_error{"CudaGraph: must end captures in reverse order of creation."};
+			}
+			current_captures().pop_back();
+
+			if (m_synchronize_when_capture_done) {
+				std::cout << "Scheduled synchronize GO!" << std::endl;
+				CUDA_CHECK_THROW(cudaDeviceSynchronize());
+				m_synchronize_when_capture_done = false;
+			}
 
 			cudaGraphExecUpdateResult update_result;
 			cudaGraphNode_t error_node;
@@ -96,9 +135,15 @@ public:
 		}
 	}
 
+	void schedule_synchronize() {
+		m_synchronize_when_capture_done = true;
+	}
+
 private:
 	cudaGraph_t m_graph = nullptr;
 	cudaGraphExec_t m_graph_instance = nullptr;
+
+	bool m_synchronize_when_capture_done = false;
 };
 
 TCNN_NAMESPACE_END
