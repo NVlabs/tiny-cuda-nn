@@ -133,10 +133,6 @@ if __name__ == "__main__":
 
 	xy = torch.stack((yv.flatten(), xv.flatten())).t()
 
-	# TCNN only supports batch sizes that are a multiple of 256. Apply the corresponding padding here.
-	xy_batch_size = (n_pixels + 255) // 256 * 256
-	xy_padded = torch.nn.functional.pad(xy, [0, 0, 0, xy_batch_size - n_pixels], "constant", 0)
-
 	path = f"reference.jpg"
 	print(f"Writing '{path}'... ", end="")
 	write_image(path, image(xy).reshape(img_shape).detach().cpu().numpy())
@@ -172,7 +168,7 @@ if __name__ == "__main__":
 			path = f"{i}.jpg"
 			print(f"Writing '{path}'... ", end="")
 			with torch.no_grad():
-				write_image(path, model(xy_padded)[:n_pixels,:].reshape(img_shape).clamp(0.0, 1.0).detach().cpu().numpy())
+				write_image(path, model(xy).reshape(img_shape).clamp(0.0, 1.0).detach().cpu().numpy())
 			print("done.")
 
 			# Ignore the time spent saving the image
@@ -184,5 +180,5 @@ if __name__ == "__main__":
 	if args.result_filename:
 		print(f"Writing '{args.result_filename}'... ", end="")
 		with torch.no_grad():
-			write_image(args.result_filename, model(xy_padded)[:n_pixels,:].reshape(img_shape).clamp(0.0, 1.0).detach().cpu().numpy())
+			write_image(args.result_filename, model(xy).reshape(img_shape).clamp(0.0, 1.0).detach().cpu().numpy())
 		print("done.")

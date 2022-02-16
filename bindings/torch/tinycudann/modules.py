@@ -39,18 +39,19 @@ class Module(torch.nn.Module):
 
 		self.loss_scale = 128.0 if self.native_tcnn_module.param_precision() == _C.Precision.Fp16 else 1.0
 
-	def _unpad_output(self, x, batch_size):
-		return x[:batch_size, :self.n_output_dims]
-
 	def forward(self, x):
+		# TCNN only supports batch sizes that are a multiple of 256. Apply the corresponding padding here.
 		batch_size = x.shape[0]
+		padded_batch_size = (batch_size + 255) // 256 * 256
+
+		x_padded = x if batch_size == padded_batch_size else torch.nn.functional.pad(x, [0, 0, 0, padded_batch_size - batch_size])
 		output = _module_func.apply(
 			self.native_tcnn_module,
-			x.to(torch.float).contiguous(),
+			x_padded.to(torch.float).contiguous(),
 			self.params.to(torch.half if self.native_tcnn_module.param_precision() == _C.Precision.Fp16 else torch.float32).contiguous(),
 			self.loss_scale
 		)
-		return self._unpad_output(output, batch_size)
+		return output[:batch_size, :self.n_output_dims]
 
 	def __getstate__(self):
 		"""Return state values to be pickled."""
