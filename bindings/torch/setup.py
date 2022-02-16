@@ -70,7 +70,7 @@ if torch.cuda.is_available():
 	bindings_dir = os.path.dirname(__file__)
 	root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
 	source_files = [
-		"tinycudann/torch_bindings.cpp",
+		"tinycudann/bindings.cpp",
 		"../../src/cpp_api.cu",
 		"../../src/common.cu",
 		"../../src/common_device.cu",
