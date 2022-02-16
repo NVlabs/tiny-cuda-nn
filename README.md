@@ -125,7 +125,12 @@ These bindings can be significantly faster than full Python implementations; in 
 > The overheads of Python/PyTorch can nonetheless be extensive.
 > For example, the bundled `mlp_learning_an_image` example is __~2x slower__ through PyTorch than native CUDA.
 
-Begin by setting up a Python 3.X environment with a recent, CUDA-enabled version of PyTorch. Then, invoke the following commands:
+Begin by setting up a Python 3.X environment with a recent, CUDA-enabled version of PyTorch. Then, invoke
+```sh
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
+Alternatively, if you would like to install from a local clone of __tiny-cuda-nn__, invoke
 ```sh
 tiny-cuda-nn$ cd bindings/torch
 tiny-cuda-nn/bindings/torch$ python setup.py install
