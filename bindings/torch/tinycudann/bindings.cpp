@@ -77,8 +77,8 @@ public:
 	: Module{tcnn::cpp::create_network(n_input_dims, n_output_dims, network)} {}
 
 	// Helper constructor to create a Encoding module
-	Module(uint32_t n_input_dims, const nlohmann::json& encoding)
-	: Module{tcnn::cpp::create_encoding(n_input_dims, encoding)} {}
+	Module(uint32_t n_input_dims, const nlohmann::json& encoding, tcnn::cpp::EPrecision requested_precision)
+	: Module{tcnn::cpp::create_encoding(n_input_dims, encoding, requested_precision)} {}
 
 	std::tuple<tcnn::cpp::Context, torch::Tensor> fwd(torch::Tensor input, torch::Tensor params) {
 		// Check for correct types
@@ -212,6 +212,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 		.export_values()
 		;
 
+	m.def("preferred_precision", &tcnn::cpp::preferred_precision);
+
 	// Encapsulates an abstract context of an operation
 	// (commonly the forward pass) to be passed on to other
 	// operations (commonly the backward pass).
@@ -234,9 +236,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 			py::arg("n_input_dims"), py::arg("n_output_dims"), py::arg("network_config")
 		)
 		.def(
-			py::init<uint32_t, const nlohmann::json&>(),
+			py::init<uint32_t, const nlohmann::json&, tcnn::cpp::EPrecision>(),
 			"Constructor for just the Encoding",
-			py::arg("n_input_dims"), py::arg("encoding_config")
+			py::arg("n_input_dims"), py::arg("encoding_config"), py::arg("precision")=tcnn::cpp::preferred_precision()
 		)
 		.def("fwd", &Module::fwd)
 		.def("bwd", &Module::bwd)

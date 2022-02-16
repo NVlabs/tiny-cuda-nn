@@ -36,12 +36,15 @@
 
 namespace tcnn { namespace cpp {
 
-static constexpr EPrecision TCNN_PRECISION = std::is_same<network_precision_t, float>::value ? EPrecision::Fp32 : EPrecision::Fp16;
+template <typename T>
+constexpr EPrecision precision() {
+	return std::is_same<T, float>::value ? EPrecision::Fp32 : EPrecision::Fp16;
+}
 
 class NetworkWithInputEncoding : public Module {
 public:
 	NetworkWithInputEncoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network)
-	: Module{TCNN_PRECISION}, m_network{std::make_shared<tcnn::NetworkWithInputEncoding<network_precision_t>>(n_input_dims, n_output_dims, encoding, network)}
+	: Module{precision<network_precision_t>(), precision<network_precision_t>()}, m_network{std::make_shared<tcnn::NetworkWithInputEncoding<network_precision_t>>(n_input_dims, n_output_dims, encoding, network)}
 	{}
 
 	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
@@ -91,10 +94,6 @@ public:
 		return m_network->n_params();
 	}
 
-	EPrecision param_precision() const override {
-		return TCNN_PRECISION;
-	}
-
 	void initialize_params(size_t seed, float* params_full_precision) override {
 		pcg32 rng{seed};
 		m_network->initialize_params(rng, params_full_precision, nullptr, nullptr, nullptr, nullptr);
@@ -108,26 +107,27 @@ private:
 	std::shared_ptr<tcnn::NetworkWithInputEncoding<network_precision_t>> m_network;
 };
 
+template <typename T>
 class Encoding : public Module {
 public:
 	Encoding(uint32_t n_input_dims, const json& encoding)
-	: Module{TCNN_PRECISION}, m_encoding{tcnn::create_encoding<network_precision_t>(n_input_dims, encoding, 0)}
+	: Module{precision<T>(), precision<T>()}, m_encoding{tcnn::create_encoding<T>(n_input_dims, encoding, 0)}
 	{}
 
 	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
-		m_encoding->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
+		m_encoding->set_params((T*)params, (T*)params, nullptr, nullptr);
 
 		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
-		PitchedPtr<network_precision_t> pitched_output((network_precision_t*)output, m_encoding->num_encoded_dims());
+		PitchedPtr<T> pitched_output((T*)output, m_encoding->num_encoded_dims());
 
 		m_encoding->encode(stream, n_elements, pitched_input, pitched_output, nullptr, true);
 	}
 
 	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
-		m_encoding->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
+		m_encoding->set_params((T*)params, (T*)params, nullptr, nullptr);
 
 		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
-		PitchedPtr<network_precision_t> pitched_output((network_precision_t*)output, m_encoding->num_encoded_dims());
+		PitchedPtr<T> pitched_output((T*)output, m_encoding->num_encoded_dims());
 
 		auto forward = std::make_unique<ForwardContext>();
 		if (prepare_input_gradients) {
@@ -140,11 +140,11 @@ public:
 	}
 
 	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void*, const void* params) override {
-		m_encoding->set_params((network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)dL_dparams);
+		m_encoding->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
 
 		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
 		PitchedPtr<float> pitched_dL_dinput(dL_dinput, m_encoding->num_dims_to_encode());
-		PitchedPtr<const network_precision_t> pitched_dL_doutput((network_precision_t*)dL_doutput, m_encoding->num_encoded_dims());
+		PitchedPtr<const T> pitched_dL_doutput((T*)dL_doutput, m_encoding->num_encoded_dims());
 
 		const auto& forward = dynamic_cast<const ForwardContext&>(*ctx.ctx);
 		if (dL_dinput && !forward.dy_dx.data()) {
@@ -162,10 +162,6 @@ public:
 		return m_encoding->n_params();
 	}
 
-	EPrecision param_precision() const override {
-		return TCNN_PRECISION;
-	}
-
 	void initialize_params(size_t seed, float* params_full_precision) override {
 		pcg32 rng{seed};
 		m_encoding->initialize_params(rng, params_full_precision, nullptr, nullptr, nullptr, nullptr);
@@ -180,11 +176,18 @@ private:
 		GPUMatrix<float> dy_dx;
 	};
 
-	std::shared_ptr<tcnn::Encoding<network_precision_t>> m_encoding;
+	std::shared_ptr<tcnn::Encoding<T>> m_encoding;
 };
 
-Module* create_encoding(uint32_t n_input_dims, const json& encoding) {
-	return new Encoding{n_input_dims, encoding};
+Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision) {
+	if (requested_precision == EPrecision::Fp32) {
+		return new Encoding<float>{n_input_dims, encoding};
+	}
+#if TCNN_HALF_PRECISION
+	return new Encoding<__half>{n_input_dims, encoding};
+#else
+	throw std::runtime_error{"TCNN was not compiled with half-precision support."};
+#endif
 }
 
 Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network) {
@@ -193,6 +196,10 @@ Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_out
 
 Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network) {
 	return create_network_with_input_encoding(n_input_dims, n_output_dims, {{"otype", "Identity"}}, network);
+}
+
+EPrecision preferred_precision() {
+	return precision<network_precision_t>();
 }
 
 }}

@@ -6,6 +6,6 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from tinycudann.ops import NetworkWithInputEncoding, Network, Encoding
+from tinycudann.modules import NetworkWithInputEncoding, Network, Encoding
 
 __all__ = ["NetworkWithInputEncoding", "Network", "Encoding"]

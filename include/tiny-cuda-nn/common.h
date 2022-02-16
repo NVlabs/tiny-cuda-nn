@@ -49,6 +49,8 @@ TCNN_NAMESPACE_BEGIN
 
 static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 
+#define TCNN_HALF_PRECISION (!(TCNN_MIN_GPU_ARCH == 61 || TCNN_MIN_GPU_ARCH <= 52))
+
 // TCNN has the following behavior depending on GPU arch.
 // Refer to the first row of the table at the following URL for information about
 // when to pick fp16 versus fp32 precision for maximum performance.
@@ -62,7 +64,7 @@ static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 // 53-60, 62 |                      no |                       70 |  __half (no tensor cores)
 //  <=52, 61 |                      no |                       70 |   float (no tensor cores)
 
-using network_precision_t = std::conditional_t<MIN_GPU_ARCH == 61 || MIN_GPU_ARCH <= 52, float, __half>;
+using network_precision_t = std::conditional_t<TCNN_HALF_PRECISION, __half, float>;
 
 // Optionally: set the precision to `float` to disable tensor cores and debug potential
 //             problems with mixed-precision training.
