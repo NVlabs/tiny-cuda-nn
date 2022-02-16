@@ -160,9 +160,25 @@ public:
 		if (input.requires_grad()) {
 			dL_dinput = torch::empty({ batch_size, input.size(1) }, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
 		}
-		torch::Tensor dL_dparams = torch::empty({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(torch::kCUDA));
 
-		m_module->backward(stream, ctx, batch_size, input.requires_grad() ? dL_dinput.data_ptr<float>() : nullptr, void_data_ptr(dL_doutput), void_data_ptr(dL_dparams), input.data_ptr<float>(), void_data_ptr(output), void_data_ptr(params));
+		torch::Tensor dL_dparams;
+		if (params.requires_grad()) {
+			dL_dparams = torch::empty({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(torch::kCUDA));
+		}
+
+		if (input.requires_grad() || params.requires_grad()) {
+			m_module->backward(
+				stream,
+				ctx,
+				batch_size,
+				input.requires_grad() ? dL_dinput.data_ptr<float>() : nullptr,
+				void_data_ptr(dL_doutput),
+				params.requires_grad() ? void_data_ptr(dL_dparams) : nullptr,
+				input.data_ptr<float>(),
+				void_data_ptr(output),
+				void_data_ptr(params)
+			);
+		}
 
 		return { dL_dinput, dL_dparams };
 	}

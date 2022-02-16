@@ -66,7 +66,8 @@ public:
 		const float* dy_dx, // encoded output dims x num_elements
 		PitchedPtr<float> dL_dx, // Same shape as inputs
 		PitchedPtr<const float> inputs = {},
-		bool accumulate_param_gradients = false // whether to accumulate parameter gradients on top of the last backward() call
+		bool accumulate_param_gradients = false, // whether to accumulate parameter gradients on top of the last backward() call
+		bool compute_param_gradients = true
 	) = 0;
 
 	virtual uint32_t num_dims_to_encode() const = 0;

@@ -683,7 +683,8 @@ public:
 		const float* dy_dx, // encoded output dims x num_elements
 		PitchedPtr<float> dL_dx, // Same shape as inputs
 		PitchedPtr<const float> inputs,
-		bool accumulate_param_gradients
+		bool accumulate_param_gradients,
+		bool compute_param_gradients
 	) override {
 		if (m_n_padded_output_dims == 0 || num_elements == 0) {
 			return;
@@ -712,44 +713,46 @@ public:
 			dL_dy_rm = (const T*)workspace.data();
 		}
 
-		// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
-		// If not, accumulate in a temporary buffer and cast later.
-		grad_t* grid_gradient;
-		if (!std::is_same<grad_t, T>::value) {
-			grid_gradient = (grad_t*)m_grid_gradient_tmp.data();
-		} else {
-			grid_gradient = (grad_t*)m_grid_gradient;
-		}
+		if (compute_param_gradients) {
+			// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
+			// If not, accumulate in a temporary buffer and cast later.
+			grad_t* grid_gradient;
+			if (!std::is_same<grad_t, T>::value) {
+				grid_gradient = (grad_t*)m_grid_gradient_tmp.data();
+			} else {
+				grid_gradient = (grad_t*)m_grid_gradient;
+			}
 
-		if (!accumulate_param_gradients) {
-			CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
-		}
+			if (!accumulate_param_gradients) {
+				CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
+			}
 
-		static constexpr uint32_t N_THREADS_HASHGRID = 256;
-		static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
+			static constexpr uint32_t N_THREADS_HASHGRID = 256;
+			static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
 
-		const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
+			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
-		kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
-			num_elements,
-			m_n_features,
-			m_hashmap_offsets_table.data(),
-			m_base_resolution,
-			std::log2(m_per_level_scale),
-			this->m_max_level,
-			this->m_max_level_gpu,
-			m_stochastic_interpolation,
-			m_interpolation_type,
-			m_grid_type,
-			grid_gradient,
-			positions->data(), // positions SoA
-			dL_dy_rm // gradients SoA
-		);
+			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+				num_elements,
+				m_n_features,
+				m_hashmap_offsets_table.data(),
+				m_base_resolution,
+				std::log2(m_per_level_scale),
+				this->m_max_level,
+				this->m_max_level_gpu,
+				m_stochastic_interpolation,
+				m_interpolation_type,
+				m_grid_type,
+				grid_gradient,
+				positions->data(), // positions SoA
+				dL_dy_rm // gradients SoA
+			);
 
-		if (!std::is_same<grad_t, T>::value) {
-			parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
-				grad[i] = (T)grad_tmp[i];
-			});
+			if (!std::is_same<grad_t, T>::value) {
+				parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
+					grad[i] = (T)grad_tmp[i];
+				});
+			}
 		}
 
 		// Can't compute input gradients if insufficient info is available

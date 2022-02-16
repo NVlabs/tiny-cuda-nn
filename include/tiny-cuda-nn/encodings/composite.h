@@ -132,7 +132,8 @@ public:
 		const float* dy_dx, // encoded output dims x num_elements
 		PitchedPtr<float> dL_dx, // Same shape as inputs
 		PitchedPtr<const float> inputs,
-		bool accumulate_param_gradients
+		bool accumulate_param_gradients,
+		bool compute_param_gradients
 	) override {
 		if (m_n_dims_to_encode == 0) {
 			return;
@@ -142,7 +143,7 @@ public:
 
 		for (size_t i = 0; i < m_nested.size(); ++i) {
 			const auto& nested = m_nested[i];
-			nested->backward(synced_streams.get(i), num_elements, dL_dy, dy_dx, dL_dx, inputs, accumulate_param_gradients);
+			nested->backward(synced_streams.get(i), num_elements, dL_dy, dy_dx, dL_dx, inputs, accumulate_param_gradients, compute_param_gradients);
 
 			dL_dy.ptr += nested->num_encoded_dims();
 			if (dy_dx) {

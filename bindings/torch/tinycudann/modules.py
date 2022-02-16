@@ -25,7 +25,7 @@ class _module_func(torch.autograd.Function):
 		with torch.no_grad():
 			scaled_grad = doutput * ctx.loss_scale
 			input_grad, weight_grad = ctx.native_tcnn_module.bwd(ctx.native_ctx, input, weights, output, scaled_grad)
-		return None, None if input_grad is None else (input_grad / ctx.loss_scale), weight_grad / ctx.loss_scale, None
+		return None, None if input_grad is None else (input_grad / ctx.loss_scale), None if weight_grad is None else (weight_grad / ctx.loss_scale), None
 
 class Module(torch.nn.Module):
 	def __init__(self, seed=1337):
