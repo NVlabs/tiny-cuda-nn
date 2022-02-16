@@ -3,6 +3,7 @@ import os
 import torch
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
@@ -19,6 +20,12 @@ print(f"Building PyTorch extension for tiny-cuda-nn version {VERSION}")
 ext_modules = []
 
 if torch.cuda.is_available():
+	include_networks = True
+	if "--no-networks" in sys.argv:
+		include_networks = False
+		sys.argv.remove("--no-networks")
+		print("Building >> without << neural networks (just the input encodings)")
+
 	if os.name == "nt":
 		def find_cl_path():
 			import glob
@@ -75,11 +82,18 @@ if torch.cuda.is_available():
 		"../../src/common.cu",
 		"../../src/common_device.cu",
 		"../../src/encoding.cu",
-		"../../src/network.cu",
-		"../../src/fully_fused_mlp.cu",
-		"../../src/cutlass_mlp.cu",
-		"../../src/cutlass_resnet.cu"
 	]
+
+	if include_networks:
+		source_files += [
+			"../../src/network.cu",
+			"../../src/fully_fused_mlp.cu",
+			"../../src/cutlass_mlp.cu",
+			"../../src/cutlass_resnet.cu",
+		]
+	else:
+		nvcc_flags.append("-DTCNN_NO_NETWORKS")
+		cflags.append("-DTCNN_NO_NETWORKS")
 
 	ext = CUDAExtension(
 		name="tinycudann_bindings._C",

@@ -32,7 +32,10 @@
 #include <tiny-cuda-nn/cpp_api.h>
 #include <tiny-cuda-nn/encoding.h>
 #include <tiny-cuda-nn/multi_stream.h>
+
+#if !defined(TCNN_NO_NETWORKS)
 #include <tiny-cuda-nn/network_with_input_encoding.h>
+#endif
 
 namespace tcnn { namespace cpp {
 
@@ -41,6 +44,11 @@ constexpr EPrecision precision() {
 	return std::is_same<T, float>::value ? EPrecision::Fp32 : EPrecision::Fp16;
 }
 
+EPrecision preferred_precision() {
+	return precision<network_precision_t>();
+}
+
+#if !defined(TCNN_NO_NETWORKS)
 class NetworkWithInputEncoding : public Module {
 public:
 	NetworkWithInputEncoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network)
@@ -106,6 +114,15 @@ public:
 private:
 	std::shared_ptr<tcnn::NetworkWithInputEncoding<network_precision_t>> m_network;
 };
+
+Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network) {
+	return new NetworkWithInputEncoding{n_input_dims, n_output_dims, encoding, network};
+}
+
+Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network) {
+	return create_network_with_input_encoding(n_input_dims, n_output_dims, {{"otype", "Identity"}}, network);
+}
+#endif // !defined(TCNN_NO_NETWORKS)
 
 template <typename T>
 class Encoding : public Module {
@@ -188,18 +205,6 @@ Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision 
 #else
 	throw std::runtime_error{"TCNN was not compiled with half-precision support."};
 #endif
-}
-
-Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network) {
-	return new NetworkWithInputEncoding{n_input_dims, n_output_dims, encoding, network};
-}
-
-Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network) {
-	return create_network_with_input_encoding(n_input_dims, n_output_dims, {{"otype", "Identity"}}, network);
-}
-
-EPrecision preferred_precision() {
-	return precision<network_precision_t>();
 }
 
 }}

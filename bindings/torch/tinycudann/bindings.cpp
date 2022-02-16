@@ -68,6 +68,7 @@ public:
 	Module(tcnn::cpp::Module* module) : m_module{module} {}
 	virtual ~Module() {}
 
+#if !defined(TCNN_NO_NETWORKS)
 	// Helper constructor to create a NetworkWithInputEncoding module
 	Module(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json& encoding, const nlohmann::json& network)
 	: Module{tcnn::cpp::create_network_with_input_encoding(n_input_dims, n_output_dims, encoding, network)} {}
@@ -75,6 +76,7 @@ public:
 	// Helper constructor to create a Network module
 	Module(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json& network)
 	: Module{tcnn::cpp::create_network(n_input_dims, n_output_dims, network)} {}
+#endif
 
 	// Helper constructor to create a Encoding module
 	Module(uint32_t n_input_dims, const nlohmann::json& encoding, tcnn::cpp::EPrecision requested_precision)
@@ -241,6 +243,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 	// under the hood. The bindings don't need to concern
 	// themselves with these implementation details, though.
 	py::class_<Module>(m, "Module")
+#if !defined(TCNN_NO_NETWORKS)
 		.def(
 			py::init<uint32_t, uint32_t, const nlohmann::json&, const nlohmann::json&>(),
 			"Constructor for Encoding+Network combo",
@@ -251,6 +254,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 			"Constructor for just the Network",
 			py::arg("n_input_dims"), py::arg("n_output_dims"), py::arg("network_config")
 		)
+#endif
 		.def(
 			py::init<uint32_t, const nlohmann::json&, tcnn::cpp::EPrecision>(),
 			"Constructor for just the Encoding",
