@@ -7,32 +7,55 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import torch
+from torch.autograd.function import once_differentiable
 from tinycudann_bindings import _C
 
-class _module_func(torch.autograd.Function):
+def _torch_precision(tcnn_precision):
+	if tcnn_precision == _C.Precision.Fp16:
+		return torch.half
+	elif tcnn_precision == _C.Precision.Fp32:
+		return torch.float
+	else:
+		raise ValueError(f"Unknown precision {tcnn_precision}")
+
+class _module_function(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, native_tcnn_module, input, params, loss_scale):
+		# If no output gradient is provided, no need to
+		# automatically materialize it as torch.zeros.
+		ctx.set_materialize_grads(False)
+
 		native_ctx, output = native_tcnn_module.fwd(input, params)
 		ctx.save_for_backward(input, params, output)
 		ctx.native_tcnn_module = native_tcnn_module
 		ctx.native_ctx = native_ctx
 		ctx.loss_scale = loss_scale
+
 		return output
 
 	@staticmethod
+	@once_differentiable
 	def backward(ctx, doutput):
-		input, weights, output = ctx.saved_tensors
+		if doutput is None:
+			return None, None, None, None
+
+		input, params, output = ctx.saved_tensors
 		with torch.no_grad():
 			scaled_grad = doutput * ctx.loss_scale
-			input_grad, weight_grad = ctx.native_tcnn_module.bwd(ctx.native_ctx, input, weights, output, scaled_grad)
-		return None, None if input_grad is None else (input_grad / ctx.loss_scale), None if weight_grad is None else (weight_grad / ctx.loss_scale), None
+			input_grad, weight_grad = ctx.native_tcnn_module.bwd(ctx.native_ctx, input, params, output, scaled_grad)
+			input_grad = None if input_grad is None else (input_grad / ctx.loss_scale)
+			weight_grad = None if weight_grad is None else (weight_grad / ctx.loss_scale)
+
+		return None, input_grad, weight_grad, None
 
 class Module(torch.nn.Module):
 	def __init__(self, seed=1337):
 		super(Module, self).__init__()
 
 		self.native_tcnn_module = self._native_tcnn_module()
+		self.dtype = _torch_precision(self.native_tcnn_module.param_precision())
 
+		self.seed = seed
 		initial_params = self.native_tcnn_module.initial_params(seed)
 		self.params = torch.nn.Parameter(initial_params, requires_grad=True)
 		self.register_parameter(name="params", param=self.params)
@@ -45,10 +68,10 @@ class Module(torch.nn.Module):
 		padded_batch_size = (batch_size + 255) // 256 * 256
 
 		x_padded = x if batch_size == padded_batch_size else torch.nn.functional.pad(x, [0, 0, 0, padded_batch_size - batch_size])
-		output = _module_func.apply(
+		output = _module_function.apply(
 			self.native_tcnn_module,
 			x_padded.to(torch.float).contiguous(),
-			self.params.to(torch.half if self.native_tcnn_module.param_precision() == _C.Precision.Fp16 else torch.float32).contiguous(),
+			self.params.to(_torch_precision(self.native_tcnn_module.param_precision())).contiguous(),
 			self.loss_scale
 		)
 		return output[:batch_size, :self.n_output_dims]
@@ -64,6 +87,9 @@ class Module(torch.nn.Module):
 		self.__dict__.update(state)
 		# Reconstruct native entries
 		self.native_tcnn_module = self._native_tcnn_module()
+
+	def extra_repr(self):
+		return f"n_input_dims={self.n_input_dims}, n_output_dims={self.n_output_dims}, seed={self.seed}, dtype={self.dtype}, hyperparams={self.native_tcnn_module.hyperparams()}"
 
 class NetworkWithInputEncoding(Module):
 	"""
@@ -102,7 +128,7 @@ class NetworkWithInputEncoding(Module):
 		super(NetworkWithInputEncoding, self).__init__(seed=seed)
 
 	def _native_tcnn_module(self):
-		return _C.Module(self.n_input_dims, self.n_output_dims, self.encoding_config, self.network_config)
+		return _C.create_network_with_input_encoding(self.n_input_dims, self.n_output_dims, self.encoding_config, self.network_config)
 
 class Network(Module):
 	"""
@@ -134,7 +160,7 @@ class Network(Module):
 		super(Network, self).__init__(seed=seed)
 
 	def _native_tcnn_module(self):
-		return _C.Module(self.n_input_dims, self.n_output_dims, self.network_config)
+		return _C.create_network(self.n_input_dims, self.n_output_dims, self.network_config)
 
 class Encoding(Module):
 	"""
@@ -179,4 +205,4 @@ class Encoding(Module):
 		self.n_output_dims = self.native_tcnn_module.n_output_dims()
 
 	def _native_tcnn_module(self):
-		return _C.Module(self.n_input_dims, self.encoding_config, self.precision)
+		return _C.create_encoding(self.n_input_dims, self.encoding_config, self.precision)

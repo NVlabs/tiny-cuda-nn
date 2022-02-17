@@ -109,6 +109,7 @@ if __name__ == "__main__":
 	n_channels = image.data.shape[2]
 
 	model = tcnn.NetworkWithInputEncoding(n_input_dims=2, n_output_dims=n_channels, encoding_config=config["encoding"], network_config=config["network"])
+	print(model)
 
 	#===================================================================================================
 	# The following is equivalent to the above, but slower. Only use "naked" tcnn.Encoding and

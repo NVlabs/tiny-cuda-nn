@@ -111,6 +111,14 @@ public:
 		return m_network->padded_output_width();
 	}
 
+	json hyperparams() const override {
+		return m_network->hyperparams();
+	}
+
+	std::string name() const override {
+		return m_network->name();
+	}
+
 private:
 	std::shared_ptr<tcnn::NetworkWithInputEncoding<network_precision_t>> m_network;
 };
@@ -186,6 +194,14 @@ public:
 
 	uint32_t n_output_dims() const override {
 		return m_encoding->num_encoded_dims();
+	}
+
+	json hyperparams() const override {
+		return m_encoding->hyperparams();
+	}
+
+	std::string name() const override {
+		return m_encoding->name();
 	}
 
 private:

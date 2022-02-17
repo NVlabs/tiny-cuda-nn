@@ -214,6 +214,18 @@ public:
 		return total;
 	}
 
+	json hyperparams() const override {
+		json::array_t nested;
+		for (auto& n : m_nested) {
+			nested.emplace_back(n->hyperparams());
+		}
+
+		return {
+			{"otype", "Composite"},
+			{"nested", nested}
+		};
+	}
+
 private:
 	std::vector<std::unique_ptr<Encoding<T>>> m_nested;
 	uint32_t m_n_dims_to_encode;

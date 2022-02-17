@@ -133,6 +133,16 @@ public:
 		return {forward.hidden.at(layer).data(), CM};
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "CutlassResNet"},
+			{"output_activation", to_string(m_output_activation)},
+			{"n_neurons", m_network_width},
+			{"n_blocks", m_n_blocks},
+			{"n_matrices_per_block", m_n_matrices_per_block},
+		};
+	}
+
 private:
 	struct ForwardContext : public Context {
 		std::vector<GPUMatrix<T>> hidden;

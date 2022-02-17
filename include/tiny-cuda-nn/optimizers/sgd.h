@@ -125,6 +125,14 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "SGD"},
+			{"learning_rate", m_learning_rate},
+			{"l2_reg", m_l2_reg},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["current_step"] = m_current_step;

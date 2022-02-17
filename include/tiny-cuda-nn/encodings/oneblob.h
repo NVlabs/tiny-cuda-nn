@@ -234,6 +234,13 @@ public:
 		return m_n_bins;
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "OneBlob"},
+			{"n_bins", m_n_bins},
+		};
+	}
+
 private:
 	uint32_t m_n_bins;
 	uint32_t m_n_dims_to_encode;

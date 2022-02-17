@@ -127,6 +127,12 @@ public:
 	}
 
 	void update_hyperparams(const json& params) override { }
+
+	json hyperparams() const override {
+		return {
+			{"otype", "RelativeL2Luminance"},
+		};
+	}
 };
 
 TCNN_NAMESPACE_END

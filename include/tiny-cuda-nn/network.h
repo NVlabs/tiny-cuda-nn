@@ -41,6 +41,9 @@ enum class WeightUsage {
 	Backward,
 };
 
+Activation string_to_activation(const std::string& activation_name);
+std::string to_string(Activation activation);
+
 template <typename T>
 void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, MatrixLayout layout, float* output);
 

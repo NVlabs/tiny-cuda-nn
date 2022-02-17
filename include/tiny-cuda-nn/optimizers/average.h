@@ -134,6 +134,14 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Average"},
+			{"nested", m_nested->hyperparams()},
+			{"n_samples", m_n_samples},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();

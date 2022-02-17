@@ -132,6 +132,15 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Lookahead"},
+			{"nested", m_nested->hyperparams()},
+			{"alpha", m_alpha},
+			{"n_steps", m_n_steps},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();

@@ -121,6 +121,14 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Batched"},
+			{"nested", m_nested->hyperparams()},
+			{"batch_size_multiplier", m_batch_size_multiplier},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();

@@ -259,6 +259,14 @@ public:
 		m_loss->update_hyperparams(params.value("loss", json::object()));
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Trainer"},
+			{"optimizer", m_optimizer->hyperparams()},
+			{"loss", m_loss->hyperparams()},
+		};
+	}
+
 	float* params() {
 		return m_params_full_precision;
 	}

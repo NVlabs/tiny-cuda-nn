@@ -40,7 +40,7 @@
 
 TCNN_NAMESPACE_BEGIN
 
-Activation string_to_activation(std::string activation_name) {
+Activation string_to_activation(const std::string& activation_name) {
 	if (equals_case_insensitive(activation_name, "None")) {
 		return Activation::None;
 	} else if (equals_case_insensitive(activation_name, "ReLU")) {
@@ -60,13 +60,25 @@ Activation string_to_activation(std::string activation_name) {
 	throw std::runtime_error{std::string{"Invalid activation name: "} + activation_name};
 }
 
+std::string to_string(Activation activation) {
+	switch (activation) {
+		case Activation::None: return "None";
+		case Activation::ReLU: return "ReLU";
+		case Activation::Exponential: return "Exponential";
+		case Activation::Sigmoid: return "Sigmoid";
+		case Activation::Sine: return "Sine";
+		case Activation::Squareplus: return "Squareplus";
+		case Activation::Softplus: return "Softplus";
+		default: throw std::runtime_error{std::string{"Invalid activation"}};
+	}
+}
+
 template <typename T>
 void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, MatrixLayout layout, float* output) {
 	linear_kernel(extract_dimension_pos_neg_kernel<T>, 0, stream, num_elements, dim, fan_in, fan_out, encoded, layout, output);
 }
 
 template void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const network_precision_t* encoded, MatrixLayout layout, float* output);
-
 
 std::string select_network(const json& network) {
 	std::string otype = network.value("otype", "MLP");

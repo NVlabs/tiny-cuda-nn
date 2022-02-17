@@ -216,6 +216,14 @@ public:
 		return m_encoding.get();
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "NetworkWithInputEncoding"},
+			{"encoding", m_encoding->hyperparams()},
+			{"network", m_network->hyperparams()},
+		};
+	}
+
 private:
 	std::unique_ptr<Network<T>> m_network;
 	std::shared_ptr<Encoding<T>> m_encoding;
