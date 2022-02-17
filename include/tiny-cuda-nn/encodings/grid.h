@@ -874,8 +874,8 @@ GridEncoding<T>* create_grid_encoding_templated(uint32_t n_dims_to_encode, const
 	const std::string default_type = equals_case_insensitive(encoding_type, "TiledGrid") ? "Tiled" : (equals_case_insensitive(encoding_type, "DenseGrid") ? "Dense" : "Hash");
 
 	uint32_t n_features;
-	if (encoding.contains("n_features")) {
-		n_features = encoding["n_features"];
+	if (encoding.contains("n_features") || encoding.contains("n_grid_features")) {
+		n_features = encoding.contains("n_features") ? encoding["n_features"] : encoding["n_grid_features"];
 		if (encoding.contains("n_levels")) {
 			throw std::runtime_error{"GridEncoding: may not specify n_features and n_levels simultaneously (one determines the other)"};
 		}
