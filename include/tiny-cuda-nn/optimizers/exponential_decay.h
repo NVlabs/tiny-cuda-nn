@@ -114,6 +114,17 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "ExponentialDecay"},
+			{"nested", m_nested->hyperparams()},
+			{"decay_base", m_decay_base},
+			{"decay_interval", m_decay_interval},
+			{"decay_start", m_decay_start},
+			{"decay_end", m_decay_end},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();

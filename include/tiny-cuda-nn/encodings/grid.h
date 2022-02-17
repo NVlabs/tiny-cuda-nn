@@ -47,9 +47,13 @@
 
 TCNN_NAMESPACE_BEGIN
 
-enum GridType { Hash, Dense, Tiled };
+enum class GridType {
+	Hash,
+	Dense,
+	Tiled,
+};
 
-inline GridType string_to_grid_type(std::string grid_type) {
+inline GridType string_to_grid_type(const std::string& grid_type) {
 	if (equals_case_insensitive(grid_type, "Hash")) {
 		return GridType::Hash;
 	} else if (equals_case_insensitive(grid_type, "Dense")) {
@@ -59,6 +63,15 @@ inline GridType string_to_grid_type(std::string grid_type) {
 	}
 
 	throw std::runtime_error{std::string{"Invalid grid type: "} + grid_type};
+}
+
+inline std::string to_string(GridType grid_type) {
+	switch (grid_type) {
+		case GridType::Hash: return "Hash";
+		case GridType::Dense: return "Dense";
+		case GridType::Tiled: return "Tiled";
+		default: throw std::runtime_error{std::string{"Invalid grid type"}};
+	}
 }
 
 template <uint32_t N_DIMS>
@@ -534,6 +547,7 @@ public:
 		GridType grid_type
 	) :
 	m_n_features{n_features},
+	m_log2_hashmap_size{log2_hashmap_size},
 	m_base_resolution{base_resolution},
 	m_per_level_scale{per_level_scale},
 	m_stochastic_interpolation{stochastic_interpolation},
@@ -565,7 +579,7 @@ public:
 				// If hash table needs fewer params than dense, then use fewer and rely on the hash.
 				params_in_level = std::min(params_in_level, (1u << log2_hashmap_size));
 			} else {
-				throw std::runtime_error{std::string{"GridEncoding: invalid grid type "} + std::to_string(grid_type)};
+				throw std::runtime_error{std::string{"GridEncoding: invalid grid type "} + to_string(grid_type)};
 			}
 
 			offsets_table_host[i] = offset;
@@ -834,11 +848,30 @@ public:
 		return N_FEATURES_PER_LEVEL;
 	}
 
+	json hyperparams() const override {
+		json result = {
+			{"otype", "Grid"},
+			{"type", to_string(m_grid_type)},
+			{"n_levels", m_n_levels},
+			{"n_features_per_level", N_FEATURES_PER_LEVEL},
+			{"base_resolution", m_base_resolution},
+			{"per_level_scale", m_per_level_scale},
+			{"interpolation", to_string(m_interpolation_type)},
+		};
+
+		if (m_grid_type == GridType::Hash) {
+			result["log2_hashmap_size"] = m_log2_hashmap_size;
+		}
+
+		return result;
+	}
+
 private:
 	uint32_t m_n_features;
 	uint32_t m_n_levels;
 	uint32_t m_n_params;
 	GPUMemory<uint32_t> m_hashmap_offsets_table;
+	uint32_t m_log2_hashmap_size;
 	uint32_t m_base_resolution;
 
 	uint32_t m_n_dims_to_pass_through;

@@ -40,7 +40,7 @@
 
 TCNN_NAMESPACE_BEGIN
 
-InterpolationType string_to_interpolation_type(std::string interpolation_type) {
+InterpolationType string_to_interpolation_type(const std::string& interpolation_type) {
 	if (equals_case_insensitive(interpolation_type, "Nearest")) {
 		return InterpolationType::Nearest;
 	} else if (equals_case_insensitive(interpolation_type, "Linear")) {
@@ -50,6 +50,15 @@ InterpolationType string_to_interpolation_type(std::string interpolation_type) {
 	}
 
 	throw std::runtime_error{std::string{"Invalid interpolation type: "} + interpolation_type};
+}
+
+std::string to_string(InterpolationType interpolation_type) {
+	switch (interpolation_type) {
+		case InterpolationType::Nearest: return "Nearest";
+		case InterpolationType::Linear: return "Linear";
+		case InterpolationType::Smoothstep: return "Smoothstep";
+		default: throw std::runtime_error{std::string{"Invalid interpolation type"}};
+	}
 }
 
 template <typename T>

@@ -170,6 +170,15 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "EMA"},
+			{"nested", m_nested->hyperparams()},
+			{"decay", m_ema_decay},
+			{"full_precision", m_full_precision},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();

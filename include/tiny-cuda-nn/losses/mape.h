@@ -118,6 +118,12 @@ public:
 	}
 
 	void update_hyperparams(const json& params) override { }
+
+	json hyperparams() const override {
+		return {
+			{"otype", "MAPE"},
+		};
+	}
 };
 
 TCNN_NAMESPACE_END

@@ -37,13 +37,15 @@
 
 TCNN_NAMESPACE_BEGIN
 
-enum InterpolationType {
+enum class InterpolationType {
 	Nearest,
 	Linear,
 	Smoothstep,
 };
 
-InterpolationType string_to_interpolation_type(std::string interpolation_type);
+InterpolationType string_to_interpolation_type(const std::string& interpolation_type);
+
+std::string to_string(InterpolationType interpolation_type);
 
 template <typename T>
 class Encoding : public ParametricObject<T> {

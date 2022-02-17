@@ -968,6 +968,24 @@ public:
 		// m_graph.reset();
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Shampoo"},
+			{"beta1", m_beta1},
+			{"beta2", m_beta2},
+			{"beta3", m_beta3},
+			{"beta_shampoo", m_beta_shampoo},
+			{"epsilon", m_epsilon},
+			{"identity", m_identity_strength},
+			{"learning_rate", m_base_learning_rate},
+			{"cg_on_momentum", m_cg_on_momentum},
+			{"frobenius_normalization", m_frobenius_normalization},
+			{"l2_reg", m_l2_reg},
+			{"relative_decay", m_relative_weight_decay},
+			{"absolute_decay", m_absolute_weight_decay},
+		};
+	}
+
 	json serialize() const override {
 		throw std::runtime_error{"The Shampoo optimizer does not yet support serialization."};
 	}

@@ -251,6 +251,23 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Adam"},
+			{"beta1", m_beta1},
+			{"beta2", m_beta2},
+			{"epsilon", m_epsilon},
+			{"learning_rate", m_base_learning_rate},
+			{"l2_reg", m_l2_reg},
+			{"adabound", m_adabound},
+			{"relative_decay", m_relative_weight_decay},
+			{"absolute_decay", m_absolute_weight_decay},
+			{"non_matrix_learning_rate_factor", m_non_matrix_learning_rate_factor},
+			{"optimize_matrix_params", m_optimize_matrix_params},
+			{"optimize_non_matrix_params", m_optimize_non_matrix_params},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["current_step"] = m_current_step;

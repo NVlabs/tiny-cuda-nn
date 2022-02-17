@@ -46,7 +46,7 @@ TCNN_NAMESPACE_BEGIN
 template <typename T>
 __global__ void kernel_sh(
 	const uint32_t num_elements,
-	const uint32_t sh_degree,
+	const uint32_t degree,
 	const uint32_t num_to_pad,
 	PitchedPtr<const float> data_in,
 	PitchedPtr<T> data_out,
@@ -75,17 +75,17 @@ __global__ void kernel_sh(
 
 	auto write_sh = [&]() {
 		out[0] = 0.28209479177387814f ;                          // 1/(2*sqrt(pi))
-		if (sh_degree <= 1) { return; }
+		if (degree <= 1) { return; }
 		out[1] = -0.48860251190291987f*y ;                               // -sqrt(3)*y/(2*sqrt(pi))
 		out[2] = 0.48860251190291987f*z ;                                // sqrt(3)*z/(2*sqrt(pi))
 		out[3] = -0.48860251190291987f*x ;                               // -sqrt(3)*x/(2*sqrt(pi))
-		if (sh_degree <= 2) { return; }
+		if (degree <= 2) { return; }
 		out[4] = 1.0925484305920792f*xy ;                                // sqrt(15)*xy/(2*sqrt(pi))
 		out[5] = -1.0925484305920792f*yz ;                               // -sqrt(15)*yz/(2*sqrt(pi))
 		out[6] = 0.94617469575755997f*z2 - 0.31539156525251999f ;                         // sqrt(5)*(3*z2 - 1)/(4*sqrt(pi))
 		out[7] = -1.0925484305920792f*xz ;                               // -sqrt(15)*xz/(2*sqrt(pi))
 		out[8] = 0.54627421529603959f*x2 - 0.54627421529603959f*y2 ;                              // sqrt(15)*(x2 - y2)/(4*sqrt(pi))
-		if (sh_degree <= 3) { return; }
+		if (degree <= 3) { return; }
 		out[9] = 0.59004358992664352f*y*(-3.0f*x2 + y2) ;                         // sqrt(70)*y*(-3*x2 + y2)/(8*sqrt(pi))
 		out[10] = 2.8906114426405538f*xy*z ;                             // sqrt(105)*xy*z/(2*sqrt(pi))
 		out[11] = 0.45704579946446572f*y*(1.0f - 5.0f*z2) ;                                // sqrt(42)*y*(1 - 5*z2)/(8*sqrt(pi))
@@ -93,7 +93,7 @@ __global__ void kernel_sh(
 		out[13] = 0.45704579946446572f*x*(1.0f - 5.0f*z2) ;                                // sqrt(42)*x*(1 - 5*z2)/(8*sqrt(pi))
 		out[14] = 1.4453057213202769f*z*(x2 - y2) ;                              // sqrt(105)*z*(x2 - y2)/(4*sqrt(pi))
 		out[15] = 0.59004358992664352f*x*(-x2 + 3.0f*y2) ;                                // sqrt(70)*x*(-x2 + 3*y2)/(8*sqrt(pi))
-		if (sh_degree <= 4) { return; }
+		if (degree <= 4) { return; }
 		out[16] = 2.5033429417967046f*xy*(x2 - y2) ;                             // 3*sqrt(35)*xy*(x2 - y2)/(4*sqrt(pi))
 		out[17] = 1.7701307697799304f*yz*(-3.0f*x2 + y2) ;                                // 3*sqrt(70)*yz*(-3*x2 + y2)/(8*sqrt(pi))
 		out[18] = 0.94617469575756008f*xy*(7.0f*z2 - 1.0f) ;                               // 3*sqrt(5)*xy*(7*z2 - 1)/(4*sqrt(pi))
@@ -103,7 +103,7 @@ __global__ void kernel_sh(
 		out[22] = 0.47308734787878004f*(x2 - y2)*(7.0f*z2 - 1.0f) ;                                // 3*sqrt(5)*(x2 - y2)*(7*z2 - 1)/(8*sqrt(pi))
 		out[23] = 1.7701307697799304f*xz*(-x2 + 3.0f*y2) ;                                // 3*sqrt(70)*xz*(-x2 + 3*y2)/(8*sqrt(pi))
 		out[24] = -3.7550144126950569f*x2*y2 + 0.62583573544917614f*x4 + 0.62583573544917614f*y4 ;                         // 3*sqrt(35)*(-6*x2*y2 + x4 + y4)/(16*sqrt(pi))
-		if (sh_degree <= 5) { return; }
+		if (degree <= 5) { return; }
 		out[25] = 0.65638205684017015f*y*(10.0f*x2*y2 - 5.0f*x4 - y4) ;                            // 3*sqrt(154)*y*(10*x2*y2 - 5*x4 - y4)/(32*sqrt(pi))
 		out[26] = 8.3026492595241645f*xy*z*(x2 - y2) ;                           // 3*sqrt(385)*xy*z*(x2 - y2)/(4*sqrt(pi))
 		out[27] = -0.48923829943525038f*y*(3.0f*x2 - y2)*(9.0f*z2 - 1.0f) ;                         // -sqrt(770)*y*(3*x2 - y2)*(9*z2 - 1)/(32*sqrt(pi))
@@ -115,7 +115,7 @@ __global__ void kernel_sh(
 		out[33] = -0.48923829943525038f*x*(x2 - 3.0f*y2)*(9.0f*z2 - 1.0f) ;                         // -sqrt(770)*x*(x2 - 3*y2)*(9*z2 - 1)/(32*sqrt(pi))
 		out[34] = 2.0756623148810411f*z*(-6.0f*x2*y2 + x4 + y4) ;                         // 3*sqrt(385)*z*(-6*x2*y2 + x4 + y4)/(16*sqrt(pi))
 		out[35] = 0.65638205684017015f*x*(10.0f*x2*y2 - x4 - 5.0f*y4) ;                            // 3*sqrt(154)*x*(10*x2*y2 - x4 - 5*y4)/(32*sqrt(pi))
-		if (sh_degree <= 6) { return; }
+		if (degree <= 6) { return; }
 		out[36] = 1.3663682103838286f*xy*(-10.0f*x2*y2 + 3.0f*x4 + 3.0f*y4) ;                               // sqrt(6006)*xy*(-10*x2*y2 + 3*x4 + 3*y4)/(32*sqrt(pi))
 		out[37] = 2.3666191622317521f*yz*(10.0f*x2*y2 - 5.0f*x4 - y4) ;                            // 3*sqrt(2002)*yz*(10*x2*y2 - 5*x4 - y4)/(32*sqrt(pi))
 		out[38] = 2.0182596029148963f*xy*(x2 - y2)*(11.0f*z2 - 1.0f) ;                             // 3*sqrt(91)*xy*(x2 - y2)*(11*z2 - 1)/(8*sqrt(pi))
@@ -129,7 +129,7 @@ __global__ void kernel_sh(
 		out[46] = 0.50456490072872406f*(11.0f*z2 - 1.0f)*(-6.0f*x2*y2 + x4 + y4) ;                          // 3*sqrt(91)*(11*z2 - 1)*(-6*x2*y2 + x4 + y4)/(32*sqrt(pi))
 		out[47] = 2.3666191622317521f*xz*(10.0f*x2*y2 - x4 - 5.0f*y4) ;                            // 3*sqrt(2002)*xz*(10*x2*y2 - x4 - 5*y4)/(32*sqrt(pi))
 		out[48] = 10.247761577878714f*x2*y4 - 10.247761577878714f*x4*y2 + 0.6831841051919143f*x6 - 0.6831841051919143f*y6 ;                         // sqrt(6006)*(15*x2*y4 - 15*x4*y2 + x6 - y6)/(64*sqrt(pi))
-		if (sh_degree <= 7) { return; }
+		if (degree <= 7) { return; }
 		out[49] = 0.70716273252459627f*y*(-21.0f*x2*y4 + 35.0f*x4*y2 - 7.0f*x6 + y6) ;                              // 3*sqrt(715)*y*(-21*x2*y4 + 35*x4*y2 - 7*x6 + y6)/(64*sqrt(pi))
 		out[50] = 5.2919213236038001f*xy*z*(-10.0f*x2*y2 + 3.0f*x4 + 3.0f*y4) ;                             // 3*sqrt(10010)*xy*z*(-10*x2*y2 + 3*x4 + 3*y4)/(32*sqrt(pi))
 		out[51] = -0.51891557872026028f*y*(13.0f*z2 - 1.0f)*(-10.0f*x2*y2 + 5.0f*x4 + y4) ;                          // -3*sqrt(385)*y*(13*z2 - 1)*(-10*x2*y2 + 5*x4 + y4)/(64*sqrt(pi))
@@ -153,7 +153,7 @@ __global__ void kernel_sh(
 		return;
 	}
 
-	uint32_t stride = sh_degree * sh_degree;
+	uint32_t stride = degree * degree;
 
 	float* dx = &dy_dx[i * stride * 3];
 	float* dy = dx + stride;
@@ -161,17 +161,17 @@ __global__ void kernel_sh(
 
 	auto write_sh_dx = [&]() {
 		dx[0] = 0.0f ;                             // 0
-		if (sh_degree <= 1) { return; }
+		if (degree <= 1) { return; }
 		dx[1] = 0.0f ;                             // 0
 		dx[2] = 0.0f ;                             // 0
 		dx[3] = -0.48860251190291992f ;                          // -sqrt(3)/(2*sqrt(pi))
-		if (sh_degree <= 2) { return; }
+		if (degree <= 2) { return; }
 		dx[4] = 1.0925484305920792f*y ;                          // sqrt(15)*y/(2*sqrt(pi))
 		dx[5] = 0.0f ;                             // 0
 		dx[6] = 0.0f ;                             // 0
 		dx[7] = -1.0925484305920792f*z ;                         // -sqrt(15)*z/(2*sqrt(pi))
 		dx[8] = 1.0925484305920792f*x ;                          // sqrt(15)*x/(2*sqrt(pi))
-		if (sh_degree <= 3) { return; }
+		if (degree <= 3) { return; }
 		dx[9] = -3.5402615395598609f*xy ;                                // -3*sqrt(70)*xy/(4*sqrt(pi))
 		dx[10] = 2.8906114426405538f*yz ;                                // sqrt(105)*yz/(2*sqrt(pi))
 		dx[11] = 0.0f ;                            // 0
@@ -179,7 +179,7 @@ __global__ void kernel_sh(
 		dx[13] = 0.45704579946446572f - 2.2852289973223288f*z2 ;                          // sqrt(42)*(1 - 5*z2)/(8*sqrt(pi))
 		dx[14] = 2.8906114426405538f*xz ;                                // sqrt(105)*xz/(2*sqrt(pi))
 		dx[15] = -1.7701307697799304f*x2 + 1.7701307697799304f*y2 ;                               // 3*sqrt(70)*(-x2 + y2)/(8*sqrt(pi))
-		if (sh_degree <= 4) { return; }
+		if (degree <= 4) { return; }
 		dx[16] = 2.5033429417967046f*y*(3.0f*x2 - y2) ;                           // 3*sqrt(35)*y*(3*x2 - y2)/(4*sqrt(pi))
 		dx[17] = -10.620784618679583f*xy*z ;                             // -9*sqrt(70)*xy*z/(4*sqrt(pi))
 		dx[18] = 0.94617469575756008f*y*(7.0f*z2 - 1.0f) ;                         // 3*sqrt(5)*y*(7*z2 - 1)/(4*sqrt(pi))
@@ -189,7 +189,7 @@ __global__ void kernel_sh(
 		dx[22] = 0.94617469575756008f*x*(7.0f*z2 - 1.0f) ;                         // 3*sqrt(5)*x*(7*z2 - 1)/(4*sqrt(pi))
 		dx[23] = 5.3103923093397913f*z*(-x2 + y2) ;                              // 9*sqrt(70)*z*(-x2 + y2)/(8*sqrt(pi))
 		dx[24] = 2.5033429417967046f*x*(x2 - 3.0f*y2) ;                           // 3*sqrt(35)*x*(x2 - 3*y2)/(4*sqrt(pi))
-		if (sh_degree <= 5) { return; }
+		if (degree <= 5) { return; }
 		dx[25] = 13.127641136803401f*xy*(-x2 + y2) ;                             // 15*sqrt(154)*xy*(-x2 + y2)/(8*sqrt(pi))
 		dx[26] = 8.3026492595241645f*yz*(3.0f*x2 - y2) ;                          // 3*sqrt(385)*yz*(3*x2 - y2)/(4*sqrt(pi))
 		dx[27] = 2.9354297966115022f*xy*(1.0f - 9.0f*z2) ;                         // 3*sqrt(770)*xy*(1 - 9*z2)/(16*sqrt(pi))
@@ -201,7 +201,7 @@ __global__ void kernel_sh(
 		dx[33] = -13.209434084751759f*x2*z2 + 1.4677148983057511f*x2 + 13.209434084751759f*y2*z2 - 1.4677148983057511f*y2 ;                         // 3*sqrt(770)*(-9*x2*z2 + x2 + 9*y2*z2 - y2)/(32*sqrt(pi))
 		dx[34] = 8.3026492595241645f*xz*(x2 - 3.0f*y2) ;                          // 3*sqrt(385)*xz*(x2 - 3*y2)/(4*sqrt(pi))
 		dx[35] = 19.6914617052051f*x2*y2 - 3.2819102842008503f*x4 - 3.2819102842008503f*y4 ;                               // 15*sqrt(154)*(6*x2*y2 - x4 - y4)/(32*sqrt(pi))
-		if (sh_degree <= 6) { return; }
+		if (degree <= 6) { return; }
 		dx[36] = 4.0991046311514854f*y*(-10.0f*x2*y2 + 5.0f*x4 + y4) ;                             // 3*sqrt(6006)*y*(-10*x2*y2 + 5*x4 + y4)/(32*sqrt(pi))
 		dx[37] = 47.332383244635047f*xy*z*(-x2 + y2) ;                           // 15*sqrt(2002)*xy*z*(-x2 + y2)/(8*sqrt(pi))
 		dx[38] = 2.0182596029148963f*y*(3.0f*x2 - y2)*(11.0f*z2 - 1.0f) ;                           // 3*sqrt(91)*y*(3*x2 - y2)*(11*z2 - 1)/(8*sqrt(pi))
@@ -215,7 +215,7 @@ __global__ void kernel_sh(
 		dx[46] = 2.0182596029148963f*x*(x2 - 3.0f*y2)*(11.0f*z2 - 1.0f) ;                           // 3*sqrt(91)*x*(x2 - 3*y2)*(11*z2 - 1)/(8*sqrt(pi))
 		dx[47] = 11.833095811158762f*z*(6.0f*x2*y2 - x4 - y4) ;                           // 15*sqrt(2002)*z*(6*x2*y2 - x4 - y4)/(32*sqrt(pi))
 		dx[48] = 4.0991046311514854f*x*(-10.0f*x2*y2 + x4 + 5.0f*y4) ;                             // 3*sqrt(6006)*x*(-10*x2*y2 + x4 + 5*y4)/(32*sqrt(pi))
-		if (sh_degree <= 7) { return; }
+		if (degree <= 7) { return; }
 		dx[49] = 9.9002782553443485f*xy*(10.0f*x2*y2 - 3.0f*x4 - 3.0f*y4) ;                         // 21*sqrt(715)*xy*(10*x2*y2 - 3*x4 - 3*y4)/(32*sqrt(pi))
 		dx[50] = 15.875763970811402f*yz*(-10.0f*x2*y2 + 5.0f*x4 + y4) ;                            // 9*sqrt(10010)*yz*(-10*x2*y2 + 5*x4 + y4)/(32*sqrt(pi))
 		dx[51] = -10.378311574405206f*xy*(x2 - y2)*(13.0f*z2 - 1.0f) ;                             // -15*sqrt(385)*xy*(x2 - y2)*(13*z2 - 1)/(16*sqrt(pi))
@@ -235,17 +235,17 @@ __global__ void kernel_sh(
 
 	auto write_sh_dy = [&]() {
 		dy[0] = 0.0f ;                             // 0
-		if (sh_degree <= 1) { return; }
+		if (degree <= 1) { return; }
 		dy[1] = -0.48860251190291992f ;                          // -sqrt(3)/(2*sqrt(pi))
 		dy[2] = 0.0f ;                             // 0
 		dy[3] = 0.0f ;                             // 0
-		if (sh_degree <= 2) { return; }
+		if (degree <= 2) { return; }
 		dy[4] = 1.0925484305920792f*x ;                          // sqrt(15)*x/(2*sqrt(pi))
 		dy[5] = -1.0925484305920792f*z ;                         // -sqrt(15)*z/(2*sqrt(pi))
 		dy[6] = 0.0f ;                             // 0
 		dy[7] = 0.0f ;                             // 0
 		dy[8] = -1.0925484305920792f*y ;                         // -sqrt(15)*y/(2*sqrt(pi))
-		if (sh_degree <= 3) { return; }
+		if (degree <= 3) { return; }
 		dy[9] = -1.7701307697799304f*x2 + 1.7701307697799304f*y2 ;                                // 3*sqrt(70)*(-x2 + y2)/(8*sqrt(pi))
 		dy[10] = 2.8906114426405538f*xz ;                                // sqrt(105)*xz/(2*sqrt(pi))
 		dy[11] = 0.45704579946446572f - 2.2852289973223288f*z2 ;                          // sqrt(42)*(1 - 5*z2)/(8*sqrt(pi))
@@ -253,7 +253,7 @@ __global__ void kernel_sh(
 		dy[13] = 0.0f ;                            // 0
 		dy[14] = -2.8906114426405538f*yz ;                               // -sqrt(105)*yz/(2*sqrt(pi))
 		dy[15] = 3.5402615395598609f*xy ;                                // 3*sqrt(70)*xy/(4*sqrt(pi))
-		if (sh_degree <= 4) { return; }
+		if (degree <= 4) { return; }
 		dy[16] = 2.5033429417967046f*x*(x2 - 3.0f*y2) ;                           // 3*sqrt(35)*x*(x2 - 3*y2)/(4*sqrt(pi))
 		dy[17] = 5.3103923093397913f*z*(-x2 + y2) ;                              // 9*sqrt(70)*z*(-x2 + y2)/(8*sqrt(pi))
 		dy[18] = 0.94617469575756008f*x*(7.0f*z2 - 1.0f) ;                         // 3*sqrt(5)*x*(7*z2 - 1)/(4*sqrt(pi))
@@ -263,7 +263,7 @@ __global__ void kernel_sh(
 		dy[22] = 0.94617469575756008f*y*(1.0f - 7.0f*z2) ;                         // 3*sqrt(5)*y*(1 - 7*z2)/(4*sqrt(pi))
 		dy[23] = 10.620784618679583f*xy*z ;                              // 9*sqrt(70)*xy*z/(4*sqrt(pi))
 		dy[24] = 2.5033429417967046f*y*(-3.0f*x2 + y2) ;                          // 3*sqrt(35)*y*(-3*x2 + y2)/(4*sqrt(pi))
-		if (sh_degree <= 5) { return; }
+		if (degree <= 5) { return; }
 		dy[25] = 19.6914617052051f*x2*y2 - 3.2819102842008503f*x4 - 3.2819102842008503f*y4 ;                               // 15*sqrt(154)*(6*x2*y2 - x4 - y4)/(32*sqrt(pi))
 		dy[26] = 8.3026492595241645f*xz*(x2 - 3.0f*y2) ;                          // 3*sqrt(385)*xz*(x2 - 3*y2)/(4*sqrt(pi))
 		dy[27] = -1.4677148983057511f*(x2 - y2)*(9.0f*z2 - 1.0f) ;                         // -3*sqrt(770)*(x2 - y2)*(9*z2 - 1)/(32*sqrt(pi))
@@ -275,7 +275,7 @@ __global__ void kernel_sh(
 		dy[33] = 2.9354297966115022f*xy*(9.0f*z2 - 1.0f) ;                         // 3*sqrt(770)*xy*(9*z2 - 1)/(16*sqrt(pi))
 		dy[34] = 8.3026492595241645f*yz*(-3.0f*x2 + y2) ;                         // 3*sqrt(385)*yz*(-3*x2 + y2)/(4*sqrt(pi))
 		dy[35] = 13.127641136803401f*xy*(x2 - y2) ;                              // 15*sqrt(154)*xy*(x2 - y2)/(8*sqrt(pi))
-		if (sh_degree <= 6) { return; }
+		if (degree <= 6) { return; }
 		dy[36] = 4.0991046311514854f*x*(-10.0f*x2*y2 + x4 + 5.0f*y4) ;                             // 3*sqrt(6006)*x*(-10*x2*y2 + x4 + 5*y4)/(32*sqrt(pi))
 		dy[37] = 11.833095811158762f*z*(6.0f*x2*y2 - x4 - y4) ;                           // 15*sqrt(2002)*z*(6*x2*y2 - x4 - y4)/(32*sqrt(pi))
 		dy[38] = 2.0182596029148963f*x*(x2 - 3.0f*y2)*(11.0f*z2 - 1.0f) ;                           // 3*sqrt(91)*x*(x2 - 3*y2)*(11*z2 - 1)/(8*sqrt(pi))
@@ -289,7 +289,7 @@ __global__ void kernel_sh(
 		dy[46] = -2.0182596029148963f*y*(3.0f*x2 - y2)*(11.0f*z2 - 1.0f) ;                          // -3*sqrt(91)*y*(3*x2 - y2)*(11*z2 - 1)/(8*sqrt(pi))
 		dy[47] = 47.332383244635047f*xy*z*(x2 - y2) ;                            // 15*sqrt(2002)*xy*z*(x2 - y2)/(8*sqrt(pi))
 		dy[48] = 4.0991046311514854f*y*(10.0f*x2*y2 - 5.0f*x4 - y4) ;                              // 3*sqrt(6006)*y*(10*x2*y2 - 5*x4 - y4)/(32*sqrt(pi))
-		if (sh_degree <= 7) { return; }
+		if (degree <= 7) { return; }
 		dy[49] = -74.252086915082614f*x2*y4 + 74.252086915082614f*x4*y2 - 4.9501391276721742f*x6 + 4.9501391276721742f*y6 ;                         // 21*sqrt(715)*(-15*x2*y4 + 15*x4*y2 - x6 + y6)/(64*sqrt(pi))
 		dy[50] = 15.875763970811402f*xz*(-10.0f*x2*y2 + x4 + 5.0f*y4) ;                            // 9*sqrt(10010)*xz*(-10*x2*y2 + x4 + 5*y4)/(32*sqrt(pi))
 		dy[51] = 0.51891557872026028f*(13.0f*z2 - 1.0f)*(10.0f*x2*y2 - 5.0f*x4 + 4.0f*y2*(5.0f*x2 - y2) - y4) ;                                // 3*sqrt(385)*(13*z2 - 1)*(10*x2*y2 - 5*x4 + 4*y2*(5*x2 - y2) - y4)/(64*sqrt(pi))
@@ -309,17 +309,17 @@ __global__ void kernel_sh(
 
 	auto write_sh_dz = [&]() {
 		dz[0] = 0.0f ;                             // 0
-		if (sh_degree <= 1) { return; }
+		if (degree <= 1) { return; }
 		dz[1] = 0.0f ;                             // 0
 		dz[2] = 0.48860251190291992f ;                           // sqrt(3)/(2*sqrt(pi))
 		dz[3] = 0.0f ;                             // 0
-		if (sh_degree <= 2) { return; }
+		if (degree <= 2) { return; }
 		dz[4] = 0.0f ;                             // 0
 		dz[5] = -1.0925484305920792f*y ;                         // -sqrt(15)*y/(2*sqrt(pi))
 		dz[6] = 1.8923493915151202f*z ;                          // 3*sqrt(5)*z/(2*sqrt(pi))
 		dz[7] = -1.0925484305920792f*x ;                         // -sqrt(15)*x/(2*sqrt(pi))
 		dz[8] = 0.0f ;                             // 0
-		if (sh_degree <= 3) { return; }
+		if (degree <= 3) { return; }
 		dz[9] = 0.0f ;                             // 0
 		dz[10] = 2.8906114426405538f*xy ;                                // sqrt(105)*xy/(2*sqrt(pi))
 		dz[11] = -4.5704579946446566f*yz ;                               // -5*sqrt(42)*yz/(4*sqrt(pi))
@@ -327,7 +327,7 @@ __global__ void kernel_sh(
 		dz[13] = -4.5704579946446566f*xz ;                               // -5*sqrt(42)*xz/(4*sqrt(pi))
 		dz[14] = 1.4453057213202769f*x2 - 1.4453057213202769f*y2 ;                                // sqrt(105)*(x2 - y2)/(4*sqrt(pi))
 		dz[15] = 0.0f ;                            // 0
-		if (sh_degree <= 4) { return; }
+		if (degree <= 4) { return; }
 		dz[16] = 0.0f ;                            // 0
 		dz[17] = 1.7701307697799304f*y*(-3.0f*x2 + y2) ;                          // 3*sqrt(70)*y*(-3*x2 + y2)/(8*sqrt(pi))
 		dz[18] = 13.246445740605839f*xy*z ;                              // 21*sqrt(5)*xy*z/(2*sqrt(pi))
@@ -337,7 +337,7 @@ __global__ void kernel_sh(
 		dz[22] = 6.6232228703029197f*z*(x2 - y2) ;                               // 21*sqrt(5)*z*(x2 - y2)/(4*sqrt(pi))
 		dz[23] = 1.7701307697799304f*x*(-x2 + 3.0f*y2) ;                          // 3*sqrt(70)*x*(-x2 + 3*y2)/(8*sqrt(pi))
 		dz[24] = 0.0f ;                            // 0
-		if (sh_degree <= 5) { return; }
+		if (degree <= 5) { return; }
 		dz[25] = 0.0f ;                            // 0
 		dz[26] = 8.3026492595241645f*xy*(x2 - y2) ;                              // 3*sqrt(385)*xy*(x2 - y2)/(4*sqrt(pi))
 		dz[27] = 8.8062893898345074f*yz*(-3.0f*x2 + y2) ;                         // 9*sqrt(770)*yz*(-3*x2 + y2)/(16*sqrt(pi))
@@ -349,7 +349,7 @@ __global__ void kernel_sh(
 		dz[33] = 8.8062893898345074f*xz*(-x2 + 3.0f*y2) ;                         // 9*sqrt(770)*xz*(-x2 + 3*y2)/(16*sqrt(pi))
 		dz[34] = -12.453973889286246f*x2*y2 + 2.0756623148810411f*x4 + 2.0756623148810411f*y4 ;                            // 3*sqrt(385)*(-6*x2*y2 + x4 + y4)/(16*sqrt(pi))
 		dz[35] = 0.0f ;                            // 0
-		if (sh_degree <= 6) { return; }
+		if (degree <= 6) { return; }
 		dz[36] = 0.0f ;                            // 0
 		dz[37] = 2.3666191622317521f*y*(10.0f*x2*y2 - 5.0f*x4 - y4) ;                              // 3*sqrt(2002)*y*(10*x2*y2 - 5*x4 - y4)/(32*sqrt(pi))
 		dz[38] = 44.401711264127719f*xy*z*(x2 - y2) ;                            // 33*sqrt(91)*xy*z*(x2 - y2)/(4*sqrt(pi))
@@ -363,7 +363,7 @@ __global__ void kernel_sh(
 		dz[46] = 11.10042781603193f*z*(-6.0f*x2*y2 + x4 + y4) ;                           // 33*sqrt(91)*z*(-6*x2*y2 + x4 + y4)/(16*sqrt(pi))
 		dz[47] = 2.3666191622317521f*x*(10.0f*x2*y2 - x4 - 5.0f*y4) ;                              // 3*sqrt(2002)*x*(10*x2*y2 - x4 - 5*y4)/(32*sqrt(pi))
 		dz[48] = 0.0f ;                            // 0
-		if (sh_degree <= 7) { return; }
+		if (degree <= 7) { return; }
 		dz[49] = 0.0f ;                            // 0
 		dz[50] = 5.2919213236038001f*xy*(-10.0f*x2*y2 + 3.0f*x4 + 3.0f*y4) ;                                // 3*sqrt(10010)*xy*(-10*x2*y2 + 3*x4 + 3*y4)/(32*sqrt(pi))
 		dz[51] = 13.491805046726766f*yz*(10.0f*x2*y2 - 5.0f*x4 - y4) ;                             // 39*sqrt(385)*yz*(10*x2*y2 - 5*x4 - y4)/(32*sqrt(pi))
@@ -389,7 +389,7 @@ __global__ void kernel_sh(
 template <typename T>
 __global__ void kernel_sh_backward(
 	const uint32_t num_elements,
-	const uint32_t sh_degree,
+	const uint32_t degree,
 	const uint32_t num_to_pad,
 	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
@@ -401,7 +401,7 @@ __global__ void kernel_sh_backward(
 	const uint32_t i = encoded_index / 3;
 	const uint32_t j = encoded_index - i * 3;
 
-	const uint32_t outputs_per_input = sh_degree * sh_degree;
+	const uint32_t outputs_per_input = degree * degree;
 
 	float result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
@@ -417,19 +417,19 @@ __global__ void kernel_sh_backward(
 template <typename T>
 class SphericalHarmonicsEncoding : public Encoding<T> {
 public:
-	SphericalHarmonicsEncoding(uint32_t sh_degree, uint32_t n_dims_to_encode)
-	: m_sh_degree{sh_degree}, m_n_dims_to_encode{n_dims_to_encode} {
-		m_n_padded_output_dims = m_n_output_dims = sh_degree * sh_degree;
+	SphericalHarmonicsEncoding(uint32_t degree, uint32_t n_dims_to_encode)
+	: m_degree{degree}, m_n_dims_to_encode{n_dims_to_encode} {
+		m_n_padded_output_dims = m_n_output_dims = degree * degree;
 
 		if (n_dims_to_encode != 3) {
 			throw std::runtime_error{"Can only encode 3D directions in spherical harmonics."};
 		}
 
-		if (m_sh_degree <= 0) {
+		if (m_degree <= 0) {
 			throw std::runtime_error{"Spherical harmonics must have positive degree."};
 		}
 
-		if (m_sh_degree > 8) {
+		if (m_degree > 8) {
 			throw std::runtime_error{"Spherical harmonics are only implemented up to degree 8."};
 		}
 	}
@@ -448,7 +448,7 @@ public:
 
 		linear_kernel(kernel_sh<T>, 0, stream,
 			num_elements,
-			m_sh_degree,
+			m_degree,
 			m_n_to_pad,
 			inputs,
 			outputs,
@@ -477,7 +477,7 @@ public:
 
 		linear_kernel(kernel_sh_backward<T>, 0, stream,
 			num_elements * 3,
-			m_sh_degree,
+			m_degree,
 			m_n_to_pad,
 			dL_dy,
 			dy_dx,
@@ -494,7 +494,7 @@ public:
 	}
 
 	uint32_t num_forward_gradient_dims() const override {
-		return m_sh_degree * m_sh_degree * 3;
+		return m_degree * m_degree * 3;
 	}
 
 	void set_alignment(uint32_t alignment) override {
@@ -507,8 +507,15 @@ public:
 		return 1;
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "SphericalHarmonics"},
+			{"degree", m_degree},
+		};
+	}
+
 private:
-	uint32_t m_sh_degree;
+	uint32_t m_degree;
 	uint32_t m_n_dims_to_encode;
 	uint32_t m_n_trailing_dims_to_ignore;
 

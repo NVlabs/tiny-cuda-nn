@@ -173,6 +173,14 @@ public:
 		return 1;
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Identity"},
+			{"scale", m_scale},
+			{"offset", m_offset},
+		};
+	}
+
 private:
 	uint32_t m_n_dims_to_encode;
 

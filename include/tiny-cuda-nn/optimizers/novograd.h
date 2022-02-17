@@ -213,6 +213,18 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "Novograd"},
+			{"beta1", m_beta1},
+			{"beta2", m_beta2},
+			{"epsilon", m_epsilon},
+			{"learning_rate", m_base_learning_rate},
+			{"relative_decay", m_relative_weight_decay},
+			{"absolute_decay", m_absolute_weight_decay},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["current_step"] = m_current_step;

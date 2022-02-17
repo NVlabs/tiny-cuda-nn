@@ -33,6 +33,7 @@
 #include <json/json.hpp>
 
 #include <memory>
+#include <string>
 
 namespace tcnn {
 	struct Context {
@@ -78,6 +79,9 @@ public:
 	EPrecision output_precision() const {
 		return m_output_precision;
 	}
+
+	virtual json hyperparams() const = 0;
+	virtual std::string name() const = 0;
 
 private:
 	EPrecision m_param_precision;

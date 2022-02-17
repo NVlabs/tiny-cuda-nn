@@ -46,6 +46,12 @@ using json = nlohmann::json;
 class Object {
 public:
 	virtual ~Object() { }
+
+	virtual json hyperparams() const = 0;
+
+	std::string name() const {
+		return hyperparams().value("otype", "<Unknown>");
+	}
 };
 
 class ObjectWithMutableHyperparams : public Object {

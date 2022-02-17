@@ -144,6 +144,17 @@ public:
 		return {forward.hidden.at(layer).data(), CM};
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "FullyFusedMLP"},
+			{"activation", to_string(m_activation)},
+			{"output_activation", to_string(m_output_activation)},
+			{"n_neurons", m_network_width},
+			{"n_hidden_layers", m_n_hidden_layers},
+			{"feedback_alignment", m_use_feedback_alignment},
+		};
+	}
+
 private:
 	struct ForwardContext : public Context {
 		std::vector<GPUMatrix<T>> hidden;

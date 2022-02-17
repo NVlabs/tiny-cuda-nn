@@ -190,6 +190,13 @@ public:
 		return 1;
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "TriangleWave"},
+			{"n_frequencies", m_n_frequencies},
+		};
+	}
+
 private:
 	uint32_t m_n_frequencies;
 	uint32_t m_n_dims_to_encode;
