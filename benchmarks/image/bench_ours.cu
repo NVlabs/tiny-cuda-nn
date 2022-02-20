@@ -144,7 +144,7 @@ int main(int argc, char* argv[]) {
 
 		cudaTextureDesc texDesc;
 		memset(&texDesc, 0, sizeof(texDesc));
-		texDesc.filterMode = cudaFilterModePoint;
+		texDesc.filterMode = cudaFilterModeLinear;
 		texDesc.normalizedCoords = true;
 		texDesc.addressMode[0] = cudaAddressModeClamp;
 		texDesc.addressMode[1] = cudaAddressModeClamp;
@@ -190,8 +190,8 @@ int main(int argc, char* argv[]) {
 		save_image(sampled_image.data(), sampling_width, sampling_height, 3, 3, "reference.jpg");
 
 		// Fourth step: train the model by sampling the above image and optimizing relative squared error using Adam.
-		std::vector<uint32_t> batch_sizes = {1 << 14, 1 << 15, 1 << 16, 1 << 17, 1 << 18, 1 << 19, 1 << 20, 1 << 21};
-		std::vector<std::string> methods = {"cutlass", "fully_fused"};
+		std::vector<uint32_t> batch_sizes = {1 << 21, 1 << 20, 1 << 19, 1 << 18, 1 << 17, 1 << 16, 1 << 15, 1 << 14};
+		std::vector<std::string> methods = {"fully_fused", "cutlass"};
 		json bench_result;
 
 		for (std::string method : methods) {
@@ -258,6 +258,7 @@ int main(int argc, char* argv[]) {
 					for (uint32_t j = 0; j < STEPS_INCREMENT; ++j) {
 						// Compute reference values at random coordinates
 						generate_random_uniform<float>(training_stream, rng, batch_size * num_dims_encoded, batch.data());
+						linear_kernel(eval_image<num_output_dims>, 0, training_stream, batch_size, texture, filter, width, height, batch.data(), bench_target.data());
 
 						// Training step
 						float* p_loss = j == (STEPS_INCREMENT - 1) ? &loss_value : nullptr;
