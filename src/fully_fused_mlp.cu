@@ -44,7 +44,7 @@ void check_shmem_error(cudaError_t error) {
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T, bool BACKWARD=false>
+template <int WIDTH, int N_ITERS, typename OUT_T, bool BACKWARD=false>
 __device__ void threadblock_layer(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out_intermediate_threadblock_this_layer, const OUT_T* __restrict__ activation_aux = nullptr) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch.
 	//           Can be forward activations or backward activations, depending on caller.
@@ -97,14 +97,14 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 		#pragma unroll
 		for (uint32_t i = 0; i < N_BLOCKS; ++i) {
 			// Load a chunk of intermediate activations from shared memory and multiply with chunk of weights
-			wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * (threadIdx.z + l * BLOCK_DIM_Z)) * (WIDTH + SKEW), WIDTH + SKEW);
+			wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * l) * (WIDTH + SKEW), WIDTH + SKEW);
 			wmma::mma_sync(result_frag[l], act_frag, weights_frag[i], result_frag[l]);
 		}
 
 		// Activation
 		if (BACKWARD) {
 			// Load the temporary forward matrix for the relu transfer
-			wmma::load_matrix_sync(act_frag, activation_aux + weights_col + (threadIdx.z + l * BLOCK_DIM_Z) * 16 * WIDTH, WIDTH);
+			wmma::load_matrix_sync(act_frag, activation_aux + weights_col + l * 16 * WIDTH, WIDTH);
 			warp_activation_backward<__half>(activation, result_frag[l], act_frag, result_frag[l]);
 		} else {
 			warp_activation<__half>(activation, result_frag[l], result_frag[l]);
@@ -115,7 +115,7 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 
 	#pragma unroll
 	for (int l = 0; l < N_ITERS; ++l) {
-		wmma::store_matrix_sync(act_shmem + weights_col + (threadIdx.z + l * BLOCK_DIM_Z) * 16 * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
+		wmma::store_matrix_sync(act_shmem + weights_col + l * 16 * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 	}
 
 	if (out_intermediate_threadblock_this_layer != nullptr) {
@@ -123,12 +123,12 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 
 		#pragma unroll
 		for (int l = 0; l < N_ITERS; ++l) {
-			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * (threadIdx.z + l * BLOCK_DIM_Z)) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * (threadIdx.z + l * BLOCK_DIM_Z)) * (WIDTH + SKEW)];
+			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * l) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * l) * (WIDTH + SKEW)];
 		}
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS>
+template <int WIDTH, int N_ITERS>
 __device__ void threadblock_load_input_static(__half* __restrict__ act_shmem, const __half* __restrict__ input_threadblock) {
 	// act_shmem will be filled by the thread block's chunk of input_threadblock
 
@@ -143,11 +143,11 @@ __device__ void threadblock_load_input_static(__half* __restrict__ act_shmem, co
 
 	#pragma unroll
 	for (int i = 0; i < N_ITERS; ++i) {
-		*(int4*)&act_shmem[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * (WIDTH + SKEW)] = *(int4*)&input_threadblock[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * WIDTH];
+		*(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)] = *(int4*)&input_threadblock[lane_offset + (row + 16 * i) * WIDTH];
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, Activation ACTIVATION, typename OUTPUT_LAYOUT>
+template <int WIDTH, int N_ITERS, Activation ACTIVATION, typename OUTPUT_LAYOUT>
 __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput, const __half* __restrict__ weights, __half* __restrict__ out_intermediate, const __half* __restrict__ forward, __half* __restrict__ dL_dinput, const __half* __restrict__ weights_first_layer, const uint32_t batch_size, const uint32_t out_width, const uint32_t n_hidden_matmuls) {
 	// `dL_doutput` points to the input matrix of the backward pass, i.e. the loss gradients. Assumed to be 16 neurons wide.
 	// `weights` points to the weight matrices (contiguous in memory).
@@ -171,8 +171,8 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 
 	// Multipying one 16-row chunk of intermediate activations with the weight matrix requires all warps of the block.
 	// Thus, each block computes exactly one 16-row chunk of the next layer's intermediate activations.
-	const uint32_t elem_idx_base = 16 * bi * N_ITERS * BLOCK_DIM_Z;
-	const uint32_t elem_idx = elem_idx_base + 16 * threadIdx.z;
+	const uint32_t elem_idx_base = 16 * bi * N_ITERS;
+	const uint32_t elem_idx = elem_idx_base;
 
 	const uint32_t layer_stride = WIDTH * WIDTH;
 	const uint32_t output_stride = WIDTH * batch_size;
@@ -197,9 +197,9 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 
 			// Load a chunk of output gradients from shared memory and multiply with previously loaded weights
 			if (std::is_same<OUTPUT_LAYOUT, wmma::row_major>::value) {
-				wmma::load_matrix_sync(act_frag, dL_doutput + (elem_idx + 16 * (threadIdx.z + l * BLOCK_DIM_Z)) * 16, 16);
+				wmma::load_matrix_sync(act_frag, dL_doutput + (elem_idx + 16 * l) * 16, 16);
 			} else {
-				wmma::load_matrix_sync(act_frag, dL_doutput + (elem_idx + 16 * (threadIdx.z + l * BLOCK_DIM_Z)), batch_size);
+				wmma::load_matrix_sync(act_frag, dL_doutput + (elem_idx + 16 * l), batch_size);
 			}
 
 			// NOTE: activation transfer of the _output_ activation is expected to be done _prior_ to calling this kernel
@@ -209,7 +209,7 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 
 			// Load the temporary forward matrix for the relu transfer
 			wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> forward_frag;
-			wmma::load_matrix_sync(forward_frag, forward + output_stride * n_hidden_matmuls + weights_col + (elem_idx + l * BLOCK_DIM_Z * 16) * WIDTH, WIDTH);
+			wmma::load_matrix_sync(forward_frag, forward + output_stride * n_hidden_matmuls + weights_col + (elem_idx + l * 16) * WIDTH, WIDTH);
 
 			warp_activation_backward<__half>(ACTIVATION, result_frag[l], forward_frag, result_frag[l]);
 		}
@@ -218,24 +218,24 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 
 		#pragma unroll
 		for (int l = 0; l < N_ITERS; ++l) {
-			wmma::store_matrix_sync(act_shmem + weights_col + (16 * (threadIdx.z + l * BLOCK_DIM_Z)) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
+			wmma::store_matrix_sync(act_shmem + weights_col + (16 * l) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 		}
 
 		__syncthreads();
 
 		#pragma unroll
 		for (int i = 0; i < N_ITERS; ++i) {
-			*(int4*)&out_intermediate[lane_offset + (row + elem_idx + i * BLOCK_DIM_Z * 16) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * (WIDTH + SKEW)];
+			*(int4*)&out_intermediate[lane_offset + (row + elem_idx + i * 16) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 		}
 	} else {
 		// If the output width is larger than 16, we will have used CUTLASS for backpropping through the last layer.
 		// Load the resulting gradients.
-		threadblock_load_input_static<WIDTH, BLOCK_DIM_Z, N_ITERS>(act_shmem, out_intermediate + elem_idx * WIDTH);
+		threadblock_load_input_static<WIDTH, N_ITERS>(act_shmem, out_intermediate + elem_idx * WIDTH);
 	}
 
 	// Backprop through hidden layers
 	for (uint32_t k = 0; k < n_hidden_matmuls; ++k) {
-		threadblock_layer<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, true>(ACTIVATION, act_shmem, weights + layer_stride * (n_hidden_matmuls - k - 1), out_intermediate + output_stride * (k + 1) + elem_idx_base * WIDTH, forward + output_stride * (n_hidden_matmuls - k - 1) + elem_idx_base * WIDTH);
+		threadblock_layer<WIDTH, N_ITERS, __half, true>(ACTIVATION, act_shmem, weights + layer_stride * (n_hidden_matmuls - k - 1), out_intermediate + output_stride * (k + 1) + elem_idx_base * WIDTH, forward + output_stride * (n_hidden_matmuls - k - 1) + elem_idx_base * WIDTH);
 	}
 
 	// Compute loss gradients w.r.t. input if desired.
@@ -243,7 +243,7 @@ __global__ void kernel_mlp_fused_backward(const __half* __restrict__ dL_doutput,
 	// AND THAT THE INPUT LAYOUT IS THE SAME AS THE HIDDEN LAYOUT.
 	// DON'T PASS A NON-NULL dL_dinput IF THIS REQUIREMENT IS NOT MET.
 	if (dL_dinput != nullptr) {
-		threadblock_layer<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, true>(Activation::None, act_shmem, weights_first_layer, dL_dinput + elem_idx_base * WIDTH);
+		threadblock_layer<WIDTH, N_ITERS, __half, true>(Activation::None, act_shmem, weights_first_layer, dL_dinput + elem_idx_base * WIDTH);
 	}
 }
 
@@ -282,31 +282,30 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_backward(
 	}
 
 	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
-	const uint32_t BLOCK_DIM_Z = 1;
 
-	if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
-		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
+	if (batch_size % (16 * N_ITERS) != 0) {
+		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS) + "."};
 	}
 
-	const dim3 threads = { 32u, N_BLOCKS, BLOCK_DIM_Z }; // 32 threads = 1 warp, 8 warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
+	const dim3 threads = { 32u, N_BLOCKS, 1 }; // 32 threads = 1 warp, 8 warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
 
-	uint32_t n_elems_per_block = 16 * BLOCK_DIM_Z * N_ITERS;
+	uint32_t n_elems_per_block = 16 * N_ITERS;
 	uint32_t n_blocks = div_round_up(batch_size, n_elems_per_block);
 
-	int shmem_size = sizeof(__half) * ((16 * BLOCK_DIM_Z * N_ITERS) * (WIDTH + SKEW)); // WIDTH rows of input and 16 * threads.z rows of weights
+	int shmem_size = sizeof(__half) * ((16 * N_ITERS) * (WIDTH + SKEW)); // WIDTH rows of input and 16 * threads.z rows of weights
 	const dim3 blocks = { n_blocks, 1u, 1u };
 
 	// The kernels operate with transposed layouts compared with the MLP code
 	if (dL_doutput.layout() == RM) {
-		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::col_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
-		kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::col_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
+		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, N_ITERS, ACTIVATION, nvcuda::wmma::col_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
+		kernel_mlp_fused_backward<WIDTH, N_ITERS, ACTIVATION, nvcuda::wmma::col_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
 	} else {
-		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::row_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
-		kernel_mlp_fused_backward<WIDTH, BLOCK_DIM_Z, N_ITERS, ACTIVATION, nvcuda::wmma::row_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
+		check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused_backward<WIDTH, N_ITERS, ACTIVATION, nvcuda::wmma::row_major>, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size));
+		kernel_mlp_fused_backward<WIDTH, N_ITERS, ACTIVATION, nvcuda::wmma::row_major><<<blocks, threads, shmem_size, stream>>>(dL_doutput.data(), weights.data(), temporaries.data(), forward.data(), dL_dinput ? dL_dinput->data() : nullptr, weights_first_layer.data(), batch_size, out_width, n_hidden_matmuls);
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T, typename INPUT_LAYOUT>
+template <int WIDTH, int N_ITERS, typename OUT_T, typename INPUT_LAYOUT>
 __device__ void threadblock_input_layer_forward_dynamic(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ input_threadblock, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out_intermediate_threadblock_this_layer, const uint32_t in_width, const uint32_t batch_size) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch
 	// input_threadblock points to the thread block's chunk of the input batch in global memory
@@ -335,12 +334,12 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 
 	const uint32_t weights_col = 16 * wi;
 
-	__half* __restrict__ weights_shmem = act_shmem + BLOCK_DIM_Z * 16 * (in_width + INPUT_SKEW);
+	__half* __restrict__ weights_shmem = act_shmem + 16 * (in_width + INPUT_SKEW);
 
 	// Load input weight matrix (fits completely into shared memory)
-	// Each thread can load 8 fp16 elements (16 bytes) at once; we have N_BLOCKS*BLOCK_DIM_Z warps
-	const uint32_t n_elems_per_load = N_BLOCKS * 32 * BLOCK_DIM_Z * 8;
-	const uint32_t thread_elem_idx = (li + wi * 32 + threadIdx.z * N_BLOCKS * 32) * 8;
+	// Each thread can load 8 fp16 elements (16 bytes) at once; we have N_BLOCKS warps
+	const uint32_t n_elems_per_load = N_BLOCKS * 32 * 8;
+	const uint32_t thread_elem_idx = (li + wi * 32) * 8;
 
 	const uint32_t n_elems_b = WIDTH * in_width;
 
@@ -362,7 +361,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 			// Load chunk of inputs into shmem.
 			// This is faster than loading it from gmem directly, even though it is only used once.
 			// (Possibly due to latency hiding through staging.)
-			const uint32_t n_elems_a = BLOCK_DIM_Z * 16 * in_width;
+			const uint32_t n_elems_a = 16 * in_width;
 
 			#pragma unroll
 			for (uint32_t idx = thread_elem_idx; idx < n_elems_a; idx += n_elems_per_load) {
@@ -378,9 +377,9 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 		for (uint32_t i = 0; i < n_tensor_ops; ++i) {
 			// Load chunk of inputs and weights from shared memory and multiply them
 			if (std::is_same<INPUT_LAYOUT, wmma::row_major>::value) {
-				wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * threadIdx.z) * (in_width + INPUT_SKEW), in_width + INPUT_SKEW);
+				wmma::load_matrix_sync(act_frag, act_shmem + 16 * i, in_width + INPUT_SKEW);
 			} else {
-				wmma::load_matrix_sync(act_frag, input_threadblock + 16 * i * batch_size + 16 * (threadIdx.z + l * BLOCK_DIM_Z), batch_size);
+				wmma::load_matrix_sync(act_frag, input_threadblock + 16 * i * batch_size + 16 * l, batch_size);
 			}
 			wmma::load_matrix_sync(weights_frag, weights_shmem + 16 * i + weights_col * (in_width + INPUT_SKEW), in_width + INPUT_SKEW);
 			wmma::mma_sync(result_frag[l], act_frag, weights_frag, result_frag[l]);
@@ -399,7 +398,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 
 	#pragma unroll
 	for (int l = 0; l < N_ITERS; ++l) {
-		wmma::store_matrix_sync(act_shmem + weights_col + (16 * (threadIdx.z + l * BLOCK_DIM_Z)) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
+		wmma::store_matrix_sync(act_shmem + weights_col + (16 * l) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 	}
 
 	if (out_intermediate_threadblock_this_layer != nullptr) {
@@ -407,12 +406,12 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 
 		#pragma unroll
 		for (int i = 0; i < N_ITERS; ++i) {
-			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * (WIDTH + SKEW)];
+			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * i) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 		}
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T>
+template <int WIDTH, int N_ITERS, typename OUT_T>
 __device__ void threadblock_last_layer_forward(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out, const uint32_t batch_size, const nvcuda::wmma::layout_t output_layout) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch
 	// weights_this_layer points to the weight matrix of the current layer
@@ -433,7 +432,7 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 	const uint32_t li = threadIdx.x; // index in warp ("lane index")
 	const uint32_t wi = threadIdx.y; // index in block ("warp index")
 
-	__half* __restrict__ weights_shmem = act_shmem + N_ITERS * BLOCK_DIM_Z * 16 * (WIDTH + SKEW);
+	__half* __restrict__ weights_shmem = act_shmem + N_ITERS * 16 * (WIDTH + SKEW);
 
 	const uint32_t weights_row = (8 * li) % WIDTH;
 	const uint32_t weights_col = (8 * li + 8 * 32 * wi) / WIDTH;
@@ -441,9 +440,7 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 	// Load weight matrix into shared memory for the last multiplication.
 	// Loading into shared memory as opposed to directly into registers is faster
 	// because unlike in the previous layers, each warp uses the same entries of the weight matrix.
-	if (threadIdx.z == 0) {
-		*(int4*)&weights_shmem[weights_row + weights_col * (WIDTH + SKEW)] = *(int4*)&weights_this_layer[weights_row + weights_col * WIDTH];
-	}
+	*(int4*)&weights_shmem[weights_row + weights_col * (WIDTH + SKEW)] = *(int4*)&weights_this_layer[weights_row + weights_col * WIDTH];
 
 	__syncthreads();
 
@@ -457,21 +454,21 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 		#pragma unroll
 		for (uint32_t i = 0; i < N_BLOCKS; ++i) {
 			// Load a chunk of intermediate activations from shared memory and multiply with chunk of the weight matrix
-			wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * (threadIdx.z + idx * BLOCK_DIM_Z)) * (WIDTH + SKEW), WIDTH + SKEW);
+			wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * idx) * (WIDTH + SKEW), WIDTH + SKEW);
 			wmma::mma_sync(result_frag, act_frag, weights_frag[i], result_frag);
 		}
 
 		warp_activation<__half>(activation, result_frag, result_frag);
 
 		if (output_layout == wmma::mem_row_major) {
-			wmma::store_matrix_sync(out + (threadIdx.z + idx * BLOCK_DIM_Z) * 16 * 16, result_frag, 16, output_layout);
+			wmma::store_matrix_sync(out + idx * 16 * 16, result_frag, 16, output_layout);
 		} else {
-			wmma::store_matrix_sync(out + (threadIdx.z + idx * BLOCK_DIM_Z) * 16, result_frag, batch_size, output_layout);
+			wmma::store_matrix_sync(out + idx * 16, result_frag, batch_size, output_layout);
 		}
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS>
+template <int WIDTH, int N_ITERS>
 __device__ void threadblock_write_output_static(const __half* __restrict__ act_shmem, __half* __restrict__ output_threadblock) {
 	// output_threadblock will be filled by the thread block's act_shmem
 
@@ -488,11 +485,11 @@ __device__ void threadblock_write_output_static(const __half* __restrict__ act_s
 
 	#pragma unroll
 	for (int i = 0; i < N_ITERS; ++i) {
-		*(int4*)&output_threadblock[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * (threadIdx.z + i * BLOCK_DIM_Z)) * (WIDTH + SKEW)];
+		*(int4*)&output_threadblock[lane_offset + (row + 16 * i) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 	}
 }
 
-template <int WIDTH, int BLOCK_DIM_Z, int N_ITERS, typename OUT_T, Activation ACTIVATION, bool INFERENCE>
+template <int WIDTH, int N_ITERS, typename OUT_T, Activation ACTIVATION, bool INFERENCE>
 __global__ void kernel_mlp_fused(const Activation output_activation, const __half* __restrict__ input, const __half* __restrict__ weights, OUT_T* __restrict__ out_intermediate, OUT_T* __restrict__ out, const uint32_t batch_size, const uint32_t in_width, const uint32_t out_width, const uint32_t n_hidden_matmuls, const nvcuda::wmma::layout_t input_layout, const nvcuda::wmma::layout_t output_layout) {
 	// `input` points to the input matrix. Can be any width.
 	// `weights` points to the weight matrices (contiguous in memory).
@@ -512,20 +509,20 @@ __global__ void kernel_mlp_fused(const Activation output_activation, const __hal
 	__half* act_shmem = shmem;
 
 	// Each block computes exactly one 16-element chunk of the batch.
-	const uint32_t elem_idx = 16 * blockIdx.x * N_ITERS * BLOCK_DIM_Z;
+	const uint32_t elem_idx = 16 * blockIdx.x * N_ITERS;
 
 	// First layer
 	if (input_layout == nvcuda::wmma::mem_col_major || in_width != WIDTH) {
 		if (input_layout == nvcuda::wmma::mem_row_major) {
-			threadblock_input_layer_forward_dynamic<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T, nvcuda::wmma::row_major>(ACTIVATION, act_shmem, input + elem_idx * in_width, weights, !INFERENCE ? (out_intermediate + elem_idx * WIDTH) : nullptr, in_width, batch_size);
+			threadblock_input_layer_forward_dynamic<WIDTH, N_ITERS, OUT_T, nvcuda::wmma::row_major>(ACTIVATION, act_shmem, input + elem_idx * in_width, weights, !INFERENCE ? (out_intermediate + elem_idx * WIDTH) : nullptr, in_width, batch_size);
 		} else {
-			threadblock_input_layer_forward_dynamic<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T, nvcuda::wmma::col_major>(ACTIVATION, act_shmem, input + elem_idx, weights, !INFERENCE ? (out_intermediate + elem_idx * WIDTH) : nullptr, in_width, batch_size);
+			threadblock_input_layer_forward_dynamic<WIDTH, N_ITERS, OUT_T, nvcuda::wmma::col_major>(ACTIVATION, act_shmem, input + elem_idx, weights, !INFERENCE ? (out_intermediate + elem_idx * WIDTH) : nullptr, in_width, batch_size);
 		}
 	} else {
 		// If the input has the same width & layout as the hidden layers, we can simply use the network's regular layer routine (with static size)
 		// instead of using the slower dynamic input layer routine.
-		threadblock_load_input_static<WIDTH, BLOCK_DIM_Z, N_ITERS>(act_shmem, input + elem_idx * WIDTH);
-		threadblock_layer<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T>(ACTIVATION, act_shmem, weights, !INFERENCE ? (out_intermediate + elem_idx * WIDTH) : nullptr);
+		threadblock_load_input_static<WIDTH, N_ITERS>(act_shmem, input + elem_idx * WIDTH);
+		threadblock_layer<WIDTH, N_ITERS, OUT_T>(ACTIVATION, act_shmem, weights, !INFERENCE ? (out_intermediate + elem_idx * WIDTH) : nullptr);
 	}
 
 	const uint32_t first_layer_size = WIDTH * in_width;
@@ -534,20 +531,20 @@ __global__ void kernel_mlp_fused(const Activation output_activation, const __hal
 
 	// Hidden layers
 	for (uint32_t k = 0; k < n_hidden_matmuls; ++k) {
-		threadblock_layer<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T>(ACTIVATION, act_shmem, weights + first_layer_size + layer_stride * k, !INFERENCE ? (out_intermediate + output_stride * (k + 1) + elem_idx * WIDTH) : nullptr);
+		threadblock_layer<WIDTH, N_ITERS, OUT_T>(ACTIVATION, act_shmem, weights + first_layer_size + layer_stride * k, !INFERENCE ? (out_intermediate + output_stride * (k + 1) + elem_idx * WIDTH) : nullptr);
 	}
 
 	if (out_width > 16) {
 		// In the forward pass, intermediate activations are already written out.
 		if (INFERENCE) {
-			threadblock_write_output_static<WIDTH, BLOCK_DIM_Z, N_ITERS>(act_shmem, out_intermediate + elem_idx * WIDTH);
+			threadblock_write_output_static<WIDTH, N_ITERS>(act_shmem, out_intermediate + elem_idx * WIDTH);
 		}
 	} else if (out) {
 		// Last layer
 		if (output_layout == nvcuda::wmma::mem_row_major) {
-			threadblock_last_layer_forward<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T>(output_activation, act_shmem, weights + first_layer_size + layer_stride * n_hidden_matmuls, out + elem_idx * 16, 16, output_layout);
+			threadblock_last_layer_forward<WIDTH, N_ITERS, OUT_T>(output_activation, act_shmem, weights + first_layer_size + layer_stride * n_hidden_matmuls, out + elem_idx * 16, 16, output_layout);
 		} else {
-			threadblock_last_layer_forward<WIDTH, BLOCK_DIM_Z, N_ITERS, OUT_T>(output_activation, act_shmem, weights + first_layer_size + layer_stride * n_hidden_matmuls, out + elem_idx, batch_size, output_layout);
+			threadblock_last_layer_forward<WIDTH, N_ITERS, OUT_T>(output_activation, act_shmem, weights + first_layer_size + layer_stride * n_hidden_matmuls, out + elem_idx, batch_size, output_layout);
 		}
 	}
 }
@@ -604,27 +601,26 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	}
 
 	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
-	const uint32_t BLOCK_DIM_Z = 1;
 
-	if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
-		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
+	if (batch_size % (16 * N_ITERS) != 0) {
+		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS) + "."};
 	}
 
-	const dim3 threads = { 32u, N_BLOCK_ROWS, BLOCK_DIM_Z }; // 32 threads = 1 warp, N_BLOCK_ROWS warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
+	const dim3 threads = { 32u, N_BLOCK_ROWS, 1 }; // 32 threads = 1 warp, N_BLOCK_ROWS warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
 
-	uint32_t n_elems_per_block = 16 * BLOCK_DIM_Z * N_ITERS;
+	uint32_t n_elems_per_block = 16 * N_ITERS;
 	uint32_t n_blocks = div_round_up(batch_size, n_elems_per_block);
 
-	size_t shmem_size = sizeof(__half) * (16 + 16 * BLOCK_DIM_Z * N_ITERS) * (WIDTH + SKEW); // 16*WIDTH rows of weights (for the last layer; others are in registers only) + 16*WIDTH*BLOCK_DIM_Z*N_ITERS rows of intermediate activations
+	size_t shmem_size = sizeof(__half) * (16 + 16 * N_ITERS) * (WIDTH + SKEW); // 16*WIDTH rows of weights (for the last layer; others are in registers only) + 16*WIDTH*N_ITERS rows of intermediate activations
 	if (in_width != WIDTH || input.layout() == RM) {
 		// If the input width is dynamic, the input weight matrix as well as part of the input will live in extra shared memory
-		shmem_size = std::max(shmem_size, sizeof(__half) * (WIDTH + 16 * BLOCK_DIM_Z) * (in_width + INPUT_SKEW));
+		shmem_size = std::max(shmem_size, sizeof(__half) * (WIDTH + 16) * (in_width + INPUT_SKEW));
 	}
 
 	const dim3 blocks = { n_blocks, 1u, 1u };
 
-	check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, ACTIVATION, INFERENCE>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)shmem_size));
-	kernel_mlp_fused<WIDTH, BLOCK_DIM_Z, N_ITERS, __half, ACTIVATION, INFERENCE><<<blocks, threads, shmem_size, stream>>>(
+	check_shmem_error(cudaFuncSetAttribute(kernel_mlp_fused<WIDTH, N_ITERS, __half, ACTIVATION, INFERENCE>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)shmem_size));
+	kernel_mlp_fused<WIDTH, N_ITERS, __half, ACTIVATION, INFERENCE><<<blocks, threads, shmem_size, stream>>>(
 		output_activation,
 		input.data(),
 		weights.data(),
