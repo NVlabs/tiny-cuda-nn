@@ -604,7 +604,7 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	}
 
 	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
-	const uint32_t BLOCK_DIM_Z = (INFERENCE && WIDTH == 128) ? 2 : 1;
+	const uint32_t BLOCK_DIM_Z = 1;
 
 	if (batch_size % (16 * N_ITERS * BLOCK_DIM_Z) != 0) {
 		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS * BLOCK_DIM_Z) + "."};
