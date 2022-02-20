@@ -422,6 +422,10 @@ class GPUMemoryArena {
 
 public:
 	GPUMemoryArena() {
+		if (!cuda_supports_virtual_memory()) {
+			throw std::runtime_error{std::string{"GPU "} + std::to_string(cuda_device()) + " does not support virtual memory."};
+		}
+
 		// Align memory at least by a cache line (128 bytes).
 		m_alignment = (size_t)128;
 		m_max_size = next_multiple(MAX_SIZE, cuda_memory_granularity());

@@ -48,6 +48,12 @@ int cuda_device() {
 	return device;
 }
 
+bool cuda_supports_virtual_memory(int device) {
+	int supports_vmm;
+	CU_CHECK_THROW(cuDeviceGetAttribute(&supports_vmm, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device));
+	return supports_vmm != 0;
+}
+
 uint32_t cuda_compute_capability(int device) {
 	cudaDeviceProp props;
 	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));

@@ -88,6 +88,11 @@ enum class Activation {
 
 int cuda_device();
 
+bool cuda_supports_virtual_memory(int device);
+inline bool cuda_supports_virtual_memory() {
+	return cuda_supports_virtual_memory(cuda_device());
+}
+
 uint32_t cuda_compute_capability(int device);
 inline uint32_t cuda_compute_capability() {
 	return cuda_compute_capability(cuda_device());
