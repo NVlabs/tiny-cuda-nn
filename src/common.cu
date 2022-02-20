@@ -50,7 +50,7 @@ int cuda_device() {
 
 bool cuda_supports_virtual_memory(int device) {
 	int supports_vmm;
-	CU_CHECK_THROW(cuDeviceGetAttribute(&supports_vmm, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device));
+	CU_CHECK_THROW(cuDeviceGetAttribute(&supports_vmm, CU_DEVICE_ATTRIBUTE_VIRTUAL_ADDRESS_MANAGEMENT_SUPPORTED, device));
 	return supports_vmm != 0;
 }
 
