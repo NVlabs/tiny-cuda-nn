@@ -81,46 +81,71 @@ public:
 			skip_capture |= captureStatus != cudaStreamCaptureStatusNone;
 		}
 
-		// Actually capture & run the graph
-		if (!skip_capture) {
-			CUDA_CHECK_THROW(cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed));
-			current_captures().push_back(this);
-		}
-
-		fun();
-
+		ScopeGuard capture_complete;
 		if (!skip_capture) {
 			if (m_graph) {
 				CUDA_CHECK_THROW(cudaGraphDestroy(m_graph));
 				m_graph = nullptr;
 			}
-			CUDA_CHECK_THROW(cudaStreamEndCapture(stream, &m_graph));
-			if (current_captures().back() != this) {
-				throw std::runtime_error{"CudaGraph: must end captures in reverse order of creation."};
-			}
-			current_captures().pop_back();
 
-			if (m_synchronize_when_capture_done) {
-				std::cout << "Scheduled synchronize GO!" << std::endl;
-				CUDA_CHECK_THROW(cudaDeviceSynchronize());
-				m_synchronize_when_capture_done = false;
-			}
+			CUDA_CHECK_THROW(cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed));
+			current_captures().push_back(this);
 
-			cudaGraphExecUpdateResult update_result;
-			cudaGraphNode_t error_node;
-			if (m_graph_instance) {
-				CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &error_node, &update_result));
-			}
+			capture_complete = ScopeGuard{[&]() {
+				CUDA_CHECK_THROW(cudaStreamEndCapture(stream, &m_graph));
 
-			if (!m_graph_instance || update_result != cudaGraphExecUpdateSuccess) {
-				if (m_graph_instance) {
-					CUDA_CHECK_THROW(cudaGraphExecDestroy(m_graph_instance));
+				if (current_captures().back() != this) {
+					throw std::runtime_error{"CudaGraph: must end captures in reverse order of creation."};
 				}
-				CUDA_CHECK_THROW(cudaGraphInstantiate(&m_graph_instance, m_graph, NULL, NULL, 0));
-			}
+				current_captures().pop_back();
 
-			CUDA_CHECK_THROW(cudaGraphLaunch(m_graph_instance, stream));
+				if (m_synchronize_when_capture_done) {
+					std::cout << "Scheduled synchronize GO!" << std::endl;
+					CUDA_CHECK_THROW(cudaDeviceSynchronize());
+					m_synchronize_when_capture_done = false;
+				}
+
+				// Capture failed for some reason. Reset state and don't execute anything.
+				// A corresponding exception is likely already in flight.
+				if (!m_graph) {
+					if (m_graph_instance) {
+						CUDA_CHECK_THROW(cudaGraphExecDestroy(m_graph_instance));
+					}
+
+					m_graph = nullptr;
+					m_graph_instance = nullptr;
+					return;
+				}
+
+				// If we previously created a graph instance, try to update it with the newly captured graph.
+				// This is cheaper than creating a new instance from scratch (and may involve just updating
+				// pointers rather than changing the topology of the graph.)
+				if (m_graph_instance) {
+					cudaGraphExecUpdateResult update_result;
+					cudaGraphNode_t error_node;
+					CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &error_node, &update_result));
+
+					// If the update failed, reset graph instance. We will create a new one next.
+					if (update_result != cudaGraphExecUpdateSuccess) {
+						CUDA_CHECK_THROW(cudaGraphExecDestroy(m_graph_instance));
+						m_graph_instance = nullptr;
+					}
+				}
+
+				if (!m_graph_instance) {
+					CUDA_CHECK_THROW(cudaGraphInstantiate(&m_graph_instance, m_graph, NULL, NULL, 0));
+				}
+
+				CUDA_CHECK_THROW(cudaGraphLaunch(m_graph_instance, stream));
+			}};
 		}
+
+		// Run the contents of the graph
+		//  - if skip_capture == true, the GPU will be used as normal
+		//  - if skip_capture == false, the kernel calls will be recorded,
+		//    manifested into a cuda graph object, and subsequently run by
+		//    the above cude in `capture_guard`.
+		fun();
 	}
 
 	void reset() {
