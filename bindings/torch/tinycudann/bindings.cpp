@@ -238,6 +238,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 		;
 
 	m.def("preferred_precision", &tcnn::cpp::preferred_precision);
+	m.def("batch_size_granularity", &tcnn::cpp::batch_size_granularity);
 
 	// Encapsulates an abstract context of an operation
 	// (commonly the forward pass) to be passed on to other

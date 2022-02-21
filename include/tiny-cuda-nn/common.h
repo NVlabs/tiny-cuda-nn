@@ -255,6 +255,8 @@ TCNN_HOST_DEVICE T next_multiple(T val, T divisor) {
 	return div_round_up(val, divisor) * divisor;
 }
 
+constexpr uint32_t batch_size_granularity = 128;
+
 constexpr uint32_t n_threads_linear = 128;
 
 template <typename T>

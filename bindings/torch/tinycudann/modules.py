@@ -63,9 +63,10 @@ class Module(torch.nn.Module):
 		self.loss_scale = 128.0 if self.native_tcnn_module.param_precision() == _C.Precision.Fp16 else 1.0
 
 	def forward(self, x):
-		# TCNN only supports batch sizes that are a multiple of 256. Apply the corresponding padding here.
+		# TCNN only supports batch sizes that are a multiple of 128. Apply the corresponding padding here.
 		batch_size = x.shape[0]
-		padded_batch_size = (batch_size + 255) // 256 * 256
+		batch_size_granularity = int(_C.batch_size_granularity())
+		padded_batch_size = (batch_size + batch_size_granularity-1) // batch_size_granularity * batch_size_granularity
 
 		x_padded = x if batch_size == padded_batch_size else torch.nn.functional.pad(x, [0, 0, 0, padded_batch_size - batch_size])
 		output = _module_function.apply(

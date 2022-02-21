@@ -53,6 +53,10 @@ enum EPrecision {
 	Fp16,
 };
 
+EPrecision preferred_precision();
+
+uint32_t batch_size_granularity();
+
 struct Context {
 	std::unique_ptr<tcnn::Context> ctx;
 };
@@ -88,10 +92,8 @@ private:
 	EPrecision m_output_precision;
 };
 
-Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision);
 Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network);
 Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network);
-
-EPrecision preferred_precision();
+Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision);
 
 }}

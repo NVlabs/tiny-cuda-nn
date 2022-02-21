@@ -48,6 +48,10 @@ EPrecision preferred_precision() {
 	return precision<network_precision_t>();
 }
 
+uint32_t batch_size_granularity() {
+	return tcnn::batch_size_granularity;
+}
+
 #if !defined(TCNN_NO_NETWORKS)
 class NetworkWithInputEncoding : public Module {
 public:

@@ -195,7 +195,7 @@ int main(int argc, char* argv[]) {
 		// int sampling_height = 1024;
 
 		uint32_t n_coords = sampling_width * sampling_height;
-		uint32_t n_coords_padded = (n_coords + 255) / 256 * 256;
+		uint32_t n_coords_padded = next_multiple(n_coords, batch_size_granularity);
 
 		GPUMemory<float> sampled_image(n_coords * 3);
 		GPUMemory<float> xs_and_ys(n_coords_padded * 2);
