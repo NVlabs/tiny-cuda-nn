@@ -30,11 +30,15 @@ import struct
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 def mse2psnr(x):
-    return -10.*np.log(x)/np.log(10.)
+	return -10.*np.log(x)/np.log(10.)
 
 def write_image_imageio(img_file, img, quality):
 	img = (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-	imageio.imwrite(img_file, img, quality=quality, subsampling=0)
+	kwargs = {}
+	if os.path.splitext(img_file)[1].lower() in [".jpg", ".jpeg"]:
+		kwargs["quality"] = quality
+		kwargs["subsampling"] = 0
+	imageio.imwrite(img_file, img, **kwargs)
 
 def read_image_imageio(img_file):
 	img = imageio.imread(img_file)
@@ -82,13 +86,6 @@ def write_image(file, img, quality=95):
 			img[...,0:3] = linear_to_srgb(img[...,0:3])
 		else:
 			img = linear_to_srgb(img)
-		write_image_imageio(file, img, quality)
-
-def write_image_gamma(file, img, gamma, quality=95):
-	if os.path.splitext(file)[1] == ".exr":
-		img = exr.write(file, img)
-	else:
-		img = img**(1.0/gamma) # this will break alpha channels
 		write_image_imageio(file, img, quality)
 
 def trim(error, skip=0.000001):
