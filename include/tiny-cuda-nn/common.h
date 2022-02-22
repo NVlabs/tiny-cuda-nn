@@ -220,6 +220,10 @@ private:
 #define TCNN_HOST
 #endif
 
+#if defined(__CUDA_ARCH__)
+static_assert(__CUDA_ARCH__ >= MIN_GPU_ARCH * 10, "MIN_GPU_ARCH=" STR(TCNN_MIN_GPU_ARCH) "0 must bound __CUDA_ARCH__=" STR(__CUDA_ARCH__) " from below, but doesn't.");
+#endif
+
 template <typename T>
 TCNN_HOST_DEVICE T clamp(T val, T lower, T upper) {
 	return val < lower ? lower : (upper < val ? upper : val);
