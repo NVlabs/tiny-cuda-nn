@@ -524,7 +524,7 @@ protected:
 template <typename T, uint32_t N_POS_DIMS=3, uint32_t N_FEATURES_PER_LEVEL=2>
 class GridEncodingTemplated : public GridEncoding<T> {
 public:
-#if TCNN_MIN_GPU_ARCH >= 60
+#if TCNN_MIN_GPU_ARCH >= 62 || TCNN_MIN_GPU_ARCH == 60
 	// The GPUs that we tested this on do not have an efficient 1D fp16
 	// atomicAdd feature. Thus, we accumulate gradients at fp32 if we're
 	// forced to use 1D atomicAdds. As soon as 2D or higher is possible,
