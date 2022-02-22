@@ -82,6 +82,7 @@ public:
 
 			if (nested_dims_to_encode > 0) {
 				m_nested.emplace_back(create_encoding<T>(nested_dims_to_encode, nested[i], 1));
+				m_nested.back()->set_output_layout(m_output_layout);
 			}
 		}
 
@@ -118,7 +119,7 @@ public:
 			nested->encode(synced_streams.get(i), num_elements, inputs, outputs, dy_dx, is_inference);
 
 			inputs.ptr += nested->num_dims_to_encode();
-			outputs.ptr += nested->num_encoded_dims();
+			outputs.ptr += nested->num_encoded_dims() * (m_output_layout == SoA ? num_elements : 1);
 			if (dy_dx) {
 				dy_dx += nested->num_forward_gradient_dims() * num_elements;
 			}
@@ -145,7 +146,7 @@ public:
 			const auto& nested = m_nested[i];
 			nested->backward(synced_streams.get(i), num_elements, dL_dy, dy_dx, dL_dx, inputs, accumulate_param_gradients, compute_param_gradients);
 
-			dL_dy.ptr += nested->num_encoded_dims();
+			dL_dy.ptr += nested->num_encoded_dims() * (m_output_layout == SoA ? num_elements : 1);;
 			if (dy_dx) {
 				dy_dx += nested->num_forward_gradient_dims() * num_elements;
 			}
@@ -190,6 +191,28 @@ public:
 		return 1;
 	}
 
+	bool supports_output_layout(MatrixLayout layout) const override {
+		// Only supports layout if all nested encodings do
+		bool result = true;
+		for (const auto& nested : m_nested) {
+			result &= nested->supports_output_layout(layout);
+		}
+
+		return result;
+	}
+
+	void set_output_layout(MatrixLayout layout) override {
+		for (auto&& nested : m_nested) {
+			nested->set_output_layout(layout);
+		}
+
+		m_output_layout = layout;
+	}
+
+	MatrixLayout output_layout() const override {
+		return m_output_layout;
+	}
+
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
 		size_t offset = 0;
 		for (auto& nested : m_nested) {
@@ -229,6 +252,8 @@ public:
 private:
 	std::vector<std::unique_ptr<Encoding<T>>> m_nested;
 	uint32_t m_n_dims_to_encode;
+
+	MatrixLayout m_output_layout = AoS;
 };
 
 TCNN_NAMESPACE_END
