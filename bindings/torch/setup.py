@@ -41,6 +41,9 @@ if torch.cuda.is_available():
 				raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
 			os.environ["PATH"] += ";" + cl_path
 
+	major, minor = torch.cuda.get_device_capability()
+	compute_capability = major * 10 + minor
+
 	nvcc_flags = [
 		"-std=c++14",
 		"--extended-lambda",
@@ -50,6 +53,8 @@ if torch.cuda.is_available():
 		"-U__CUDA_NO_HALF_OPERATORS__",
 		"-U__CUDA_NO_HALF_CONVERSIONS__",
 		"-U__CUDA_NO_HALF2_OPERATORS__",
+		f"-gencode=arch=compute_{compute_capability},code=compute_{compute_capability}",
+		f"-gencode=arch=compute_{compute_capability},code=sm_{compute_capability}",
 	]
 	if os.name == "posix":
 		cflags = ["-std=c++14"]
@@ -60,9 +65,6 @@ if torch.cuda.is_available():
 		]
 	elif os.name == "nt":
 		cflags = ["/std:c++14"]
-
-	major, minor = torch.cuda.get_device_capability()
-	compute_capability = major * 10 + minor
 
 	print(f"Targeting compute capability {compute_capability}")
 
