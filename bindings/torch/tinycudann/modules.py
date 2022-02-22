@@ -39,6 +39,10 @@ class _module_function(torch.autograd.Function):
 		if doutput is None:
 			return None, None, None, None
 
+		if not doutput.is_cuda:
+			print("TCNN WARNING: doutput must be a CUDA tensor, but isn't. This indicates suboptimal performance.")
+			doutput = doutput.cuda()
+
 		input, params, output = ctx.saved_tensors
 		with torch.no_grad():
 			scaled_grad = doutput * ctx.loss_scale
@@ -63,7 +67,10 @@ class Module(torch.nn.Module):
 		self.loss_scale = 128.0 if self.native_tcnn_module.param_precision() == _C.Precision.Fp16 else 1.0
 
 	def forward(self, x):
-		# TCNN only supports batch sizes that are a multiple of 128. Apply the corresponding padding here.
+		if not x.is_cuda:
+			print("TCNN WARNING: input must be a CUDA tensor, but isn't. This indicates suboptimal performance.")
+			x = x.cuda()
+
 		batch_size = x.shape[0]
 		batch_size_granularity = int(_C.batch_size_granularity())
 		padded_batch_size = (batch_size + batch_size_granularity-1) // batch_size_granularity * batch_size_granularity
