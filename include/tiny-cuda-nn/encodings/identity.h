@@ -45,26 +45,30 @@ TCNN_NAMESPACE_BEGIN
 
 template <typename T>
 __global__ void identity(
+	const uint32_t num_outputs,
 	const uint32_t num_elements,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
 	const float scale,
 	const float offset,
+	MatrixLayout output_layout,
 	PitchedPtr<const float> data_in,
 	PitchedPtr<T> data_out,
 	float* __restrict__ dy_dx)
 {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (encoded_index >= num_elements) return;
+	if (encoded_index >= num_outputs) return;
 
 	const uint32_t fan_out = num_to_encode + num_to_pad;
 	const uint32_t i = encoded_index / fan_out;
 	const uint32_t j = encoded_index - i * fan_out;
 
+	T* out = output_layout == AoS ? &data_out(i)[j] : (data_out.ptr + i + j * num_elements);
+
 	if (j >= num_to_encode) {
-		data_out(i)[j] = 1;
+		*out = 1;
 	} else {
-		data_out(i)[j] = data_in(i)[j] * scale + offset;
+		*out = data_in(i)[j] * scale + offset;
 		if (dy_dx != nullptr) {
 			dy_dx[i * num_to_encode + j] = scale;
 		}
@@ -73,21 +77,25 @@ __global__ void identity(
 
 template <typename T>
 __global__ void identity_backward(
+	const uint32_t num_outputs,
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const float scale,
+	MatrixLayout output_layout,
 	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
 	PitchedPtr<float> dL_dx)
 {
 	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (output_index >= num_elements) return;
+	if (output_index >= num_outputs) return;
 
 	const uint32_t i = output_index / n_dims_to_encode;
 	const uint32_t j = output_index - i * n_dims_to_encode;
 
+	const T* grad = output_layout == AoS ? &dL_dy(i)[j] : (dL_dy.ptr + i + j * num_elements);
+
 	// The identity encoding can simply pass through the derivative.
-	dL_dx(i)[j] = (T)((float)dL_dy(i)[j] * scale);
+	dL_dx(i)[j] = (T)((float)*grad * scale);
 }
 
 template <typename T>
@@ -112,10 +120,12 @@ public:
 
 		linear_kernel(identity<T>, 0, stream,
 			num_elements * num_encoded_dims(),
+			num_elements,
 			m_n_dims_to_encode,
 			m_n_to_pad,
 			m_scale,
 			m_offset,
+			m_output_layout,
 			inputs,
 			outputs,
 			dy_dx
@@ -143,8 +153,10 @@ public:
 
 		linear_kernel(identity_backward<T>, 0, stream,
 			num_elements * m_n_dims_to_encode,
+			num_elements,
 			m_n_dims_to_encode,
 			m_scale,
+			m_output_layout,
 			dL_dy,
 			dy_dx,
 			dL_dx
@@ -173,6 +185,18 @@ public:
 		return 1;
 	}
 
+	bool supports_output_layout(MatrixLayout layout) const override {
+		return true;
+	}
+
+	void set_output_layout(MatrixLayout layout) override {
+		m_output_layout = layout;
+	}
+
+	MatrixLayout output_layout() const override {
+		return m_output_layout;
+	}
+
 	json hyperparams() const override {
 		return {
 			{"otype", "Identity"},
@@ -191,6 +215,8 @@ private:
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
+
+	MatrixLayout m_output_layout = AoS;
 };
 
 TCNN_NAMESPACE_END
