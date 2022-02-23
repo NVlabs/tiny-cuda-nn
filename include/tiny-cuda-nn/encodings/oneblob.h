@@ -88,10 +88,10 @@ __global__ void kernel_one_blob(
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
+	MatrixLayout output_layout,
 	PitchedPtr<const float> data_in,
 	PitchedPtr<T> data_out,
-	float* __restrict__ dy_dx,
-	const uint32_t trailing_dims_to_ignore = 0
+	float* __restrict__ dy_dx
 ) {
 	const uint32_t fan_out_encoded = num_to_encode << num_bins_log2;
 	const uint32_t fan_out = fan_out_encoded + num_to_pad;
@@ -101,12 +101,13 @@ __global__ void kernel_one_blob(
 	const uint32_t encoded_index = j + i * blockDim.x;
 	if (encoded_index >= num_elements * fan_out) return;
 
+	T* out = output_layout == AoS ? &data_out(i)[j] : (data_out.ptr + i + j * num_elements);
+
 	if (j >= fan_out_encoded) {
 		// A value of 1 here allows the network to learn a bias-like thing.
-		data_out(i)[j] = 1;
+		*out = 1;
 	} else {
-		const uint32_t input_idx = (j >> num_bins_log2);
-		data_out(i)[j] = (input_idx >= num_to_encode-trailing_dims_to_ignore) ? (T)0.0f : (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i), j, num_bins_log2);
+		*out = (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i), j, num_bins_log2);
 		if (dy_dx != nullptr) {
 			// Negative sign, because the kernels are translated with their input (i.e. the input has a negative sign)
 			dy_dx[i * fan_out_encoded + j] = -one_blob_subwarp_aligned(quartic_cdf_deriv, data_in(i), j, num_bins_log2);
@@ -116,22 +117,27 @@ __global__ void kernel_one_blob(
 
 template <typename T>
 __global__ void kernel_one_blob_backward(
+	const uint32_t num_outputs,
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t n_bins,
+	MatrixLayout output_layout,
 	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
 	PitchedPtr<float> dL_dx)
 {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (encoded_index >= num_elements) return;
+	if (encoded_index >= num_outputs) return;
 
 	const uint32_t i = encoded_index / n_dims_to_encode;
 	const uint32_t j = encoded_index - i * n_dims_to_encode;
 
 	float result = 0;
 	for (int k = 0; k < n_bins; ++k) {
-		result += (float)dL_dy(i)[j * n_bins + k] * dy_dx[i * n_dims_to_encode * n_bins + j * n_bins + k];
+		uint32_t encoded_dim = j * n_bins + k;
+		const T* grad = output_layout == AoS ? &dL_dy(i)[encoded_dim] : (dL_dy.ptr + i + encoded_dim * num_elements);
+
+		result += (float)*grad * dy_dx[i * n_dims_to_encode * n_bins + j * n_bins + k];
 	}
 	dL_dx(i)[j] = result;
 }
@@ -176,10 +182,10 @@ public:
 			num_bins_log2,
 			m_n_dims_to_encode,
 			m_n_to_pad,
+			m_output_layout,
 			inputs,
 			outputs,
-			dy_dx,
-			m_n_trailing_dims_to_ignore
+			dy_dx
 		);
 	}
 
@@ -204,8 +210,10 @@ public:
 
 		linear_kernel(kernel_one_blob_backward<T>, 0, stream,
 			num_elements * m_n_dims_to_encode,
+			num_elements,
 			m_n_dims_to_encode,
 			m_n_bins,
+			m_output_layout,
 			dL_dy,
 			dy_dx,
 			dL_dx
@@ -234,6 +242,19 @@ public:
 		return m_n_bins;
 	}
 
+	bool supports_output_layout(MatrixLayout layout) const override {
+		// Technically supports SoA, but is usually slower than AoS
+		return layout == AoS;
+	}
+
+	void set_output_layout(MatrixLayout layout) override {
+		m_output_layout = layout;
+	}
+
+	MatrixLayout output_layout() const override {
+		return m_output_layout;
+	}
+
 	json hyperparams() const override {
 		return {
 			{"otype", "OneBlob"},
@@ -244,12 +265,13 @@ public:
 private:
 	uint32_t m_n_bins;
 	uint32_t m_n_dims_to_encode;
-	uint32_t m_n_trailing_dims_to_ignore;
 
 	// derived sizes
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
+
+	MatrixLayout m_output_layout = AoS;
 };
 
 TCNN_NAMESPACE_END
