@@ -89,10 +89,12 @@ if torch.cuda.is_available():
 	if include_networks:
 		source_files += [
 			"../../src/network.cu",
-			"../../src/fully_fused_mlp.cu",
 			"../../src/cutlass_mlp.cu",
 			"../../src/cutlass_resnet.cu",
 		]
+
+		if compute_capability >= 70:
+			source_files.append("../../src/fully_fused_mlp.cu")
 	else:
 		nvcc_flags.append("-DTCNN_NO_NETWORKS")
 		cflags.append("-DTCNN_NO_NETWORKS")
