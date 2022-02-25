@@ -88,10 +88,8 @@ __global__ void kernel_one_blob(
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
-	MatrixLayout output_layout,
 	PitchedPtr<const float> data_in,
-	PitchedPtr<T> data_out,
-	float* __restrict__ dy_dx
+	PitchedPtr<T> data_out
 ) {
 	const uint32_t fan_out_encoded = num_to_encode << num_bins_log2;
 	const uint32_t fan_out = fan_out_encoded + num_to_pad;
@@ -101,44 +99,82 @@ __global__ void kernel_one_blob(
 	const uint32_t encoded_index = j + i * blockDim.x;
 	if (encoded_index >= num_elements * fan_out) return;
 
-	T* out = output_layout == AoS ? &data_out(i)[j] : (data_out.ptr + i + j * num_elements);
-
 	if (j >= fan_out_encoded) {
 		// A value of 1 here allows the network to learn a bias-like thing.
-		*out = 1;
+		data_out(i)[j] = 1;
 	} else {
-		*out = (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i), j, num_bins_log2);
-		if (dy_dx != nullptr) {
-			// Negative sign, because the kernels are translated with their input (i.e. the input has a negative sign)
-			dy_dx[i * fan_out_encoded + j] = -one_blob_subwarp_aligned(quartic_cdf_deriv, data_in(i), j, num_bins_log2);
-		}
+		data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i), j, num_bins_log2);
+	}
+}
+
+template <typename T>
+__global__ void kernel_one_blob_soa(
+	const uint32_t num_elements,
+	const uint32_t num_bins_log2,
+	const uint32_t num_to_encode,
+	PitchedPtr<const float> data_in,
+	PitchedPtr<T> data_out
+) {
+	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
+	const uint32_t j = threadIdx.x;
+	const uint32_t to_encode_index = j + i * blockDim.x;
+	if (to_encode_index >= num_elements * num_to_encode) return;
+
+	const float x = data_in(i)[j];
+
+	const uint32_t n_bins = 1 << num_bins_log2;
+	T* out = (data_out.ptr + i + j * n_bins * num_elements);
+
+	float left_cdf = quartic_cdf(-x, n_bins) + quartic_cdf(-x - 1.0f, n_bins) + quartic_cdf(-x + 1.0f, n_bins);
+
+	for (uint32_t k = 0; k < n_bins; ++k) {
+		const float right_boundary = scalbnf(k+1, -num_bins_log2);
+		const float right_cdf = quartic_cdf(right_boundary - x, n_bins) + quartic_cdf(right_boundary - x - 1.0f, n_bins) + quartic_cdf(right_boundary - x + 1.0f, n_bins);
+
+		*out = (T)(right_cdf - left_cdf);
+
+		left_cdf = right_cdf;
+		out += num_elements;
 	}
 }
 
 template <typename T>
 __global__ void kernel_one_blob_backward(
-	const uint32_t num_outputs,
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
-	const uint32_t n_bins,
+	const uint32_t num_bins_log2,
 	MatrixLayout output_layout,
 	PitchedPtr<const T> dL_dy,
-	const float* dy_dx,
+	PitchedPtr<const float> data_in,
 	PitchedPtr<float> dL_dx)
 {
-	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
-	if (encoded_index >= num_outputs) return;
+	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
+	const uint32_t j = threadIdx.x;
+	const uint32_t to_encode_index = j + i * blockDim.x;
+	if (to_encode_index >= num_elements * n_dims_to_encode) return;
 
-	const uint32_t i = encoded_index / n_dims_to_encode;
-	const uint32_t j = encoded_index - i * n_dims_to_encode;
+	const float x = data_in(i)[j];
+
+	const uint32_t n_bins = 1 << num_bins_log2;
 
 	float result = 0;
-	for (int k = 0; k < n_bins; ++k) {
+
+	float left_cdf = quartic_cdf_deriv(-x, n_bins) + quartic_cdf_deriv(-x - 1.0f, n_bins) + quartic_cdf_deriv(-x + 1.0f, n_bins);
+
+	for (uint32_t k = 0; k < n_bins; ++k) {
+		const float right_boundary = scalbnf(k+1, -num_bins_log2);
+		const float right_cdf = quartic_cdf_deriv(right_boundary - x, n_bins) + quartic_cdf_deriv(right_boundary - x - 1.0f, n_bins) + quartic_cdf_deriv(right_boundary - x + 1.0f, n_bins);
+
+		float deriv = left_cdf - right_cdf;
+
+		left_cdf = right_cdf;
+
 		uint32_t encoded_dim = j * n_bins + k;
 		const T* grad = output_layout == AoS ? &dL_dy(i)[encoded_dim] : (dL_dy.ptr + i + encoded_dim * num_elements);
 
-		result += (float)*grad * dy_dx[i * n_dims_to_encode * n_bins + j * n_bins + k];
+		result += (float)*grad * deriv;
 	}
+
 	dL_dx(i)[j] = result;
 }
 
@@ -170,23 +206,39 @@ public:
 
 		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
 
-		// Since the padded number of dimensions is always divisible by 8, we can
-		// always exactly divide it by 2.
-		const uint32_t min_n_threads = n_threads_linear;
-		const dim3 threads = { num_encoded_dims(), div_round_up(min_n_threads, num_encoded_dims()), 1 };
-		const uint32_t n_threads = threads.x * threads.y;
-		const dim3 blocks = { div_round_up(num_elements * num_encoded_dims(), n_threads), 1, 1 };
+		if (m_output_layout == AoS) {
+			const uint32_t min_n_threads = n_threads_linear;
+			const dim3 threads = { num_encoded_dims(), div_round_up(min_n_threads, num_encoded_dims()), 1 };
+			const uint32_t n_threads = threads.x * threads.y;
+			const dim3 blocks = { div_round_up(num_elements * num_encoded_dims(), n_threads), 1, 1 };
 
-		kernel_one_blob<T><<<blocks, threads, 0, stream>>>(
-			num_elements,
-			num_bins_log2,
-			m_n_dims_to_encode,
-			m_n_to_pad,
-			m_output_layout,
-			inputs,
-			outputs,
-			dy_dx
-		);
+			kernel_one_blob<T><<<blocks, threads, 0, stream>>>(
+				num_elements,
+				num_bins_log2,
+				m_n_dims_to_encode,
+				m_n_to_pad,
+				inputs,
+				outputs
+			);
+		} else {
+			const uint32_t min_n_threads = n_threads_linear;
+			const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
+			const uint32_t n_threads = threads.x * threads.y;
+			const dim3 blocks = { div_round_up(num_elements * m_n_dims_to_encode, n_threads), 1, 1 };
+
+			kernel_one_blob_soa<T><<<blocks, threads, 0, stream>>>(
+				num_elements,
+				num_bins_log2,
+				m_n_dims_to_encode,
+				inputs,
+				outputs
+			);
+
+			// Padding
+			parallel_for_gpu(stream, num_elements * m_n_to_pad, [outputs=outputs.ptr + num_elements * m_n_dims_to_encode] __device__ (size_t i) {
+				outputs[i] = (T)1.0f;
+			});
+		}
 	}
 
 	void backward(
@@ -204,18 +256,24 @@ public:
 		}
 
 		// Can't compute input gradients if insufficient info is available
-		if (!dy_dx || !dL_dx) {
+		if (!dL_dx) {
 			return;
 		}
 
-		linear_kernel(kernel_one_blob_backward<T>, 0, stream,
-			num_elements * m_n_dims_to_encode,
+		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
+
+		const uint32_t min_n_threads = n_threads_linear;
+		const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
+		const uint32_t n_threads = threads.x * threads.y;
+		const dim3 blocks = { div_round_up(num_elements * m_n_dims_to_encode, n_threads), 1, 1 };
+
+		kernel_one_blob_backward<T><<<blocks, threads, 0, stream>>>(
 			num_elements,
 			m_n_dims_to_encode,
-			m_n_bins,
+			num_bins_log2,
 			m_output_layout,
 			dL_dy,
-			dy_dx,
+			inputs,
 			dL_dx
 		);
 	}
@@ -229,7 +287,7 @@ public:
 	}
 
 	uint32_t num_forward_gradient_dims() const override {
-		return m_n_dims_to_encode * m_n_bins;
+		return 0;
 	}
 
 	void set_alignment(uint32_t alignment) override {
@@ -243,8 +301,7 @@ public:
 	}
 
 	bool supports_output_layout(MatrixLayout layout) const override {
-		// Technically supports SoA, but is usually slower than AoS
-		return layout == AoS;
+		return true;
 	}
 
 	void set_output_layout(MatrixLayout layout) override {
