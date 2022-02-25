@@ -451,7 +451,7 @@ public:
 		}
 
 		// Can't compute input gradients if insufficient info is available
-		if (!dy_dx || !dL_dx) {
+		if (!dL_dx) {
 			return;
 		}
 
