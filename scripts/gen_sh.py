@@ -78,6 +78,9 @@ for diffvar in [False,x,y,z] if do_diff else [False]:
 			o=o.subs(y2*y2,y4)
 			o=o.subs(z2*z2,z4)
 			o=simplify(o)
-			out=f'd{diffvar}' if diffvar else 'out';
-			print(f'{out}[{j}] =',ccode(N(o)),';\t\t\t\t//',o)
+			out=f'd{diffvar}' if diffvar else 'out'
+			if diffvar:
+				print(f'{"// " if o == 0 else ""}d{diffvar} += (float)*grad({j}) * ({ccode(N(o))});\t\t\t\t//', o)
+			else:
+				print(f'out[{j}] =', ccode(N(o)), ';\t\t\t\t//', o)
 			j=j+1
