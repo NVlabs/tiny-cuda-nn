@@ -86,7 +86,7 @@ def get_args():
 
 	parser.add_argument("image", nargs="?", default="data/images/albert.jpg", help="Image to match")
 	parser.add_argument("config", nargs="?", default="data/config_hash.json", help="JSON config for tiny-cuda-nn")
-	parser.add_argument("n_steps", nargs="?", default=10000000, help="Number of training steps")
+	parser.add_argument("n_steps", nargs="?", type=int, default=10000000, help="Number of training steps")
 	parser.add_argument("result_filename", nargs="?", default="", help="Number of training steps")
 
 	args = parser.parse_args()
