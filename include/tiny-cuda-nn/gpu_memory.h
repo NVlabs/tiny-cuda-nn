@@ -24,9 +24,11 @@
  */
 
 /** @file   gpu_memory.h
- *  @author Nikolaus Binder and Thomas Müller, NVIDIA
- *  @brief  Managed memory on the GPU. Like a std::vector, memory is alocated  either explicitly (resize/enlarge)
+ *  @author Thomas Müller and Nikolaus Binder, NVIDIA
+ *  @brief  Managed memory on the GPU. Like a std::vector, memory is allocated either explicitly (resize/enlarge)
  *          or implicitly (resize_and_copy_from_host etc). Memory is always and automatically released in the destructor.
+ *          Also contains a GPU memory arena for light-weight stream-ordered allocations of temporary memory. The
+ *          memory arena makes use of virtual memory when available to avoid re-allocations during progressive growing.
  */
 
 #pragma once
@@ -314,21 +316,12 @@ public:
 		copy_to_host(data.data(), m_size);
 	}
 
-	/// Copies data from another device array to this one, automatically resizing it
-	void copy_from_device(const GPUMemory<T> &other) {
-		if (m_size != other.m_size) {
-			resize(other.m_size);
-		}
-
-		try {
-			CUDA_CHECK_THROW(cudaMemcpy(m_data, other.m_data, m_size * sizeof(T), cudaMemcpyDeviceToDevice));
-		} catch (std::runtime_error error) {
-			throw std::runtime_error(std::string("Could not copy from device: ") + error.what());
-		}
-	}
-
 	/// Copies size elements from another device array to this one, automatically resizing it
 	void copy_from_device(const GPUMemory<T> &other, const size_t size) {
+		if (size == 0) {
+			return;
+		}
+
 		if (m_size < size) {
 			resize(size);
 		}
@@ -340,11 +333,20 @@ public:
 		}
 	}
 
+	/// Copies data from another device array to this one, automatically resizing it
+	void copy_from_device(const GPUMemory<T> &other) {
+		copy_from_device(other, other.m_size);
+	}
+
 	// Created an (owned) copy of the data
-	GPUMemory<T> copy() const {
-		GPUMemory<T> result{m_size};
+	GPUMemory<T> copy(size_t size) const {
+		GPUMemory<T> result{size};
 		result.copy_from_device(*this);
 		return result;
+	}
+
+	GPUMemory<T> copy() const {
+		return copy(m_size);
 	}
 
 	T* data() const {
@@ -422,15 +424,27 @@ class GPUMemoryArena {
 
 public:
 	GPUMemoryArena() {
-		if (!cuda_supports_virtual_memory()) {
-			throw std::runtime_error{std::string{"GPU "} + std::to_string(cuda_device()) + " does not support virtual memory."};
-		}
-
 		// Align memory at least by a cache line (128 bytes).
 		m_alignment = (size_t)128;
 		m_max_size = next_multiple(MAX_SIZE, cuda_memory_granularity());
 
 		m_free_intervals = {{0, m_max_size}};
+
+		if (!cuda_supports_virtual_memory()) {
+			// Use regular memory as fallback
+			m_fallback_memory = std::make_shared<GPUMemory<uint8_t>>();
+
+			static bool printed_warning = false;
+			if (!printed_warning) {
+				printed_warning = true;
+				std::cout
+					<< "GPUMemoryArena: Warning: GPU " << cuda_device() << " does not support virtual memory. "
+					<< "Falling back to regular allocations, which will be larger and can cause occasional stutter."
+					<< std::endl;
+			}
+			return;
+		}
+
 		CU_CHECK_THROW(cuMemAddressReserve(&m_base_address, m_max_size, 0, 0, 0));
 	}
 
@@ -439,10 +453,11 @@ public:
 
 	~GPUMemoryArena() {
 		try {
-			total_n_bytes_allocated() -= m_size;
-
 			CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
 			if (m_base_address) {
+				total_n_bytes_allocated() -= m_size;
+
 				CU_CHECK_THROW(cuMemUnmap(m_base_address, m_size));
 
 				for (const auto& handle : m_handles) {
@@ -460,7 +475,11 @@ public:
 	}
 
 	uint8_t* data() {
-		return (uint8_t*)m_base_address;
+		return m_fallback_memory ? m_fallback_memory->data() : (uint8_t*)m_base_address;
+	}
+
+	std::shared_ptr<GPUMemory<uint8_t>> backing_memory() {
+		return m_fallback_memory;
 	}
 
 	// Finds the smallest interval of free memory in the GPUMemoryArena that's
@@ -511,6 +530,19 @@ public:
 			return;
 		}
 
+		if (m_fallback_memory) {
+			static const double GROWTH_FACTOR = 1.5;
+
+			CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+			m_size = next_multiple((size_t)(n_bytes * GROWTH_FACTOR), cuda_memory_granularity());
+			m_fallback_memory = std::make_shared<GPUMemory<uint8_t>>(m_fallback_memory->copy(m_size));
+
+			CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+			return;
+		}
+
 		size_t n_bytes_to_allocate = n_bytes - m_size;
 		n_bytes_to_allocate = next_multiple(n_bytes_to_allocate, cuda_memory_granularity());
 
@@ -548,7 +580,9 @@ public:
 	class Allocation {
 	public:
 		Allocation() = default;
-		Allocation(cudaStream_t stream, size_t offset, GPUMemoryArena* workspace) : m_stream{stream}, m_offset{offset}, m_workspace{workspace} {}
+		Allocation(cudaStream_t stream, size_t offset, GPUMemoryArena* workspace)
+		: m_stream{stream}, m_data{workspace->data() + offset}, m_offset{offset}, m_workspace{workspace}, m_backing_memory{workspace->backing_memory()}
+		{}
 
 		~Allocation() {
 			if (m_workspace) {
@@ -559,8 +593,11 @@ public:
 		Allocation(const Allocation& other) = delete;
 
 		Allocation& operator=(Allocation&& other) {
+			std::swap(m_stream, other.m_stream);
+			std::swap(m_data, other.m_data);
 			std::swap(m_offset, other.m_offset);
 			std::swap(m_workspace, other.m_workspace);
+			std::swap(m_backing_memory, other.m_backing_memory);
 			return *this;
 		}
 
@@ -569,11 +606,11 @@ public:
 		}
 
 		uint8_t* data() {
-			return m_workspace ? m_workspace->data() + m_offset : nullptr;
+			return m_data;
 		}
 
 		const uint8_t* data() const {
-			return m_workspace ? m_workspace->data() + m_offset : nullptr;
+			return m_data;
 		}
 
 		cudaStream_t stream() const {
@@ -582,8 +619,14 @@ public:
 
 	private:
 		cudaStream_t m_stream = nullptr;
+		uint8_t* m_data = nullptr;
 		size_t m_offset = 0;
 		GPUMemoryArena* m_workspace = nullptr;
+
+		// Backing GPUMemory (if backed by a GPUMemory). Ensures that
+		// the backing memory is only freed once all allocations that
+		// use it were destroyed.
+		std::shared_ptr<GPUMemory<uint8_t>> m_backing_memory = nullptr;
 	};
 
 private:
@@ -608,7 +651,12 @@ private:
 
 	CUdeviceptr m_base_address = {};
 	size_t m_size = 0;
+
 	std::vector<CUmemGenericAllocationHandle> m_handles;
+
+	// Used then virtual memory isn't supported.
+	// Requires more storage + memcpy, but is more portable.
+	std::shared_ptr<GPUMemory<uint8_t>> m_fallback_memory = nullptr;
 
 	size_t m_alignment;
 	size_t m_max_size;
