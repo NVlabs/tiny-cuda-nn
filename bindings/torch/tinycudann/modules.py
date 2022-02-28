@@ -18,6 +18,9 @@ def _torch_precision(tcnn_precision):
 	else:
 		raise ValueError(f"Unknown precision {tcnn_precision}")
 
+def free_temporary_memory():
+	_C.free_temporary_memory()
+
 class _module_function(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, native_tcnn_module, input, params, loss_scale):

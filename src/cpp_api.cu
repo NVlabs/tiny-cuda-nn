@@ -52,6 +52,10 @@ uint32_t batch_size_granularity() {
 	return tcnn::batch_size_granularity;
 }
 
+void free_temporary_memory() {
+	tcnn::free_all_gpu_memory_arenas();
+}
+
 #if !defined(TCNN_NO_NETWORKS)
 class NetworkWithInputEncoding : public Module {
 public:

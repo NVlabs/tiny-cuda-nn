@@ -702,4 +702,8 @@ inline void free_gpu_memory_arena(cudaStream_t stream) {
 	gpu_memory_arenas().erase(stream);
 }
 
+inline void free_all_gpu_memory_arenas() {
+	gpu_memory_arenas().clear();
+}
+
 TCNN_NAMESPACE_END
