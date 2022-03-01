@@ -419,14 +419,11 @@ struct Interval {
 };
 
 class GPUMemoryArena {
-	// ~16 GB of temporary buffers per stream ought to be enough for now.
-	static const size_t MAX_SIZE = (size_t)1 << 34;
-
 public:
 	GPUMemoryArena() {
 		// Align memory at least by a cache line (128 bytes).
 		m_alignment = (size_t)128;
-		m_max_size = next_multiple(MAX_SIZE, cuda_memory_granularity());
+		m_max_size = next_multiple(cuda_memory_info().total, cuda_memory_granularity());
 
 		m_free_intervals = {{0, m_max_size}};
 
@@ -445,6 +442,11 @@ public:
 			return;
 		}
 
+		// Reserve an address range that would be sufficient for housing the entire
+		// available GPU RAM (if nothing else was using the GPU). This is unlikely
+		// to exhaust all available addresses (even if multiple GPUMemoryArenas are
+		// used simultaneously), while also ensuring that we never exhaust the
+		// reserved address range without running out of physical memory beforehand.
 		CU_CHECK_THROW(cuMemAddressReserve(&m_base_address, m_max_size, 0, 0, 0));
 	}
 
