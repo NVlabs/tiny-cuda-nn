@@ -823,7 +823,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	const GPUMatrixDynamic<T>& dL_doutput,
 	GPUMatrixDynamic<T>* dL_dinput,
 	bool use_inference_matrices,
-	bool compute_param_gradients
+	EGradientMode param_gradients_mode
 ) {
 	if (dL_doutput.m() != m_padded_output_width) {
 		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
@@ -853,6 +853,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	// - RELU: pre_activation_gradinet = post_activation_gradient if val > 0 else 0
 
 	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Backward;
+	const float param_gradient_beta = param_gradients_mode == EGradientMode::Accumulate ? 1.0f : 0.0f;
 
 	{
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
@@ -864,13 +865,13 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		uint32_t tmp_idx = m_n_hidden_matmuls;
 		uint32_t backward_tmp_idx = 0;
 
-		if (compute_param_gradients) {
+		if (param_gradients_mode != EGradientMode::Ignore) {
 			// Output layer
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
 			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
 
 			// Compute weight gradients
-			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor);
+			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
 
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 		}
@@ -902,10 +903,10 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
 			uint32_t matrix_idx = m_n_hidden_matmuls - i - 1;
 
-			if (compute_param_gradients) {
+			if (param_gradients_mode != EGradientMode::Ignore) {
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
 				cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor);
+				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 			}
 
@@ -913,10 +914,10 @@ void FullyFusedMLP<T, WIDTH>::backward(
 			++backward_tmp_idx;
 		}
 
-		if (compute_param_gradients) {
+		if (param_gradients_mode != EGradientMode::Ignore) {
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
 			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor);
+			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 		}
 
@@ -927,7 +928,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 		}
 	}
 
-	if (compute_param_gradients) {
+	if (param_gradients_mode != EGradientMode::Ignore) {
 		// All the per-layer split-k matrix multiplications summing over
 		// the batch are computed in parallel streams to the actual
 		// backpropagation. Here, we need to wait for all of these to complete.

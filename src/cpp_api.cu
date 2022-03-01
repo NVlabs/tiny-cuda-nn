@@ -99,7 +99,7 @@ public:
 		// Run on our own custom stream to ensure CUDA graph capture is possible.
 		// (Significant possible speedup.)
 		SyncedMultiStream synced_stream{stream, 2};
-		m_network->backward(synced_stream.get(1), *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr, false, dL_dparams);
+		m_network->backward(synced_stream.get(1), *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr, false, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
 	}
 
 	uint32_t n_input_dims() const override {
@@ -184,7 +184,7 @@ public:
 			throw std::runtime_error{"Encoding: forward(prepare_input_gradients) must be called before backward(dL_dinput)"};
 		}
 
-		m_encoding->backward(stream, n_elements, pitched_dL_doutput, forward.dy_dx.data(), pitched_dL_dinput, pitched_input, false, dL_dparams);
+		m_encoding->backward(stream, n_elements, pitched_dL_doutput, forward.dy_dx.data(), pitched_dL_dinput, pitched_input, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
 	}
 
 	uint32_t n_input_dims() const override {

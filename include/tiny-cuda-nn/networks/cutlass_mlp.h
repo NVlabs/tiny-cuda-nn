@@ -66,7 +66,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
-		bool compute_param_gradients = true
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override;
 
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override;

@@ -146,8 +146,7 @@ public:
 		const float* dy_dx, // encoded output dims x num_elements
 		PitchedPtr<float> dL_dx, // Same shape as inputs
 		PitchedPtr<const float> inputs,
-		bool accumulate_param_gradients,
-		bool compute_param_gradients
+		EGradientMode param_gradients_mode
 	) override {
 		if (m_n_padded_output_dims == 0) {
 			return;

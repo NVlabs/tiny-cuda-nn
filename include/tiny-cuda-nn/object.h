@@ -79,6 +79,12 @@ void one_hot_batched(cudaStream_t stream, const uint32_t num_elements, const uin
 template <typename T>
 void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float factor);
 
+enum class EGradientMode {
+	Ignore,
+	Overwrite,
+	Accumulate,
+};
+
 template <typename T, typename PARAMS_T, typename COMPUTE_T=T>
 class DifferentiableObject : public ParametricObject<PARAMS_T> {
 public:
@@ -113,7 +119,7 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
-		bool compute_param_gradients = true
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) = 0;
 	void backward(
 		const Context& ctx,
@@ -122,9 +128,9 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
-		bool compute_param_gradients = true
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) {
-		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_matrices, compute_param_gradients);
+		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_matrices, param_gradients_mode);
 	}
 
 	void input_gradient(

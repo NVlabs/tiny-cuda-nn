@@ -253,7 +253,7 @@ void CutlassResNet<T, input_activation>::backward(
 	const GPUMatrixDynamic<T>& dL_doutput,
 	GPUMatrixDynamic<T>* dL_dinput,
 	bool use_inference_matrices,
-	bool compute_param_gradients
+	EGradientMode param_gradients_mode
 ) {
 	if (dL_doutput.m() != m_padded_output_width) {
 		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
@@ -279,6 +279,8 @@ void CutlassResNet<T, input_activation>::backward(
 	// - input_gradient = weights.T * output_gradient
 	// - RELU: pre_activation_gradinet = post_activation_gradient if val > 0 else 0
 
+	const float param_gradient_beta = param_gradients_mode == EGradientMode::Accumulate ? 1.0f : 0.0f;
+
 	{
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
@@ -288,11 +290,11 @@ void CutlassResNet<T, input_activation>::backward(
 
 		const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
 
-		if (compute_param_gradients) {
+		if (param_gradients_mode != EGradientMode::Ignore) {
 			// Output layer
 			cudaEventRecord(m_training_splitk_events.back(), stream);
 			cudaStreamWaitEvent(m_training_splitk_streams.back(), m_training_splitk_events.back(), 0);
-			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.back(), tmp_dL_doutput, forward.hidden.back().transposed(), output_gradient_matrix(), split_k_factor);
+			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.back(), tmp_dL_doutput, forward.hidden.back().transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
 			cudaEventRecord(m_training_splitk_events.back(), m_training_splitk_streams.back());
 		}
 
@@ -307,10 +309,10 @@ void CutlassResNet<T, input_activation>::backward(
 				uint32_t matrix_idx = m_n_matrices_per_block - 1 - j;
 				uint32_t fwd_idx = idx + matrix_idx;
 
-				if (compute_param_gradients) {
+				if (param_gradients_mode != EGradientMode::Ignore) {
 					cudaEventRecord(m_training_splitk_events.at(fwd_idx), stream);
 					cudaStreamWaitEvent(m_training_splitk_streams.at(fwd_idx), m_training_splitk_events.at(fwd_idx), 0);
-					fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(fwd_idx), backward_tmp.at(fwd_idx), forward.hidden.at(fwd_idx-1).transposed(), gradient_matrix_at(block_idx, matrix_idx), split_k_factor);
+					fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(fwd_idx), backward_tmp.at(fwd_idx), forward.hidden.at(fwd_idx-1).transposed(), gradient_matrix_at(block_idx, matrix_idx), split_k_factor, param_gradient_beta);
 					cudaEventRecord(m_training_splitk_events.at(fwd_idx), m_training_splitk_streams.at(fwd_idx));
 				}
 
@@ -322,10 +324,10 @@ void CutlassResNet<T, input_activation>::backward(
 
 		activation_backward_gpu(stream, input_activation_value, forward.input, backward_tmp.front());
 
-		if (compute_param_gradients) {
+		if (param_gradients_mode != EGradientMode::Ignore) {
 			cudaEventRecord(m_training_splitk_events.front(), stream);
 			cudaStreamWaitEvent(m_training_splitk_streams.front(), m_training_splitk_events.front(), 0);
-			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.front(), backward_tmp.front(), input.transposed(), input_gradient_matrix(), split_k_factor);
+			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.front(), backward_tmp.front(), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 			cudaEventRecord(m_training_splitk_events.front(), m_training_splitk_streams.front());
 		}
 
@@ -336,7 +338,7 @@ void CutlassResNet<T, input_activation>::backward(
 		}
 	}
 
-	if (compute_param_gradients) {
+	if (param_gradients_mode != EGradientMode::Ignore) {
 		// All the per-layer split-k matrix multiplications summing over
 		// the batch are computed in parallel streams to the actual
 		// backpropagation. Here, we need to wait for all of these to complete.

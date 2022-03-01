@@ -109,7 +109,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_matrices = false,
-		bool compute_param_gradients = true
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
 		GPUMatrixDynamic<T> dL_dnetwork_input;
 		if (m_encoding->n_params() > 0 || dL_dinput) {
@@ -118,7 +118,7 @@ public:
 
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		m_network->backward(stream, *forward.network_ctx, forward.network_input, output, dL_doutput, dL_dnetwork_input.data() ? &dL_dnetwork_input : nullptr, use_inference_matrices, compute_param_gradients);
+		m_network->backward(stream, *forward.network_ctx, forward.network_input, output, dL_doutput, dL_dnetwork_input.data() ? &dL_dnetwork_input : nullptr, use_inference_matrices, param_gradients_mode);
 		if (dL_dnetwork_input.data()) {
 			m_encoding->backward(
 				stream,
@@ -126,7 +126,8 @@ public:
 				{dL_dnetwork_input.data(), dL_dnetwork_input.m()},
 				dL_dinput ? forward.encoding_forward_gradient.data() : nullptr,
 				dL_dinput ? PitchedPtr<float>{dL_dinput->data(), dL_dinput->m()} : PitchedPtr<float>{},
-				{input.data(), input.m()}
+				{input.data(), input.m()},
+				param_gradients_mode
 			);
 		}
 	}

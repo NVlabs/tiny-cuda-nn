@@ -697,8 +697,7 @@ public:
 		const float* dy_dx, // encoded output dims x num_elements
 		PitchedPtr<float> dL_dx, // Same shape as inputs
 		PitchedPtr<const float> inputs,
-		bool accumulate_param_gradients,
-		bool compute_param_gradients
+		EGradientMode param_gradients_mode
 	) override {
 		if (m_n_padded_output_dims == 0 || num_elements == 0) {
 			return;
@@ -727,7 +726,7 @@ public:
 			dL_dy_rm = (const T*)workspace.data();
 		}
 
-		if (compute_param_gradients) {
+		if (param_gradients_mode != EGradientMode::Ignore) {
 			// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
 			// If not, accumulate in a temporary buffer and cast later.
 			grad_t* grid_gradient;
@@ -737,7 +736,7 @@ public:
 				grid_gradient = (grad_t*)m_grid_gradient;
 			}
 
-			if (!accumulate_param_gradients) {
+			if (param_gradients_mode == EGradientMode::Overwrite) {
 				CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
 			}
 
