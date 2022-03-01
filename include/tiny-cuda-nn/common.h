@@ -103,6 +103,14 @@ inline size_t cuda_memory_granularity() {
 	return cuda_memory_granularity(cuda_device());
 }
 
+struct MemoryInfo {
+	size_t total;
+	size_t free;
+	size_t used;
+};
+
+MemoryInfo cuda_memory_info();
+
 std::string to_lower(std::string str);
 std::string to_upper(std::string str);
 inline bool equals_case_insensitive(const std::string& str1, const std::string& str2) {

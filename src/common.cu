@@ -70,6 +70,13 @@ size_t cuda_memory_granularity(int device) {
 	return granularity;
 }
 
+MemoryInfo cuda_memory_info() {
+	MemoryInfo info;
+	CUDA_CHECK_THROW(cudaMemGetInfo(&info.free, &info.total));
+	info.used = info.total - info.free;
+	return info;
+}
+
 std::string to_lower(std::string str) {
 	std::transform(std::begin(str), std::end(str), std::begin(str), [](unsigned char c) { return (char)std::tolower(c); });
 	return str;
