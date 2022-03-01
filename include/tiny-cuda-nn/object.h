@@ -154,7 +154,7 @@ public:
 		one_hot_batched(stream, output.n_elements(), padded_output_width(), dim, d_doutput.data(), backprop_scale);
 
 		auto ctx = forward(stream, input, &output, true /* inference matrices */, true /* prep forward buffers for input gradients */);
-		backward(stream, *ctx, input, output, d_doutput, &d_dinput, true /* inference matrices */, false /* no param gradients */);
+		backward(stream, *ctx, input, output, d_doutput, &d_dinput, true /* inference matrices */, EGradientMode::Ignore);
 
 		mult(stream, d_dinput.n_elements(), d_dinput.data(), 1.0f / backprop_scale);
 	}
