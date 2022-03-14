@@ -101,10 +101,18 @@ public:
 	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
 		check_inference_args(input, output);
 
-		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp{padded_output_width(), output.n(), stream, output.layout()};
+		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
+		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
+			inference_output_tmp = GPUMatrixDynamic<COMPUTE_T>{(COMPUTE_T*)output.data(), output.m(), output.n(), output.layout()};
+		} else {
+			inference_output_tmp = GPUMatrixDynamic<COMPUTE_T>{padded_output_width(), output.n(), stream, output.layout()};
+		}
+
 		inference_mixed_precision(stream, input, inference_output_tmp);
 
-		// TODO: handle the case where T == float and padded_output_width() == output_width()
+		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
+			return;
+		}
 
 		const uint32_t n_elements = (uint32_t)output.n_elements();
 		trim_and_cast_from(stream, output.layout(), n_elements, padded_output_width(), output_width(), inference_output_tmp.data(), output.data());
