@@ -113,7 +113,7 @@ __global__ void kernel_one_blob_soa(
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
 	PitchedPtr<const float> data_in,
-	PitchedPtr<T> data_out
+	T* __restrict__ data_out
 ) {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
@@ -123,7 +123,7 @@ __global__ void kernel_one_blob_soa(
 	const float x = data_in(i)[j];
 
 	const uint32_t n_bins = 1 << num_bins_log2;
-	T* out = (data_out.ptr + i + j * n_bins * num_elements);
+	T* out = (data_out + i + j * n_bins * num_elements);
 
 	float left_cdf = quartic_cdf(-x, n_bins) + quartic_cdf(-x - 1.0f, n_bins) + quartic_cdf(-x + 1.0f, n_bins);
 
@@ -192,101 +192,104 @@ public:
 		}
 	}
 
-	void encode(
+	std::unique_ptr<Context> forward(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const float> inputs,
-		PitchedPtr<T> outputs,
-		float* dy_dx = nullptr,
-		bool is_inference = false
-	) const override {
-		if (m_n_padded_output_dims == 0) {
-			return;
+		const GPUMatrixDynamic<float>& input,
+		GPUMatrixDynamic<T>* output = nullptr,
+		bool use_inference_params = false,
+		bool prepare_input_gradients = false
+	) override {
+		if (!output || m_n_padded_output_dims == 0) {
+			return std::make_unique<Context>();
 		}
 
 		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
 
-		if (m_output_layout == AoS) {
+		if (output->layout() == AoS) {
 			const uint32_t min_n_threads = n_threads_linear;
-			const dim3 threads = { num_encoded_dims(), div_round_up(min_n_threads, num_encoded_dims()), 1 };
+			const dim3 threads = { padded_output_width(), div_round_up(min_n_threads, padded_output_width()), 1 };
 			const uint32_t n_threads = threads.x * threads.y;
-			const dim3 blocks = { div_round_up(num_elements * num_encoded_dims(), n_threads), 1, 1 };
+			const dim3 blocks = { div_round_up(input.n() * padded_output_width(), n_threads), 1, 1 };
 
 			kernel_one_blob<T><<<blocks, threads, 0, stream>>>(
-				num_elements,
+				input.n(),
 				num_bins_log2,
 				m_n_dims_to_encode,
 				m_n_to_pad,
-				inputs,
-				outputs
+				input.pitched_ptr(),
+				output->pitched_ptr()
 			);
 		} else {
 			const uint32_t min_n_threads = n_threads_linear;
 			const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
 			const uint32_t n_threads = threads.x * threads.y;
-			const dim3 blocks = { div_round_up(num_elements * m_n_dims_to_encode, n_threads), 1, 1 };
+			const dim3 blocks = { div_round_up(input.n() * m_n_dims_to_encode, n_threads), 1, 1 };
 
 			kernel_one_blob_soa<T><<<blocks, threads, 0, stream>>>(
-				num_elements,
+				input.n(),
 				num_bins_log2,
 				m_n_dims_to_encode,
-				inputs,
-				outputs
+				input.pitched_ptr(),
+				output->data()
 			);
 
 			// Padding
-			parallel_for_gpu(stream, num_elements * m_n_to_pad, [outputs=outputs.ptr + num_elements * m_n_dims_to_encode] __device__ (size_t i) {
-				outputs[i] = (T)1.0f;
+			parallel_for_gpu(stream, input.n() * m_n_to_pad, [out=output->data() + input.n() * m_n_dims_to_encode] __device__ (size_t i) {
+				out[i] = (T)1.0f;
 			});
 		}
+
+		return std::make_unique<Context>();
 	}
 
 	void backward(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const T> dL_dy, // Same shape as outputs
-		const float* dy_dx, // encoded output dims x num_elements
-		PitchedPtr<float> dL_dx, // Same shape as inputs
-		PitchedPtr<const float> inputs,
-		EGradientMode param_gradients_mode
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<T>& output,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
-		if (m_n_padded_output_dims == 0) {
+		if (!dL_dinput || m_n_padded_output_dims == 0) {
 			return;
 		}
 
-		// Can't compute input gradients if insufficient info is available
-		if (!dL_dx) {
-			return;
-		}
+		CHECK_THROW(dL_doutput.layout() == output.layout());
 
 		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
 
 		const uint32_t min_n_threads = n_threads_linear;
 		const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
 		const uint32_t n_threads = threads.x * threads.y;
-		const dim3 blocks = { div_round_up(num_elements * m_n_dims_to_encode, n_threads), 1, 1 };
+		const dim3 blocks = { div_round_up(input.n() * m_n_dims_to_encode, n_threads), 1, 1 };
 
 		kernel_one_blob_backward<T><<<blocks, threads, 0, stream>>>(
-			num_elements,
+			input.n(),
 			m_n_dims_to_encode,
 			num_bins_log2,
-			m_output_layout,
-			dL_dy,
-			inputs,
-			dL_dx
+			output.layout(),
+			dL_doutput.pitched_ptr(),
+			input.pitched_ptr(),
+			dL_dinput->pitched_ptr()
 		);
 	}
 
-	uint32_t num_dims_to_encode() const override {
+	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
 	}
 
-	uint32_t num_encoded_dims() const override {
+	uint32_t padded_output_width() const override {
 		return m_n_padded_output_dims;
 	}
 
-	uint32_t num_forward_gradient_dims() const override {
-		return 0;
+	uint32_t output_width() const override {
+		return m_n_padded_output_dims;
+	}
+
+	uint32_t required_input_alignment() const override {
+		return 1;
 	}
 
 	void set_alignment(uint32_t alignment) override {
@@ -299,16 +302,8 @@ public:
 		return m_n_bins;
 	}
 
-	bool supports_output_layout(MatrixLayout layout) const override {
-		return true;
-	}
-
-	void set_output_layout(MatrixLayout layout) override {
-		m_output_layout = layout;
-	}
-
-	MatrixLayout output_layout() const override {
-		return m_output_layout;
+	MatrixLayout preferred_output_layout() const override {
+		return SoA;
 	}
 
 	json hyperparams() const override {
@@ -326,8 +321,6 @@ private:
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
-
-	MatrixLayout m_output_layout = AoS;
 };
 
 TCNN_NAMESPACE_END

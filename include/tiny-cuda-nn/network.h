@@ -52,11 +52,6 @@ class Network : public DifferentiableObject<T, PARAMS_T, PARAMS_T> {
 public:
 	virtual ~Network() { }
 
-	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) = 0;
-	void inference_mixed_precision(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<PARAMS_T>& output, bool use_inference_matrices = true) {
-		inference_mixed_precision(nullptr, input, output, use_inference_matrices);
-	}
-
 	void visualize_activation(cudaStream_t stream, uint32_t layer, uint32_t dimension, const GPUMatrix<T>& input, GPUMatrix<float>& output) {
 		layer = std::min(layer, num_forward_activations()-1);
 		dimension = std::min(dimension, width(layer)-1);

@@ -50,10 +50,9 @@ public:
 	CutlassResNet(uint32_t input_width, uint32_t network_width, uint32_t output_width, uint32_t n_blocks, uint32_t n_matrices_per_block, Activation output_activation);
 	~CutlassResNet() override;
 
-	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) override;
-	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override;
+	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
-	std::unique_ptr<Context> forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override;
+	std::unique_ptr<Context> forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override;
 
 	void backward(
 		cudaStream_t stream,
@@ -62,7 +61,7 @@ public:
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
-		bool use_inference_matrices = false,
+		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override;
 
@@ -98,6 +97,10 @@ public:
 
 	size_t n_params() const override {
 		return m_total_n_params;
+	}
+
+	uint32_t input_width() const override {
+		return m_input_width;
 	}
 
 	uint32_t padded_output_width() const override {

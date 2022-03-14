@@ -53,8 +53,7 @@ __global__ void identity(
 	const float offset,
 	MatrixLayout output_layout,
 	PitchedPtr<const float> data_in,
-	PitchedPtr<T> data_out,
-	float* __restrict__ dy_dx)
+	PitchedPtr<T> data_out)
 {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_outputs) return;
@@ -69,9 +68,6 @@ __global__ void identity(
 		*out = 1;
 	} else {
 		*out = data_in(i)[j] * scale + offset;
-		if (dy_dx != nullptr) {
-			dy_dx[i * num_to_encode + j] = scale;
-		}
 	}
 }
 
@@ -83,7 +79,6 @@ __global__ void identity_backward(
 	const float scale,
 	MatrixLayout output_layout,
 	PitchedPtr<const T> dL_dy,
-	const float* dy_dx,
 	PitchedPtr<float> dL_dx)
 {
 	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -106,72 +101,73 @@ public:
 		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode;
 	}
 
-	void encode(
+	std::unique_ptr<Context> forward(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const float> inputs,
-		PitchedPtr<T> outputs,
-		float* dy_dx = nullptr,
-		bool is_inference = false
-	) const override {
-		if (m_n_padded_output_dims == 0) {
-			return;
+		const GPUMatrixDynamic<float>& input,
+		GPUMatrixDynamic<T>* output = nullptr,
+		bool use_inference_params = false,
+		bool prepare_input_gradients = false
+	) override {
+		if (!output || m_n_padded_output_dims == 0) {
+			return std::make_unique<Context>();
 		}
 
 		linear_kernel(identity<T>, 0, stream,
-			num_elements * num_encoded_dims(),
-			num_elements,
+			input.n() * padded_output_width(),
+			input.n(),
 			m_n_dims_to_encode,
 			m_n_to_pad,
 			m_scale,
 			m_offset,
-			m_output_layout,
-			inputs,
-			outputs,
-			dy_dx
+			output->layout(),
+			input.pitched_ptr(),
+			output->pitched_ptr()
 		);
+
+		return std::make_unique<Context>();
 	}
 
 	void backward(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const T> dL_dy, // Same shape as outputs
-		const float* dy_dx, // encoded output dims x num_elements
-		PitchedPtr<float> dL_dx, // Same shape as inputs
-		PitchedPtr<const float> inputs,
-		EGradientMode param_gradients_mode
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<T>& output,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
-		if (m_n_padded_output_dims == 0) {
+		if (!dL_dinput || m_n_padded_output_dims == 0) {
 			return;
 		}
 
-		// Can't compute input gradients if insufficient info is available
-		if (!dy_dx || !dL_dx) {
-			return;
-		}
+		CHECK_THROW(dL_doutput.layout() == output.layout());
 
 		linear_kernel(identity_backward<T>, 0, stream,
-			num_elements * m_n_dims_to_encode,
-			num_elements,
+			input.n() * m_n_dims_to_encode,
+			input.n(),
 			m_n_dims_to_encode,
 			m_scale,
-			m_output_layout,
-			dL_dy,
-			dy_dx,
-			dL_dx
+			output.layout(),
+			dL_doutput.pitched_ptr(),
+			dL_dinput->pitched_ptr()
 		);
 	}
 
-	uint32_t num_dims_to_encode() const override {
+	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
 	}
 
-	uint32_t num_encoded_dims() const override {
+	uint32_t padded_output_width() const override {
 		return m_n_padded_output_dims;
 	}
 
-	uint32_t num_forward_gradient_dims() const override {
-		return m_n_dims_to_encode;
+	uint32_t output_width() const override {
+		return m_n_padded_output_dims;
+	}
+
+	uint32_t required_input_alignment() const override {
+		return 1;
 	}
 
 	void set_alignment(uint32_t alignment) override {
@@ -184,16 +180,8 @@ public:
 		return 1;
 	}
 
-	bool supports_output_layout(MatrixLayout layout) const override {
-		return true;
-	}
-
-	void set_output_layout(MatrixLayout layout) override {
-		m_output_layout = layout;
-	}
-
-	MatrixLayout output_layout() const override {
-		return m_output_layout;
+	MatrixLayout preferred_output_layout() const override {
+		return SoA;
 	}
 
 	json hyperparams() const override {
@@ -214,8 +202,6 @@ private:
 	uint32_t m_n_output_dims;
 	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
-
-	MatrixLayout m_output_layout = AoS;
 };
 
 TCNN_NAMESPACE_END

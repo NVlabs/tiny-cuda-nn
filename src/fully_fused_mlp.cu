@@ -277,15 +277,12 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_backward(
 	constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0;
 	constexpr uint32_t N_BLOCKS = WIDTH / 16;
 
-	if (forward.cols() != batch_size) {
-		throw std::runtime_error{"Batch size of matrices dL_doutput and temporaries doesn't match."};
-	}
-
 	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
 
-	if (batch_size % (16 * N_ITERS) != 0) {
-		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS) + "."};
-	}
+	CHECK_THROW(forward.cols() == batch_size);
+	CHECK_THROW(batch_size % (16 * N_ITERS) == 0);
+	CHECK_THROW(dL_doutput.layout() == RM || dL_doutput.stride() == dL_doutput.m());
+	CHECK_THROW(!dL_dinput || dL_dinput->layout() == RM || dL_dinput->stride() == dL_dinput->m());
 
 	const dim3 threads = { 32u, N_BLOCKS, 1 }; // 32 threads = 1 warp, 8 warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)
 
@@ -580,25 +577,13 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	constexpr uint32_t N_BLOCK_ROWS = WIDTH / 16;
 
 	static_assert(WIDTH % 16 == 0, "Width must be a multiply of 16.");
-	if (in_width % 16 != 0) {
-		throw std::runtime_error{"Inputs must have a multiple-of-16 elements."};
-	}
 
-	if (weights.rows() != WIDTH) {
-		throw std::runtime_error{"The fully fused forward pass only works with WIDTH-sized matrices."};
-	}
-
-	if (weights.cols() % 16 != 0) {
-		throw std::runtime_error{std::string("weights must have a multiple-of-16 number of columns. ") + std::to_string(weights.cols())};
-	}
-
-	if (output_intermediate.cols() != batch_size) {
-		throw std::runtime_error{"Batch size of inputs and output_intermediate doesn't match."};
-	}
-
-	if (output && output->cols() != batch_size) {
-		throw std::runtime_error{"Batch size of inputs and outputs doesn't match."};
-	}
+	CHECK_THROW(in_width % 16 == 0);
+	CHECK_THROW(weights.rows() == WIDTH);
+	CHECK_THROW(weights.cols() % 16 == 0);
+	CHECK_THROW(output_intermediate.cols() == batch_size);
+	CHECK_THROW(!output || output->cols() == batch_size);
+	CHECK_THROW(input.layout() == RM || input.stride() == input.m());
 
 	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
 
@@ -708,20 +693,6 @@ FullyFusedMLP<T, WIDTH>::~FullyFusedMLP() {
 	}
 }
 
-template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
-	GPUMatrixDynamic<T> inference_output_tmp{m_padded_output_width, output.n(), stream, output.layout()};
-	inference_mixed_precision(stream, input, inference_output_tmp);
-
-	const uint32_t n_elements = (uint32_t)output.n_elements();
-	if (output.layout() == RM) {
-		// If the layout is row major, trimming away excess dimensions amounts to simply discarding the tail of the buffer.
-		cast_from<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, inference_output_tmp.data(), output.data());
-	} else {
-		trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, inference_output_tmp.data(), output.data());
-	}
-}
-
 template <typename CutlassLayer, MatrixLayout input_layout, typename T>
 void compute_inference_layer(
 	cudaStream_t stream,
@@ -734,26 +705,15 @@ void compute_inference_layer(
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
-	// Various error checks
-	if (input.m() != m_input_width) {
-		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
-	}
-
-	if (output.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width: ") + std::to_string(output.m()) + "!=" + std::to_string(m_output_width));
-	}
-
-	if (input.n() != output.n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
-	}
+void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
+	check_inference_mixed_precision_args(input, output);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 
 	GPUMatrix<T> inference_tmp = m_output_width > 16 ? GPUMatrix<T>{m_network_width, batch_size, stream} : GPUMatrix<T>{nullptr, m_network_width, batch_size};
 
-	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Forward;
+	const WeightUsage weight_usage = use_inference_params ? WeightUsage::Inference : WeightUsage::Forward;
 
 	// ASSUMPTION: weight matrices are contiguous in memory
 	switch (m_activation) {
@@ -774,25 +734,14 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, con
 }
 
 template <typename T, int WIDTH>
-std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
-	// Various error checks
-	if (input.m() != m_input_width) {
-		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
-	}
-
-	if (output && output->m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width (must be padded): ") + std::to_string(output->m()) + "!=" + std::to_string(m_padded_output_width));
-	}
-
-	if (output && input.n() != output->n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output->n()));
-	}
+std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
+	check_forward_args(input, output);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 	auto forward = allocate_forward_buffers(stream, batch_size);
 
-	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Forward;
+	const WeightUsage weight_usage = use_inference_params ? WeightUsage::Inference : WeightUsage::Forward;
 
 	// ASSUMPTION: weight matrices & forward_tmp matrices are contiguous in memory
 	switch (m_activation) {
@@ -822,12 +771,10 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
 	GPUMatrixDynamic<T>* dL_dinput,
-	bool use_inference_matrices,
+	bool use_inference_params,
 	EGradientMode param_gradients_mode
 ) {
-	if (dL_doutput.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
-	}
+	check_backward_args(input, output, dL_doutput, dL_dinput);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
@@ -852,7 +799,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	// - input_gradient = weights.T * output_gradient
 	// - RELU: pre_activation_gradinet = post_activation_gradient if val > 0 else 0
 
-	const WeightUsage weight_usage = use_inference_matrices ? WeightUsage::Inference : WeightUsage::Backward;
+	const WeightUsage weight_usage = use_inference_params ? WeightUsage::Inference : WeightUsage::Backward;
 	const float param_gradient_beta = param_gradients_mode == EGradientMode::Accumulate ? 1.0f : 0.0f;
 
 	{

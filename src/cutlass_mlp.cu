@@ -111,20 +111,6 @@ CutlassMLP<T>::~CutlassMLP() {
 	}
 }
 
-template <typename T>
-void CutlassMLP<T>::inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
-	GPUMatrixDynamic<T> inference_output_tmp{m_padded_output_width, output.n(), stream, output.layout()};
-	inference_mixed_precision(stream, input, inference_output_tmp);
-
-	const uint32_t n_elements = (uint32_t)output.n_elements();
-	if (output.layout() == RM) {
-		// If the layout is row major, trimming away excess dimensions amounts to simply discarding the tail of the buffer.
-		cast_from<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, inference_output_tmp.data(), output.data());
-	} else {
-		trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, inference_output_tmp.data(), output.data());
-	}
-}
-
 template <typename CutlassLayer, typename T>
 bool compute_layer(
 	cudaStream_t stream,
@@ -164,23 +150,12 @@ bool compute_inference_layer(
 }
 
 template <typename T>
-void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
-	// Various error checks
-	if (input.m() != m_input_width) {
-		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
-	}
-
-	if (output.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width: ") + std::to_string(output.m()) + "!=" + std::to_string(m_output_width));
-	}
-
-	if (input.n() != output.n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
-	}
+void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
+	check_inference_mixed_precision_args(input, output);
 
 	// If there are no hidden layers, the network is just a simple matmul.
 	if (m_n_hidden_layers == 0) {
-		compute_inference_layer<LastLayer>(stream, m_output_activation, input_weight_matrix(use_inference_matrices), input, output);
+		compute_inference_layer<LastLayer>(stream, m_output_activation, input_weight_matrix(use_inference_params), input, output);
 		return;
 	}
 
@@ -196,38 +171,27 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 			uint32_t tmp_idx = 0;
 
 			// Input layer
-			compute_inference_layer<FullLayer>(stream, m_activation, input_weight_matrix(use_inference_matrices), input, inference_tmp[tmp_idx++ % 2]);
+			compute_inference_layer<FullLayer>(stream, m_activation, input_weight_matrix(use_inference_params), input, inference_tmp[tmp_idx++ % 2]);
 
 			// Hidden layers
 			for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-				compute_inference_layer<FullLayer>(stream, m_activation, weight_matrix_at(use_inference_matrices, i), inference_tmp[(tmp_idx + 1) % 2], inference_tmp[tmp_idx % 2]);
+				compute_inference_layer<FullLayer>(stream, m_activation, weight_matrix_at(use_inference_params, i), inference_tmp[(tmp_idx + 1) % 2], inference_tmp[tmp_idx % 2]);
 				++tmp_idx;
 			}
 
 			// Output
-			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(use_inference_matrices), inference_tmp[(tmp_idx + 1) % 2], output);
+			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(use_inference_params), inference_tmp[(tmp_idx + 1) % 2], output);
 		}
 	});
 }
 
 template <typename T>
-std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
-	// Various error checks
-	if (input.m() != m_input_width) {
-		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
-	}
-
-	if (output && output->m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width (must be padded): ") + std::to_string(output->m()) + "!=" + std::to_string(m_padded_output_width));
-	}
-
-	if (output && input.n() != output->n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output->n()));
-	}
+std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
+	check_forward_args(input, output);
 
 	// If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
 	if (output && m_n_hidden_layers == 0) {
-		compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_matrices), input, *output, *output);
+		compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_params), input, *output, *output);
 		return std::make_unique<ForwardContext>(); // Nothing to save -- empty context
 	}
 
@@ -242,7 +206,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMa
 		stream,
 		false,
 		m_activation,
-		input_weight_matrix(use_inference_matrices),
+		input_weight_matrix(use_inference_params),
 		input,
 		forward->hidden.at(tmp_idx),
 		m_can_fuse_activation ? forward->hidden.at(tmp_idx) : forward->hidden.at(tmp_idx+1)
@@ -255,7 +219,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMa
 			stream,
 			false,
 			m_activation,
-			weight_matrix_at(use_inference_matrices, i),
+			weight_matrix_at(use_inference_params, i),
 			forward->hidden.at(tmp_idx-1),
 			forward->hidden.at(tmp_idx),
 			m_can_fuse_activation ? forward->hidden.at(tmp_idx) : forward->hidden.at(tmp_idx+1)
@@ -264,7 +228,7 @@ std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMa
 	}
 
 	if (output) {
-		compute_layer<LastLayer>(stream, false, m_output_activation, output_weight_matrix(use_inference_matrices), forward->hidden.at(tmp_idx-1), *output, *output);
+		compute_layer<LastLayer>(stream, false, m_output_activation, output_weight_matrix(use_inference_params), forward->hidden.at(tmp_idx-1), *output, *output);
 	}
 
 	return forward;
@@ -278,12 +242,10 @@ void CutlassMLP<T>::backward(
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
 	GPUMatrixDynamic<T>* dL_dinput,
-	bool use_inference_matrices,
+	bool use_inference_params,
 	EGradientMode param_gradients_mode
 ) {
-	if (dL_doutput.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
-	}
+	check_backward_args(input, output, dL_doutput, dL_dinput);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
@@ -327,7 +289,7 @@ void CutlassMLP<T>::backward(
 			}
 
 			if (dL_dinput) {
-				fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_matrices).transposed(), tmp_dL_doutput, *dL_dinput);
+				fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, *dL_dinput);
 			}
 
 			if (param_gradients_mode != EGradientMode::Ignore) {
@@ -351,10 +313,10 @@ void CutlassMLP<T>::backward(
 		}
 
 		if (!m_can_fuse_activation) {
-			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_matrices).transposed(), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx));
+			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx));
 			activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 		} else {
-			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_matrices).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
 		}
 
 		tmp_idx -= m_can_fuse_activation ? 1 : 2;
@@ -372,10 +334,10 @@ void CutlassMLP<T>::backward(
 			}
 
 			if (!m_can_fuse_activation) {
-				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), backward_tmp.at(backward_tmp_idx));
+				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 				activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 			} else {
-				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
 			}
 
 			tmp_idx -= m_can_fuse_activation ? 1 : 2;
@@ -392,7 +354,7 @@ void CutlassMLP<T>::backward(
 		// If requested, compute sensitivity of loss w.r.t. inputs
 		if (dL_dinput) {
 			// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_matrices).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
+			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 		}
 	}
 

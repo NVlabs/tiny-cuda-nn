@@ -56,83 +56,84 @@ void free_temporary_memory() {
 	tcnn::free_all_gpu_memory_arenas();
 }
 
-#if !defined(TCNN_NO_NETWORKS)
-class NetworkWithInputEncoding : public Module {
+template <typename T>
+class DifferentiableObject : public Module {
 public:
-	NetworkWithInputEncoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network)
-	: Module{precision<network_precision_t>(), precision<network_precision_t>()}, m_network{std::make_shared<tcnn::NetworkWithInputEncoding<network_precision_t>>(n_input_dims, n_output_dims, encoding, network)}
+	DifferentiableObject(tcnn::DifferentiableObject<float, T, T>* model)
+	: Module{precision<T>(), precision<T>()}, m_model{model}
 	{}
 
 	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
-		m_network->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
+		m_model->set_params((T*)params, (T*)params, nullptr, nullptr);
 
-		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
-		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
+		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
+		GPUMatrix<T, MatrixLayout::ColumnMajor> output_matrix((T*)output, m_model->padded_output_width(), n_elements);
 
 		// Run on our own custom stream to ensure CUDA graph capture is possible.
 		// (Significant possible speedup.)
 		SyncedMultiStream synced_stream{stream, 2};
-		m_network->inference_mixed_precision(synced_stream.get(1), input_matrix, output_matrix);
+		m_model->inference_mixed_precision(synced_stream.get(1), input_matrix, output_matrix);
 	}
 
 	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
-		m_network->set_params((network_precision_t*)params, (network_precision_t*)params, nullptr, nullptr);
+		m_model->set_params((T*)params, (T*)params, nullptr, nullptr);
 
-		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
-		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
+		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
+		GPUMatrix<T, MatrixLayout::ColumnMajor> output_matrix((T*)output, m_model->padded_output_width(), n_elements);
 
 		// Run on our own custom stream to ensure CUDA graph capture is possible.
 		// (Significant possible speedup.)
 		SyncedMultiStream synced_stream{stream, 2};
-		return { m_network->forward(synced_stream.get(1), input_matrix, &output_matrix, false, prepare_input_gradients) };
+		return { m_model->forward(synced_stream.get(1), input_matrix, &output_matrix, false, prepare_input_gradients) };
 	}
 
 	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void* output, const void* params) override {
-		m_network->set_params((network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)params, (network_precision_t*)dL_dparams);
+		m_model->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
 
-		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_network->input_width(), n_elements);
-		GPUMatrix<float, MatrixLayout::ColumnMajor> dL_dinput_matrix(dL_dinput, m_network->input_width(), n_elements);
+		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
+		GPUMatrix<float, MatrixLayout::ColumnMajor> dL_dinput_matrix(dL_dinput, m_model->input_width(), n_elements);
 
-		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> output_matrix((network_precision_t*)output, m_network->padded_output_width(), n_elements);
-		GPUMatrix<network_precision_t, MatrixLayout::ColumnMajor> dL_doutput_matrix((network_precision_t*)dL_doutput, m_network->padded_output_width(), n_elements);
+		GPUMatrix<T, MatrixLayout::ColumnMajor> output_matrix((T*)output, m_model->padded_output_width(), n_elements);
+		GPUMatrix<T, MatrixLayout::ColumnMajor> dL_doutput_matrix((T*)dL_doutput, m_model->padded_output_width(), n_elements);
 
 		// Run on our own custom stream to ensure CUDA graph capture is possible.
 		// (Significant possible speedup.)
 		SyncedMultiStream synced_stream{stream, 2};
-		m_network->backward(synced_stream.get(1), *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr, false, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
+		m_model->backward(synced_stream.get(1), *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr, false, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
 	}
 
 	uint32_t n_input_dims() const override {
-		return m_network->input_width();
+		return m_model->input_width();
 	}
 
 	size_t n_params() const override {
-		return m_network->n_params();
+		return m_model->n_params();
 	}
 
 	void initialize_params(size_t seed, float* params_full_precision) override {
 		pcg32 rng{seed};
-		m_network->initialize_params(rng, params_full_precision, nullptr, nullptr, nullptr, nullptr);
+		m_model->initialize_params(rng, params_full_precision, nullptr, nullptr, nullptr, nullptr);
 	}
 
 	uint32_t n_output_dims() const override {
-		return m_network->padded_output_width();
+		return m_model->padded_output_width();
 	}
 
 	json hyperparams() const override {
-		return m_network->hyperparams();
+		return m_model->hyperparams();
 	}
 
 	std::string name() const override {
-		return m_network->name();
+		return m_model->name();
 	}
 
 private:
-	std::shared_ptr<tcnn::NetworkWithInputEncoding<network_precision_t>> m_network;
+	std::shared_ptr<tcnn::DifferentiableObject<float, T, T>> m_model;
 };
 
+#if !defined(TCNN_NO_NETWORKS)
 Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network) {
-	return new NetworkWithInputEncoding{n_input_dims, n_output_dims, encoding, network};
+	return new DifferentiableObject<network_precision_t>{new tcnn::NetworkWithInputEncoding<network_precision_t>{n_input_dims, n_output_dims, encoding, network}};
 }
 
 Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network) {
@@ -140,92 +141,12 @@ Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json
 }
 #endif // !defined(TCNN_NO_NETWORKS)
 
-template <typename T>
-class Encoding : public Module {
-public:
-	Encoding(uint32_t n_input_dims, const json& encoding)
-	: Module{precision<T>(), precision<T>()}, m_encoding{tcnn::create_encoding<T>(n_input_dims, encoding, 0)}
-	{}
-
-	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
-		m_encoding->set_params((T*)params, (T*)params, nullptr, nullptr);
-
-		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
-		PitchedPtr<T> pitched_output((T*)output, m_encoding->num_encoded_dims());
-
-		m_encoding->encode(stream, n_elements, pitched_input, pitched_output, nullptr, true);
-	}
-
-	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
-		m_encoding->set_params((T*)params, (T*)params, nullptr, nullptr);
-
-		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
-		PitchedPtr<T> pitched_output((T*)output, m_encoding->num_encoded_dims());
-
-		auto forward = std::make_unique<ForwardContext>();
-		if (prepare_input_gradients) {
-			forward->dy_dx = prepare_input_gradients ? GPUMatrix<float>{m_encoding->num_forward_gradient_dims(), n_elements, stream} : GPUMatrix<float>{};
-		}
-
-		m_encoding->encode(stream, n_elements, pitched_input, pitched_output, forward->dy_dx.data(), false);
-
-		return { std::move(forward) };
-	}
-
-	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void*, const void* params) override {
-		m_encoding->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
-
-		PitchedPtr<const float> pitched_input(input, m_encoding->num_dims_to_encode());
-		PitchedPtr<float> pitched_dL_dinput(dL_dinput, m_encoding->num_dims_to_encode());
-		PitchedPtr<const T> pitched_dL_doutput((T*)dL_doutput, m_encoding->num_encoded_dims());
-
-		const auto& forward = dynamic_cast<const ForwardContext&>(*ctx.ctx);
-		if (dL_dinput && !forward.dy_dx.data()) {
-			throw std::runtime_error{"Encoding: forward(prepare_input_gradients) must be called before backward(dL_dinput)"};
-		}
-
-		m_encoding->backward(stream, n_elements, pitched_dL_doutput, forward.dy_dx.data(), pitched_dL_dinput, pitched_input, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
-	}
-
-	uint32_t n_input_dims() const override {
-		return m_encoding->num_dims_to_encode();
-	}
-
-	size_t n_params() const override {
-		return m_encoding->n_params();
-	}
-
-	void initialize_params(size_t seed, float* params_full_precision) override {
-		pcg32 rng{seed};
-		m_encoding->initialize_params(rng, params_full_precision, nullptr, nullptr, nullptr, nullptr);
-	}
-
-	uint32_t n_output_dims() const override {
-		return m_encoding->num_encoded_dims();
-	}
-
-	json hyperparams() const override {
-		return m_encoding->hyperparams();
-	}
-
-	std::string name() const override {
-		return m_encoding->name();
-	}
-
-private:
-	struct ForwardContext : public tcnn::Context {
-		GPUMatrix<float> dy_dx;
-	};
-
-	std::shared_ptr<tcnn::Encoding<T>> m_encoding;
-};
-
 Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision) {
 	if (requested_precision == EPrecision::Fp32) {
-		return new Encoding<float>{n_input_dims, encoding};
+		return new DifferentiableObject<float>{tcnn::create_encoding<float>(n_input_dims, encoding, 0)};
 	}
 #if TCNN_HALF_PRECISION
-	return new Encoding<__half>{n_input_dims, encoding};
+	return new DifferentiableObject<__half>{tcnn::create_encoding<__half>(n_input_dims, encoding, 0)};
 #else
 	throw std::runtime_error{"TCNN was not compiled with half-precision support."};
 #endif

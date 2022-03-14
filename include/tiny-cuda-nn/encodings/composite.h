@@ -82,7 +82,6 @@ public:
 
 			if (nested_dims_to_encode > 0) {
 				m_nested.emplace_back(create_encoding<T>(nested_dims_to_encode, nested[i], 1));
-				m_nested.back()->set_output_layout(m_output_layout);
 			}
 		}
 
@@ -96,91 +95,131 @@ public:
 				m_nested[i]->set_alignment(effective_alignmen_needed);
 			}
 
-			dims_encoded_so_far += m_nested[i]->num_encoded_dims();
+			dims_encoded_so_far += m_nested[i]->padded_output_width();
 		}
 	}
 
-	void encode(
+	std::unique_ptr<Context> forward(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const float> inputs,
-		PitchedPtr<T> outputs,
-		float* dy_dx = nullptr,
-		bool is_inference = false
-	) const override {
+		const GPUMatrixDynamic<float>& input,
+		GPUMatrixDynamic<T>* output = nullptr,
+		bool use_inference_params = false,
+		bool prepare_input_gradients = false
+	) override {
 		if (m_n_dims_to_encode == 0) {
-			return;
+			return std::make_unique<ForwardContext>();
 		}
+
+		auto forward = std::make_unique<ForwardContext>();
+		forward->nested.resize(m_nested.size());
 
 		SyncedMultiStream synced_streams{stream, m_nested.size()};
 
+		uint32_t input_offset = 0;
+		uint32_t output_offset = 0;
+
 		for (size_t i = 0; i < m_nested.size(); ++i) {
 			const auto& nested = m_nested[i];
-			nested->encode(synced_streams.get(i), num_elements, inputs, outputs, dy_dx, is_inference);
+			uint32_t input_width = nested->input_width();
+			uint32_t output_width = nested->output_width();
 
-			inputs.ptr += nested->num_dims_to_encode();
-			outputs.ptr += nested->num_encoded_dims() * (m_output_layout == SoA ? num_elements : 1);
-			if (dy_dx) {
-				dy_dx += nested->num_forward_gradient_dims() * num_elements;
+			GPUMatrixDynamic<T> sliced_output;
+			if (output) {
+				sliced_output = output->slice_rows(output_offset, output_width);
 			}
+
+			forward->nested[i] = nested->forward(
+				stream,
+				input.slice_rows(input_offset, input_width),
+				output ? &sliced_output : nullptr,
+				use_inference_params,
+				prepare_input_gradients
+			);
+
+			input_offset += input_width;
+			output_offset += output_width;
 		}
+
+		return forward;
 	}
 
 	void backward(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const T> dL_dy, // Same shape as outputs
-		const float* dy_dx, // encoded output dims x num_elements
-		PitchedPtr<float> dL_dx, // Same shape as inputs
-		PitchedPtr<const float> inputs,
-		EGradientMode param_gradients_mode
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<T>& output,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
 		if (m_n_dims_to_encode == 0) {
 			return;
 		}
 
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+		if (forward.nested.size() != m_nested.size()) {
+			throw std::runtime_error{"CompositeEncoding::backward called with incompatible context size."};
+		}
+
 		SyncedMultiStream synced_streams{stream, m_nested.size()};
+
+		uint32_t input_offset = 0;
+		uint32_t output_offset = 0;
 
 		for (size_t i = 0; i < m_nested.size(); ++i) {
 			const auto& nested = m_nested[i];
-			nested->backward(synced_streams.get(i), num_elements, dL_dy, dy_dx, dL_dx, inputs, param_gradients_mode);
+			uint32_t input_width = nested->input_width();
+			uint32_t output_width = nested->output_width();
 
-			dL_dy.ptr += nested->num_encoded_dims() * (m_output_layout == SoA ? num_elements : 1);;
-			if (dy_dx) {
-				dy_dx += nested->num_forward_gradient_dims() * num_elements;
+			GPUMatrixDynamic<float> sliced_dL_dinput;
+			if (dL_dinput) {
+				sliced_dL_dinput = dL_dinput->slice_rows(input_offset, input_width);
 			}
-			if (dL_dx) {
-				dL_dx.ptr += nested->num_dims_to_encode();
-			}
-			if (inputs) {
-				inputs.ptr += nested->num_dims_to_encode();
-			}
+
+			nested->backward(
+				synced_streams.get(i),
+				*forward.nested[i],
+				input.slice_rows(input_offset, input_width),
+				output.slice_rows(output_offset, output_width),
+				dL_doutput.slice_rows(output_offset, output_width),
+				dL_dinput ? &sliced_dL_dinput : nullptr,
+				use_inference_params,
+				param_gradients_mode
+			);
+
+			input_offset += input_width;
+			output_offset += output_width;
 		}
 	}
 
-	uint32_t num_dims_to_encode() const override {
+	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
 	}
 
-	uint32_t num_encoded_dims() const override {
+	uint32_t padded_output_width() const override {
 		uint32_t total = 0;
 		for (const auto& nested : m_nested) {
-			total += nested->num_encoded_dims();
+			total += nested->padded_output_width();
 		}
 		return total;
 	}
 
-	uint32_t num_forward_gradient_dims() const override {
+	uint32_t output_width() const override {
 		uint32_t total = 0;
 		for (const auto& nested : m_nested) {
-			total += nested->num_forward_gradient_dims();
+			total += nested->output_width();
 		}
 		return total;
+	}
+
+	uint32_t required_input_alignment() const override {
+		return 1;
 	}
 
 	void set_alignment(uint32_t alignment) override {
-		uint32_t n_dims = num_encoded_dims();
-		uint32_t last_n_dims = m_nested.back()->num_encoded_dims();
+		uint32_t n_dims = padded_output_width();
+		uint32_t last_n_dims = m_nested.back()->padded_output_width();
 
 		uint32_t desired_n_dims = next_multiple(n_dims, alignment);
 		m_nested.back()->set_alignment(desired_n_dims - (n_dims - last_n_dims));
@@ -190,7 +229,7 @@ public:
 		return 1;
 	}
 
-	bool supports_output_layout(MatrixLayout layout) const override {
+	bool supports_output_layout(MatrixLayout layout) const {
 		// Only supports layout if all nested encodings do
 		bool result = true;
 		for (const auto& nested : m_nested) {
@@ -200,16 +239,15 @@ public:
 		return result;
 	}
 
-	void set_output_layout(MatrixLayout layout) override {
-		for (auto&& nested : m_nested) {
-			nested->set_output_layout(layout);
+	MatrixLayout preferred_output_layout() const override {
+		// All encodings support AoS, so if any prefers AoS, use that.
+		for (const auto& nested : m_nested) {
+			if (nested->preferred_output_layout() == AoS) {
+				return AoS;
+			}
 		}
 
-		m_output_layout = layout;
-	}
-
-	MatrixLayout output_layout() const override {
-		return m_output_layout;
+		return SoA;
 	}
 
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
@@ -249,6 +287,10 @@ public:
 	}
 
 private:
+	struct ForwardContext : public Context {
+		std::vector<std::unique_ptr<Context>> nested;
+	};
+
 	std::vector<std::unique_ptr<Encoding<T>>> m_nested;
 	uint32_t m_n_dims_to_encode;
 

@@ -48,49 +48,23 @@ InterpolationType string_to_interpolation_type(const std::string& interpolation_
 std::string to_string(InterpolationType interpolation_type);
 
 template <typename T>
-class Encoding : public ParametricObject<T> {
+class Encoding : public DifferentiableObject<float, T, T> {
 public:
 	virtual ~Encoding() { }
 
-	virtual void encode(
+	void inference_mixed_precision(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const float> inputs,
-		PitchedPtr<T> outputs,
-		float* dy_dx = nullptr, // Gradient of output w.r.t. the generating input variable. num_forward_gradient_dims() x num_elements
-		bool is_inference = false
-	) const = 0;
-
-	virtual void backward(
-		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const T> dL_dy, // Same shape as outputs
-		const float* dy_dx, // encoded output dims x num_elements
-		PitchedPtr<float> dL_dx, // Same shape as inputs
-		PitchedPtr<const float> inputs = {},
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
-	) = 0;
-
-	virtual uint32_t num_dims_to_encode() const = 0;
-	virtual uint32_t num_encoded_dims() const = 0;
-	virtual uint32_t num_forward_gradient_dims() const = 0;
+		const GPUMatrixDynamic<float>& input,
+		GPUMatrixDynamic<T>& output,
+		bool use_inference_params = true
+	) override {
+		this->forward(stream, input, &output, use_inference_params, false);
+	}
 
 	virtual void set_alignment(uint32_t alignment) = 0;
 	virtual uint32_t min_alignment() const = 0;
 
-	virtual bool supports_output_layout(MatrixLayout layout) const {
-		return layout == AoS;
-	}
-
-	virtual void set_output_layout(MatrixLayout layout) {
-		if (layout == SoA) {
-			throw std::runtime_error{"Encoding does not support SoA outputs."};
-		}
-	}
-
-	virtual MatrixLayout output_layout() const {
-		return AoS;
-	}
+	virtual MatrixLayout preferred_output_layout() const = 0;
 
 	// By default, an encoding has no parameters
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override { }

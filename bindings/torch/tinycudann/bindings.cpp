@@ -47,6 +47,12 @@
 
 #include <tiny-cuda-nn/cpp_api.h>
 
+#define STRINGIFY(x) #x
+#define STR(x) STRINGIFY(x)
+#define FILE_LINE __FILE__ ":" STR(__LINE__)
+#define CHECK_THROW(x) \
+	do { if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); } while(0)
+
 c10::ScalarType torch_type(tcnn::cpp::EPrecision precision) {
 	switch (precision) {
 		case tcnn::cpp::EPrecision::Fp32: return torch::kFloat32;
@@ -68,23 +74,13 @@ public:
 	Module(tcnn::cpp::Module* module) : m_module{module} {}
 
 	std::tuple<tcnn::cpp::Context, torch::Tensor> fwd(torch::Tensor input, torch::Tensor params) {
-		// Check for correct types
-		if (input.scalar_type() != torch::kFloat32) {
-			throw std::runtime_error{"Module::fwd: invalid input type"};
-		}
+		// Types
+		CHECK_THROW(input.scalar_type() == torch::kFloat32);
+		CHECK_THROW(params.scalar_type() == c10_param_precision());
 
-		if (params.scalar_type() != c10_param_precision()) {
-			throw std::runtime_error{"Module::fwd: invalid param type"};
-		}
-
-		// Check for correct sizes
-		if (input.size(1) != n_input_dims()) {
-			throw std::runtime_error{"Module::fwd: invalid number of input dimensions"};
-		}
-
-		if (params.size(0) != n_params()) {
-			throw std::runtime_error{"Module::fwd: invalid number of params"};
-		}
+		// Sizes
+		CHECK_THROW(input.size(1) == n_input_dims());
+		CHECK_THROW(params.size(0) == n_params());
 
 		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -106,40 +102,20 @@ public:
 			throw std::runtime_error{"Module::bwd: called with invalid context. fwd likely (mistakenly) ran in inference mode."};
 		}
 
-		// Check for correct types
-		if (input.scalar_type() != torch::kFloat32) {
-			throw std::runtime_error{"Module::bwd: invalid input type"};
-		}
+		// Types
+		CHECK_THROW(input.scalar_type() == torch::kFloat32);
+		CHECK_THROW(params.scalar_type() == c10_param_precision());
+		CHECK_THROW(output.scalar_type() == c10_output_precision());
+		CHECK_THROW(dL_doutput.scalar_type() == c10_output_precision());
 
-		if (params.scalar_type() != c10_param_precision()) {
-			throw std::runtime_error{"Module::bwd: invalid param type"};
-		}
-
-		if (output.scalar_type() != c10_output_precision()) {
-			throw std::runtime_error{"Module::bwd: invalid output type"};
-		}
-
-		if (dL_doutput.scalar_type() != c10_output_precision()) {
-			throw std::runtime_error{"Module::bwd: invalid output gradient type"};
-		}
-
-		// Check for correct sizes
-		if (input.size(1) != n_input_dims()) {
-			throw std::runtime_error{"Module::bwd: invalid number of input dimensions"};
-		}
-
-		if (output.size(1) != n_output_dims()) {
-			throw std::runtime_error{"Module::bwd: invalid number of output dimensions"};
-		}
-
-		if (params.size(0) != n_params()) {
-			throw std::runtime_error{"Module::bwd: invalid number of params"};
-		}
+		// Sizes
+		CHECK_THROW(input.size(1) == n_input_dims());
+		CHECK_THROW(output.size(1) == n_output_dims());
+		CHECK_THROW(params.size(0) == n_params());
+		CHECK_THROW(output.size(0) == input.size(0));
+		CHECK_THROW(dL_doutput.size(0) == input.size(0));
 
 		uint32_t batch_size = input.size(0);
-		if (output.size(0) != batch_size || dL_doutput.size(0) != batch_size) {
-			throw std::runtime_error{"Module::bwd: batch size mismatch"};
-		}
 
 		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 

@@ -60,4 +60,16 @@ void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float fact
 template void mult(cudaStream_t stream, const uint32_t num_elements, float* inout, float factor);
 template void mult(cudaStream_t stream, const uint32_t num_elements, __half* inout, float factor);
 
+template <typename T>
+void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const T* in, float* out) {
+	if (layout == RM) {
+		linear_kernel(cast_from<T>, 0, stream, num_elements, in, out);
+	} else {
+		linear_kernel(trim_and_cast<T>, 0, stream, num_elements, input_width, output_width, in, out);
+	}
+}
+
+template void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const float* in, float* out);
+template void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const __half* in, float* out);
+
 TCNN_NAMESPACE_END
