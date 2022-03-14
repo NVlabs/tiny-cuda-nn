@@ -415,10 +415,10 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		using Gemm = OurGemm<ActivationTransferOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), A.stride()},
-			{(MatmulTypeCompute*)B.data(), B.stride()},
-			{(MatmulTypeAccumulator*)C.data(), C.stride()},
-			{(MatmulTypeAccumulator*)D.data(), D.stride()},
+			{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+			{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+			{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+			{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 			{act},
 			1
 		};
@@ -428,10 +428,10 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		using Gemm = OurGemm<ActivationOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), A.stride()},
-			{(MatmulTypeCompute*)B.data(), B.stride()},
-			{(MatmulTypeAccumulator*)C.data(), C.stride()},
-			{(MatmulTypeAccumulator*)D.data(), D.stride()},
+			{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+			{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+			{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+			{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 			{act, sum_source},
 			1
 		};
@@ -510,10 +510,10 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	using Gemm = SplitKGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 	typename Gemm::Arguments arguments{
 		{M, N, K},
-		{(MatmulTypeCompute*)A.data(), A.stride()},
-		{(MatmulTypeCompute*)B.data(), B.stride()},
-		{(MatmulTypeAccumulator*)C.data(), C.stride()},
-		{(MatmulTypeAccumulator*)D.data(), D.stride()},
+		{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+		{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+		{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+		{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 		{(TypeCompute)1.0f, (TypeCompute)beta},
 		split_k_slices
 	};
