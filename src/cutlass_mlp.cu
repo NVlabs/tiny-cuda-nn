@@ -151,7 +151,7 @@ bool compute_inference_layer(
 
 template <typename T>
 void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
-	check_inference_mixed_precision_args(input, output);
+	this->check_inference_mixed_precision_args(input, output);
 
 	// If there are no hidden layers, the network is just a simple matmul.
 	if (m_n_hidden_layers == 0) {
@@ -187,7 +187,7 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 
 template <typename T>
 std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
-	check_forward_args(input, output);
+	this->check_forward_args(input, output);
 
 	// If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
 	if (output && m_n_hidden_layers == 0) {
@@ -245,7 +245,7 @@ void CutlassMLP<T>::backward(
 	bool use_inference_params,
 	EGradientMode param_gradients_mode
 ) {
-	check_backward_args(input, output, dL_doutput, dL_dinput);
+	this->check_backward_args(input, output, dL_doutput, dL_dinput);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();

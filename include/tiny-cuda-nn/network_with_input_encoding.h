@@ -57,7 +57,7 @@ public:
 	virtual ~NetworkWithInputEncoding() { }
 
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override {
-		check_inference_mixed_precision_args(input, output);
+		this->check_inference_mixed_precision_args(input, output);
 
 		GPUMatrixDynamic<T> network_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		m_encoding->inference_mixed_precision(stream, input, network_input, use_inference_params);
@@ -69,7 +69,7 @@ public:
 	}
 
 	std::unique_ptr<Context> forward(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override {
-		check_forward_args(input, output);
+		this->check_forward_args(input, output);
 
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
@@ -93,7 +93,7 @@ public:
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
-		check_backward_args(input, output, dL_doutput, dL_dinput);
+		this->check_backward_args(input, output, dL_doutput, dL_dinput);
 
 		GPUMatrixDynamic<T> dL_dnetwork_input;
 		if (m_encoding->n_params() > 0 || dL_dinput) {

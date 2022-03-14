@@ -102,7 +102,7 @@ CutlassResNet<T, input_activation>::~CutlassResNet() {
 
 template <typename T, Activation input_activation>
 void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
-	check_inference_mixed_precision_args(input, output);
+	this->check_inference_mixed_precision_args(input, output);
 
 	uint32_t batch_size = input.n();
 
@@ -151,7 +151,7 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 
 template <typename T, Activation input_activation>
 std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
-	check_forward_args(input, output);
+	this->check_forward_args(input, output);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
@@ -219,7 +219,7 @@ void CutlassResNet<T, input_activation>::backward(
 	bool use_inference_params,
 	EGradientMode param_gradients_mode
 ) {
-	check_backward_args(input, output, dL_doutput, dL_dinput);
+	this->check_backward_args(input, output, dL_doutput, dL_dinput);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
