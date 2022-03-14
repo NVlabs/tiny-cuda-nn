@@ -101,33 +101,8 @@ CutlassResNet<T, input_activation>::~CutlassResNet() {
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
-	GPUMatrixDynamic<T> inference_output_tmp{m_padded_output_width, output.n(), stream, output.layout()};
-	inference_mixed_precision(stream, input, inference_output_tmp);
-
-	const uint32_t n_elements = (uint32_t)output.n_elements();
-	if (output.layout() == RM) {
-		// If the layout is row major, trimming away excess dimensions amounts to simply discarding the tail of the buffer.
-		cast_from<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, inference_output_tmp.data(), output.data());
-	} else {
-		trim_and_cast<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_padded_output_width, m_output_width, inference_output_tmp.data(), output.data());
-	}
-}
-
-template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices) {
-	// Various error checks
-	if (input.m() != m_input_width) {
-		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
-	}
-
-	if (output.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width: ") + std::to_string(output.m()) + "!=" + std::to_string(m_output_width));
-	}
-
-	if (input.n() != output.n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
-	}
+void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
+	this->check_inference_mixed_precision_args(input, output);
 
 	uint32_t batch_size = input.n();
 
@@ -140,14 +115,14 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 	// Run the actual network
 	{
 		// Input
-		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_matrices), input, inference_linear_tmp, inference_linear_tmp, input_activation);
+		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params), input, inference_linear_tmp, inference_linear_tmp, input_activation);
 
 		// Res blocks
 		for (uint32_t i = 0; i < m_n_blocks; ++i) {
-			fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), inference_linear_tmp, inference_residual_tmp[0]);
+			fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_params, i, 0), inference_linear_tmp, inference_residual_tmp[0]);
 
 			for (uint32_t matrix_idx = 1; matrix_idx < m_n_matrices_per_block - 1; ++matrix_idx) {
-				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, matrix_idx), inference_residual_tmp[(matrix_idx+1) % 2], inference_residual_tmp[matrix_idx % 2]);
+				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_params, i, matrix_idx), inference_residual_tmp[(matrix_idx+1) % 2], inference_residual_tmp[matrix_idx % 2]);
 			}
 
 			// In case there's just 1 matrix per block, the remaining addition must be done manually
@@ -158,7 +133,7 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 				uint32_t matrix_idx = m_n_matrices_per_block - 1;
 				fc_multiply<FullLayerPreReLU>(
 					stream,
-					weight_matrix_at(use_inference_matrices, i, matrix_idx),
+					weight_matrix_at(use_inference_params, i, matrix_idx),
 					inference_residual_tmp[(matrix_idx+1) % 2],
 					inference_linear_tmp,
 					inference_linear_tmp,
@@ -170,24 +145,13 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 		}
 
 		// Output
-		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), inference_linear_tmp, output, m_output_activation);
+		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_params), inference_linear_tmp, output, m_output_activation);
 	}
 }
 
 template <typename T, Activation input_activation>
-std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_matrices, bool prepare_input_gradients) {
-	// Various error checks
-	if (input.m() != m_input_width) {
-		throw std::runtime_error(std::string("Input has incorrect width: ") + std::to_string(input.m()) + "!=" + std::to_string(m_input_width));
-	}
-
-	if (output && output->m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output has incorrect width (must be padded): ") + std::to_string(output->m()) + "!=" + std::to_string(m_padded_output_width));
-	}
-
-	if (output && input.n() != output->n()) {
-		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output->n()));
-	}
+std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
+	this->check_forward_args(input, output);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
@@ -198,7 +162,7 @@ std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_
 	// Run the actual network
 	{
 		auto& input_target = input_activation_value == Activation::None ? forward->hidden.front() : forward->input;
-		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_matrices), input, input_target);
+		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params), input, input_target);
 		activation_gpu(stream, input_activation_value, input_target, forward->hidden.front());
 
 		// Res blocks
@@ -206,21 +170,21 @@ std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_
 			uint32_t idx = i * m_n_matrices_per_block + 1;
 
 			if (m_n_matrices_per_block == 1) {
-				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), forward->hidden.at(idx-1), forward->hidden.at(idx));
+				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_params, i, 0), forward->hidden.at(idx-1), forward->hidden.at(idx));
 				add<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, forward->hidden.at(idx-1).data(), forward->hidden.at(idx).data());
 			} else {
-				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), forward->hidden.at(idx-1), forward->hidden.at(idx), Activation::ReLU);
+				fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_params, i, 0), forward->hidden.at(idx-1), forward->hidden.at(idx), Activation::ReLU);
 
 				for (uint32_t matrix_idx = 1; matrix_idx < m_n_matrices_per_block - 1; ++matrix_idx) {
 					uint32_t fwd_idx = idx + matrix_idx;
-					fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, i, matrix_idx), forward->hidden.at(fwd_idx-1), forward->hidden.at(fwd_idx), Activation::ReLU);
+					fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, i, matrix_idx), forward->hidden.at(fwd_idx-1), forward->hidden.at(fwd_idx), Activation::ReLU);
 				}
 
 				uint32_t matrix_idx = m_n_matrices_per_block - 1;
 				uint32_t fwd_idx = idx + matrix_idx;
 				fc_multiply<FullLayer>(
 					stream,
-					weight_matrix_at(use_inference_matrices, i, matrix_idx),
+					weight_matrix_at(use_inference_params, i, matrix_idx),
 					forward->hidden.at(fwd_idx-1),
 					forward->hidden.at(idx-1),
 					forward->hidden.at(fwd_idx),
@@ -237,7 +201,7 @@ std::unique_ptr<Context> CutlassResNet<T, input_activation>::forward(cudaStream_
 		}
 
 		if (output) {
-			fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), forward->hidden.back(), *output, m_output_activation);
+			fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_params), forward->hidden.back(), *output, m_output_activation);
 		}
 	}
 
@@ -252,12 +216,10 @@ void CutlassResNet<T, input_activation>::backward(
 	const GPUMatrixDynamic<T>& output,
 	const GPUMatrixDynamic<T>& dL_doutput,
 	GPUMatrixDynamic<T>* dL_dinput,
-	bool use_inference_matrices,
+	bool use_inference_params,
 	EGradientMode param_gradients_mode
 ) {
-	if (dL_doutput.m() != m_padded_output_width) {
-		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
-	}
+	this->check_backward_args(input, output, dL_doutput, dL_dinput);
 
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
@@ -298,7 +260,7 @@ void CutlassResNet<T, input_activation>::backward(
 			cudaEventRecord(m_training_splitk_events.back(), m_training_splitk_streams.back());
 		}
 
-		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_matrices).transposed(), tmp_dL_doutput, backward_tmp.back());
+		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, backward_tmp.back());
 
 		// Res blocks
 		for (uint32_t i = 0; i < m_n_blocks; ++i) {
@@ -316,7 +278,7 @@ void CutlassResNet<T, input_activation>::backward(
 					cudaEventRecord(m_training_splitk_events.at(fwd_idx), m_training_splitk_streams.at(fwd_idx));
 				}
 
-				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, block_idx, matrix_idx).transposed(), backward_tmp.at(fwd_idx), forward.hidden.at(fwd_idx-1), backward_tmp.at(fwd_idx-1), Activation::ReLU, true);
+				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, block_idx, matrix_idx).transposed(), backward_tmp.at(fwd_idx), forward.hidden.at(fwd_idx-1), backward_tmp.at(fwd_idx-1), Activation::ReLU, true);
 			}
 
 			add<T><<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, backward_tmp.at(idx+m_n_matrices_per_block-1).data(), backward_tmp.at(idx-1).data());
@@ -334,7 +296,7 @@ void CutlassResNet<T, input_activation>::backward(
 		// If requested, compute sensitivity of loss w.r.t. inputs
 		if (dL_dinput) {
 			// TODO: optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_matrices).transposed(), backward_tmp.front(), *dL_dinput);
+			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.front(), *dL_dinput);
 		}
 	}
 

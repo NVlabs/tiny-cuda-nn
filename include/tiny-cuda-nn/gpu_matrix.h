@@ -115,17 +115,21 @@ public:
 	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM)
 	: m_owned_data{m * n}, m_rows{m}, m_cols{n}, m_layout{layout} {
 		m_data = m_owned_data.data();
+		set_stride_dense();
 	}
 
 	// Owning its memory as an allocation from a stream's memory arena
 	GPUMatrixDynamic(uint32_t m, uint32_t n, cudaStream_t stream, MatrixLayout layout = CM)
 	: m_arena_data{allocate_workspace(stream, m * n * sizeof(T))}, m_rows{m}, m_cols{n}, m_layout{layout} {
 		m_data = (T*)m_arena_data.data();
+		set_stride_dense();
 	}
 
 	// Pointing to external memory
-	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM)
-	: m_data{data}, m_rows{m}, m_cols{n}, m_layout{layout} {}
+	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM, uint32_t stride = 0)
+	: m_data{data}, m_layout{layout} {
+		set_size(m, n, stride);
+	}
 
 	GPUMatrixDynamic() : GPUMatrixDynamic(nullptr, 0, 0) {}
 
@@ -133,6 +137,7 @@ public:
 		std::swap(m_data, other.m_data);
 		std::swap(m_rows, other.m_rows);
 		std::swap(m_cols, other.m_cols);
+		std::swap(m_stride, other.m_stride);
 		std::swap(m_layout, other.m_layout);
 		std::swap(m_owned_data, other.m_owned_data);
 		std::swap(m_arena_data, other.m_arena_data);
@@ -158,14 +163,42 @@ public:
 	virtual ~GPUMatrixDynamic() {}
 
 	void set_data(void* data) override { m_data = (T*)data; }
-	void set_size(uint32_t rows, uint32_t cols) {
+	void set_size(uint32_t rows, uint32_t cols, uint32_t stride = 0) {
 		m_rows = rows;
 		m_cols = cols;
+
+		if (stride == 0) {
+			set_stride_dense();
+		} else {
+			m_stride = stride;
+		}
 	}
 
-	void set(T* data, uint32_t rows, uint32_t cols) {
+	void set(T* data, uint32_t rows, uint32_t cols, uint32_t stride = 0) {
 		set_data(data);
-		set_size(rows, cols);
+		set_size(rows, cols, stride);
+	}
+
+	void set_stride_dense() {
+		m_stride = m_layout == CM ? m() : n();
+	}
+
+	GPUMatrixDynamic<T> slice(uint32_t offset_rows, uint32_t new_rows, uint32_t offset_cols, uint32_t new_cols) const {
+		return GPUMatrixDynamic<T>(
+			data() + (layout() == CM ? (offset_rows + offset_cols * m_stride) : (offset_cols + offset_rows * m_stride)),
+			new_rows,
+			new_cols,
+			layout(),
+			stride()
+		);
+	}
+
+	GPUMatrixDynamic<T> slice_rows(uint32_t offset, uint32_t size) const {
+		return slice(offset, size, 0, cols());
+	}
+
+	GPUMatrixDynamic<T> slice_cols(uint32_t offset, uint32_t size) const {
+		return slice(0, rows(), offset, size);
 	}
 
 	uint32_t rows() const { return m_rows; }
@@ -176,14 +209,17 @@ public:
 	uint32_t fan_in() const { return m_cols; }
 	uint32_t n() const { return m_cols; }
 
+	uint32_t stride() const { return m_stride; }
+	PitchedPtr<T> pitched_ptr() { return {data(), stride()}; }
+	PitchedPtr<const T> pitched_ptr() const { return {data(), stride()}; }
+
 	uint32_t n_elements() const { return m_rows * m_cols; }
 	size_t n_bytes() const override { return n_elements() * sizeof(T); }
 
 	MatrixLayout layout() const { return m_layout; }
 	MatrixLayout transposed_layout() const { return m_layout == RM ? CM : RM; }
 
-	T* data() { return m_data; }
-	const T* data() const { return m_data; }
+	T* data() const { return m_data; }
 
 	void memset(int value) {
 		CUDA_CHECK_THROW(cudaMemset(data(), value, n_bytes()));
@@ -312,29 +348,13 @@ public:
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
-	const GPUMatrixDynamic<T> transposed() const {
-		return std::move(GPUMatrixDynamic<T>(m_data, n(), m(), transposed_layout()));
-	}
-
-	GPUMatrixDynamic<T> transposed() {
-		return std::move(GPUMatrixDynamic<T>(m_data, n(), m(), transposed_layout()));
-	}
-
-	const GPUMatrixDynamic<T> with_opposite_layout() const {
-		return std::move(GPUMatrixDynamic<T>(m_data, m(), n(), transposed_layout()));
-	}
-
-	GPUMatrixDynamic<T> with_opposite_layout() {
-		return std::move(GPUMatrixDynamic<T>(m_data, m(), n(), transposed_layout()));
-	}
-
-	virtual void set_layout(MatrixLayout layout) {
-		m_layout = layout;
+	GPUMatrixDynamic<T> transposed() const {
+		return GPUMatrixDynamic<T>(data(), n(), m(), transposed_layout(), stride());
 	}
 
 private:
 	T* m_data;
-	uint32_t m_rows, m_cols;
+	uint32_t m_rows, m_cols, m_stride;
 	MatrixLayout m_layout;
 	GPUMemory<T> m_owned_data;
 	GPUMemoryArena::Allocation m_arena_data;
@@ -355,8 +375,8 @@ public:
 	: GPUMatrixDynamic<T>{m, n, stream, static_layout} { }
 
 	// Pointing to external memory
-	explicit GPUMatrix(T* data, uint32_t m, uint32_t n)
-	: GPUMatrixDynamic<T>{data, m, n, static_layout} { }
+	explicit GPUMatrix(T* data, uint32_t m, uint32_t n, uint32_t stride = 0)
+	: GPUMatrixDynamic<T>{data, m, n, static_layout, stride} { }
 
 	GPUMatrix() : GPUMatrix(nullptr, 0, 0) {}
 
@@ -391,24 +411,20 @@ public:
 
 	virtual ~GPUMatrix() {}
 
-	void set_layout(MatrixLayout layout) override {
-		throw std::runtime_error{"Cannot set the layout of a GPUMatrix at runtime (it is determined by the type system). Use GPUMatrixDynamic instead."};
+	GPUMatrix<T, static_layout> slice(uint32_t offset_rows, uint32_t new_rows, uint32_t offset_cols, uint32_t new_cols) const {
+		return ((GPUMatrixDynamic<T>*)this)->slice(offset_rows, new_rows, offset_cols, new_cols);
 	}
 
-	const GPUMatrix<T, static_transposed_layout> transposed() const {
-		return std::move(GPUMatrix<T, static_transposed_layout>(const_cast<T*>(this->data()), this->n(), this->m()));
+	GPUMatrix<T, static_layout> slice_rows(uint32_t offset, uint32_t size) const {
+		return ((GPUMatrixDynamic<T>*)this)->slice_rows(offset, size);
 	}
 
-	GPUMatrix<T, static_transposed_layout> transposed() {
-		return std::move(GPUMatrix<T, static_transposed_layout>(this->data(), this->n(), this->m()));
+	GPUMatrix<T, static_layout> slice_cols(uint32_t offset, uint32_t size) const {
+		return ((GPUMatrixDynamic<T>*)this)->slice_cols(offset, size);
 	}
 
-	const GPUMatrix<T, static_transposed_layout> with_opposite_layout() const {
-		return std::move(GPUMatrix<T, static_transposed_layout>(const_cast<T*>(this->data()), this->m(), this->n()));
-	}
-
-	GPUMatrix<T, static_transposed_layout> with_opposite_layout() {
-		return std::move(GPUMatrix<T, static_transposed_layout>(this->data(), this->m(), this->n()));
+	GPUMatrix<T, static_transposed_layout> transposed() const {
+		return GPUMatrix<T, static_transposed_layout>(this->data(), this->n(), this->m(), this->stride());
 	}
 };
 

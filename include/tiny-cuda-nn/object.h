@@ -79,6 +79,9 @@ void one_hot_batched(cudaStream_t stream, const uint32_t num_elements, const uin
 template <typename T>
 void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float factor);
 
+template <typename T>
+void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const T* in, float* out);
+
 enum class EGradientMode {
 	Ignore,
 	Overwrite,
@@ -90,7 +93,31 @@ class DifferentiableObject : public ParametricObject<PARAMS_T> {
 public:
 	virtual ~DifferentiableObject() { }
 
-	virtual void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) = 0;
+	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) = 0;
+	void inference_mixed_precision(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) {
+		inference_mixed_precision(nullptr, input, output, use_inference_params);
+	}
+
+	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
+		check_inference_args(input, output);
+
+		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
+		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
+			inference_output_tmp = GPUMatrixDynamic<COMPUTE_T>{(COMPUTE_T*)output.data(), output.m(), output.n(), output.layout()};
+		} else {
+			inference_output_tmp = GPUMatrixDynamic<COMPUTE_T>{padded_output_width(), output.n(), stream, output.layout()};
+		}
+
+		inference_mixed_precision(stream, input, inference_output_tmp);
+
+		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
+			return;
+		}
+
+		const uint32_t n_elements = (uint32_t)output.n_elements();
+		trim_and_cast_from(stream, output.layout(), n_elements, padded_output_width(), output_width(), inference_output_tmp.data(), output.data());
+	}
+
 	void inference(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
 		inference(nullptr, input, output);
 	}
@@ -99,16 +126,16 @@ public:
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
-		bool use_inference_matrices = false,
+		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	) = 0;
 	std::unique_ptr<Context> forward(
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
-		bool use_inference_matrices = false,
+		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	) {
-		return forward(nullptr, input, output, use_inference_matrices, prepare_input_gradients);
+		return forward(nullptr, input, output, use_inference_params, prepare_input_gradients);
 	}
 
 	virtual void backward(
@@ -118,7 +145,7 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& output,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
-		bool use_inference_matrices = false,
+		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) = 0;
 	void backward(
@@ -127,10 +154,10 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& output,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
-		bool use_inference_matrices = false,
+		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) {
-		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_matrices, param_gradients_mode);
+		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
 	void input_gradient(
@@ -159,10 +186,48 @@ public:
 		mult(stream, d_dinput.n_elements(), d_dinput.data(), 1.0f / backprop_scale);
 	}
 
+	virtual uint32_t input_width() const = 0;
+
 	virtual uint32_t padded_output_width() const = 0;
 	virtual uint32_t output_width() const = 0;
 
 	virtual uint32_t required_input_alignment() const = 0;
+
+	void check_inference_args(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(output.m() == output_width());
+		CHECK_THROW(input.n() == output.n());
+	}
+
+	void check_inference_mixed_precision_args(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output) {
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(output.m() == padded_output_width());
+		CHECK_THROW(input.n() == output.n());
+	}
+
+	void check_forward_args(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>* output) {
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(!output || output->m() == padded_output_width());
+		CHECK_THROW(!output || input.n() == output->n());
+	}
+
+	void check_backward_args(
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<COMPUTE_T>& output,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_dinput
+	) {
+		// Width
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(output.m() == padded_output_width());
+		CHECK_THROW(dL_doutput.m() == padded_output_width());
+		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
+
+		// Equal batch size
+		CHECK_THROW(input.n() == output.n());
+		CHECK_THROW(input.n() == dL_doutput.n());
+		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
+	}
 };
 
 TCNN_NAMESPACE_END

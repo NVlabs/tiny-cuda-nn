@@ -411,19 +411,14 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
 	}
 
-	const int lda = LayoutA == RM ? A.n() : A.m();
-	const int ldb = LayoutB == RM ? B.n() : B.m();
-	const int ldc = LayoutC == RM ? C.n() : C.m();
-	const int ldd = LayoutD == RM ? D.n() : D.m();
-
 	if (transfer) {
 		using Gemm = OurGemm<ActivationTransferOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
+			{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+			{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+			{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+			{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 			{act},
 			1
 		};
@@ -433,10 +428,10 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		using Gemm = OurGemm<ActivationOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
+			{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+			{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+			{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+			{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 			{act, sum_source},
 			1
 		};
@@ -469,7 +464,7 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		fc_multiply<config>(stream, A, B_CM, C, D, act, transfer, sum_source);
 	} else {
 		auto B_RM = GPUMatrix<TypeB, RM>{B};
-		// Only column-major output is supported by CUTLASS, then B is row-major.
+		// Only column-major output is supported by CUTLASS when B is row-major.
 		// The following constructors will throw if that assumption isn't met.
 		auto C_CM = GPUMatrix<TypeC, CM>{C};
 		auto D_CM = GPUMatrix<TypeD, CM>{D};
@@ -512,18 +507,13 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
 	}
 
-	const int lda = LayoutA == RM ? A.n() : A.m();
-	const int ldb = LayoutB == RM ? B.n() : B.m();
-	const int ldc = LayoutC == RM ? C.n() : C.m();
-	const int ldd = LayoutD == RM ? D.n() : D.m();
-
 	using Gemm = SplitKGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 	typename Gemm::Arguments arguments{
 		{M, N, K},
-		{(MatmulTypeCompute*)A.data(), lda},
-		{(MatmulTypeCompute*)B.data(), ldb},
-		{(MatmulTypeAccumulator*)C.data(), ldc},
-		{(MatmulTypeAccumulator*)D.data(), ldd},
+		{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+		{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+		{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+		{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 		{(TypeCompute)1.0f, (TypeCompute)beta},
 		split_k_slices
 	};

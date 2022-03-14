@@ -162,6 +162,9 @@ private:
 #define STR(x) STRINGIFY(x)
 #define FILE_LINE __FILE__ ":" STR(__LINE__)
 
+#define CHECK_THROW(x) \
+	do { if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); } while(0)
+
 /// Checks the result of a cuXXXXXX call and throws an error on failure
 #define CU_CHECK_THROW(x)                                                                          \
 	do {                                                                                           \
@@ -169,7 +172,7 @@ private:
 		if (result != CUDA_SUCCESS) {                                                              \
 			const char *msg;                                                                       \
 			cuGetErrorName(result, &msg);                                                          \
-			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);  \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);   \
 		}                                                                                          \
 	} while(0)
 
@@ -180,7 +183,7 @@ private:
 		if (result != CUDA_SUCCESS) {                                                              \
 			const char *msg;                                                                       \
 			cuGetErrorName(result, &msg);                                                          \
-			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;  \
+			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;               \
 		}                                                                                          \
 	} while(0)
 

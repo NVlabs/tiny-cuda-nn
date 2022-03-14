@@ -216,7 +216,7 @@ int main(int argc, char* argv[]) {
 
 				json encoding_opts = config.value("encoding", json::object());
 				std::shared_ptr<Encoding<precision_t>> encoding{create_encoding<precision_t>(num_dims_encoded, encoding_opts, 16)};
-				const uint32_t padded_num_input_dims = encoding->num_encoded_dims();
+				const uint32_t padded_num_input_dims = encoding->padded_output_width();
 
 				// Auxiliary matrices for training
 				GPUMatrix<precision_t> bench_obe_out(padded_num_input_dims, batch_size);
@@ -262,7 +262,7 @@ int main(int argc, char* argv[]) {
 
 						// Training step
 						float* p_loss = j == (STEPS_INCREMENT - 1) ? &loss_value : nullptr;
-						encoding->encode(training_stream, batch_size, {batch.data(), num_dims_encoded}, {bench_obe_out.data(), num_output_dims});
+						encoding->inference_mixed_precision(training_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_obe_out);
 						trainer->training_step(training_stream, bench_obe_out, bench_target, p_loss);
 					}
 
@@ -291,7 +291,7 @@ int main(int argc, char* argv[]) {
 				mean_training_throughput /= (double)mean_counter;
 
 				// Dump learned image for sanity checking
-				encoding->encode(inference_stream, n_coords, {xs_and_ys.data(), num_dims_encoded}, {eval_obe_out.data(), num_output_dims});
+				encoding->inference_mixed_precision(inference_stream, GPUMatrix<float>{xs_and_ys.data(), num_dims_encoded, n_coords}, eval_obe_out);
 				network->inference(inference_stream, eval_obe_out, prediction);
 
 				save_image(prediction_data.data(), sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".jpg");
@@ -313,7 +313,7 @@ int main(int argc, char* argv[]) {
 					generate_random_uniform<float>(inference_stream, rng, batch_size * num_dims_encoded, batch.data());
 
 					// Inference step
-					encoding->encode(inference_stream, batch_size, {batch.data(), num_dims_encoded}, {bench_obe_out.data(), num_output_dims});
+					encoding->inference_mixed_precision(inference_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_obe_out);
 					network->inference(inference_stream, bench_obe_out, bench_target);
 
 					// Debug outputs
