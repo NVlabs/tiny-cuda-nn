@@ -56,23 +56,6 @@ Multi-layer perceptron (MLP) based on [CUTLASS](https://github.com/NVIDIA/cutlas
 }
 ```
 
-### CUTLASS ResNet
-
-Fully connected residual network based on [CUTLASS](https://github.com/NVIDIA/cutlass)' GEMM routines.
-The hidden layers always use ReLU activations for performance reasons.
-
-```json5
-{
-	"otype": "CutlassResNet",    // Component type.
-	"output_activation": "None", // Activation of the output layer.
-	"n_neurons": 128,            // Neurons in each hidden layer.
-	"n_blocks": 2,               // Number of residual blocks
-	                             // with one skip link each.
-	"n_matrices_per_block": 2    // Number of ReLU->MatMul operations
-	                             // per residual block.
-}
-```
-
 ## Encodings
 
 

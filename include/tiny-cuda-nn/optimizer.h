@@ -25,7 +25,7 @@
 
 /** @file   optimizer.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  API interface of optimizers that can be used with ResNets.
+ *  @brief  API for optimizers
  */
 
 #pragma once
