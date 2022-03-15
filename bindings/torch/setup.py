@@ -101,7 +101,12 @@ if torch.cuda.is_available():
 	ext = CUDAExtension(
 		name="tinycudann_bindings._C",
 		sources=source_files,
-		include_dirs=["%s/include" % root_dir, "%s/dependencies" % root_dir],
+		include_dirs=[
+			"%s/include" % root_dir,
+			"%s/dependencies" % root_dir,
+			"%s/dependencies/cutlass/include" % root_dir,
+			"%s/dependencies/cutlass/tools/util/include" % root_dir,
+		],
 		extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
 		libraries=["cuda", "cudadevrt", "cudart_static"],
 	)
