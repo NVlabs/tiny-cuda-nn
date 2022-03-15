@@ -32,7 +32,6 @@
 #include <tiny-cuda-nn/network.h>
 
 #include <tiny-cuda-nn/networks/cutlass_mlp.h>
-#include <tiny-cuda-nn/networks/cutlass_resnet.h>
 
 #if TCNN_MIN_GPU_ARCH >= 70
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
@@ -102,8 +101,6 @@ std::string select_network(const json& network) {
 		return "FullyFusedMLP";
 	} else if (want_cutlass_mlp) {
 		return "CutlassMLP";
-	} else if (equals_case_insensitive(otype, "ResNet") || equals_case_insensitive(otype, "CutlassResNet")) {
-		return "CutlassResNet";
 	} else {
 		return otype;
 	}
@@ -155,15 +152,6 @@ Network<T>* create_network(const json& network) {
 			network["n_output_dims"],
 			network.value("n_hidden_layers", 5u),
 			string_to_activation(network.value("activation", "ReLU")),
-			string_to_activation(network.value("output_activation", "None")),
-		};
-	} else if (equals_case_insensitive(network_type, "CutlassResNet")) {
-		return new CutlassResNet<T, Activation::None>{
-			network["n_input_dims"],
-			network.value("n_neurons", 128u),
-			network["n_output_dims"],
-			network.value("n_blocks", 2u),
-			network.value("n_matrices_per_block", 2u),
 			string_to_activation(network.value("output_activation", "None")),
 		};
 	}

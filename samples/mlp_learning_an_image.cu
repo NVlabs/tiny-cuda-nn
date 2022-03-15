@@ -139,7 +139,6 @@ int main(int argc, char* argv[]) {
 			{"network", {
 				{"otype", "FullyFusedMLP"},
 				// {"otype", "CutlassMLP"},
-				// {"otype", "CutlassResNet"},
 				{"n_neurons", 64},
 				{"n_hidden_layers", 4},
 				{"activation", "ReLU"},

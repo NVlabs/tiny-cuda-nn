@@ -25,7 +25,7 @@
 
 /** @file   loss.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  API interface for loss functions that the resnet can be trained on
+ *  @brief  API for loss functions
  */
 
 #pragma once

@@ -153,6 +153,8 @@ find_library(
 )
 include_directories("include")
 include_directories("dependencies")
+include_directories("dependencies/cutlass/include")
+include_directories("dependencies/cutlass/tools/util/include")
 
 
 ###############################################################################

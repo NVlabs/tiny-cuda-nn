@@ -90,7 +90,6 @@ if torch.cuda.is_available():
 		source_files += [
 			"../../src/network.cu",
 			"../../src/cutlass_mlp.cu",
-			"../../src/cutlass_resnet.cu",
 		]
 
 		if compute_capability >= 70:

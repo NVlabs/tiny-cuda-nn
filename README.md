@@ -170,7 +170,6 @@ Following is a summary of the components of this framework. [The JSON documentat
 | :--- | :---------- | :-----
 | Fully fused MLP | `src/fully_fused_mlp.cu` | Lightning fast implementation of small multi-layer perceptrons (MLPs).
 | CUTLASS MLP     | `src/cutlass_mlp.cu`     | MLP based on [CUTLASS](https://github.com/NVIDIA/cutlass)' GEMM routines. Slower than fully-fused, but handles larger networks and still is reasonably fast.
-| CUTLASS ResNet  | `src/cutlass_resnet.cu`  | Fully connected residual network based on CUTLASS' GEMM routines.
 
 | Input encodings | &nbsp; | &nbsp;
 | :--- | :---------- | :-----
