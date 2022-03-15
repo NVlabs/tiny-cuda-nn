@@ -184,13 +184,13 @@ public:
 	}
 
 	GPUMatrixDynamic<T> slice(uint32_t offset_rows, uint32_t new_rows, uint32_t offset_cols, uint32_t new_cols) const {
-		return GPUMatrixDynamic<T>(
-			data() + (layout() == CM ? (offset_rows + offset_cols * m_stride) : (offset_cols + offset_rows * m_stride)),
+		return GPUMatrixDynamic<T>{
+			data() + (layout() == CM ? (offset_rows + offset_cols * stride()) : (offset_cols + offset_rows * stride())),
 			new_rows,
 			new_cols,
 			layout(),
-			stride()
-		);
+			stride(),
+		};
 	}
 
 	GPUMatrixDynamic<T> slice_rows(uint32_t offset, uint32_t size) const {
