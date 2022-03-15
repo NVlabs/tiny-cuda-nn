@@ -122,15 +122,7 @@ using FullLayerPreReLU = typename std::conditional<
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 32, true>, cutlass::gemm::GemmShape<64, 64, 32, true>>
 >::type;
 
-using LastLayer = typename std::conditional<
-	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
-	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
-	typename std::conditional<
-		std::is_same<SmArch, cutlass::arch::Sm80>::value || std::is_same<SmArch, cutlass::arch::Sm75>::value,
-		LayerConfig<cutlass::gemm::GemmShape<128, 32, 32>, cutlass::gemm::GemmShape<32, 32, 32>>,
-		LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>
-	>::type
->::type;
+using LastLayer = FullLayer;
 
 // This code section describes how threadblocks are scheduled on GPU
 using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
@@ -297,12 +289,6 @@ template <typename T>
 using SumOp = cutlass::epilogue::thread::LinearCombination<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
 
 template <typename T>
-using IntermediateActivationOp = ActivationEpilogue<T, 4, TypeAccumulator, TypeCompute>;
-
-template <typename T>
-using IntermediateActivationTransferOp = ActivationTransferEpilogue<T, 4, TypeAccumulator, TypeCompute>;
-
-template <typename T>
 using ActivationOp = ActivationEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
 
 template <typename T>
@@ -464,11 +450,7 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		fc_multiply<config>(stream, A, B_CM, C, D, act, transfer, sum_source);
 	} else {
 		auto B_RM = GPUMatrix<TypeB, RM>{B};
-		// Only column-major output is supported by CUTLASS when B is row-major.
-		// The following constructors will throw if that assumption isn't met.
-		auto C_CM = GPUMatrix<TypeC, CM>{C};
-		auto D_CM = GPUMatrix<TypeD, CM>{D};
-		fc_multiply<config>(stream, A, B_RM, C_CM, D_CM, act, transfer, sum_source);
+		fc_multiply<config>(stream, A, B_RM, C, D, act, transfer, sum_source);
 	}
 }
 

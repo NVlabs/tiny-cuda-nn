@@ -190,8 +190,10 @@ std::unique_ptr<Context> CutlassMLP<T>::forward(cudaStream_t stream, const GPUMa
 	this->check_forward_args(input, output);
 
 	// If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
-	if (output && m_n_hidden_layers == 0) {
-		compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_params), input, *output, *output);
+	if (m_n_hidden_layers == 0) {
+		if (output) {
+			compute_layer<LastLayer>(stream, false, m_output_activation, input_weight_matrix(use_inference_params), input, *output, *output);
+		}
 		return std::make_unique<ForwardContext>(); // Nothing to save -- empty context
 	}
 
