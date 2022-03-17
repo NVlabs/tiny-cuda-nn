@@ -62,7 +62,6 @@ class GPUMemory {
 private:
 	T* m_data = nullptr;
 	size_t m_size = 0; // Number of elements
-	bool m_owned = true;
 
 public:
 	GPUMemory() {}
@@ -77,7 +76,9 @@ public:
 		*this = std::move(other);
 	}
 
-	TCNN_HOST_DEVICE GPUMemory(const GPUMemory<T> &other) : m_data{other.m_data}, m_size{other.m_size}, m_owned{false} {}
+	explicit GPUMemory(const GPUMemory<T>& other) {
+		copy_from_device(other);
+	}
 
 	void check_guards() const {
 #if DEBUG_GUARD_SIZE > 0
@@ -140,10 +141,6 @@ public:
 	/// Frees memory again
 	TCNN_HOST_DEVICE ~GPUMemory() {
 #ifndef __CUDA_ARCH__
-		if (!m_owned) {
-			return;
-		}
-
 		try {
 			if (m_data) {
 				free_memory();
@@ -163,10 +160,6 @@ public:
 	 */
 	/// Resizes the array to the exact new size, even if it is already larger
 	void resize(const size_t size) {
-		if (!m_owned) {
-			throw std::runtime_error("Cannot resize non-owned memory.");
-		}
-
 		if (m_size != size) {
 			if (m_size) {
 				try {
