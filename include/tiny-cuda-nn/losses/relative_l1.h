@@ -67,16 +67,15 @@ __global__ void relative_l1_loss(
 	const float prediction = (float)predictions[i];
 
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
-	const float difference = prediction - targets[target_idx] / pdf;
+	const float difference = prediction - targets[target_idx];
 
-	const float one_over_prediction_plus_epsilon = 1.0f / (fabsf(prediction) + 1e-2f);
+	const float scale = 1.0f / (fabsf(prediction) + 1e-2f) / pdf;
 
-	values[i] = fabsf(difference) * one_over_prediction_plus_epsilon / n_total;
+	values[i] = fabsf(difference) * scale / n_total;
 
-	float gradient = copysignf(one_over_prediction_plus_epsilon, difference);
+	float gradient = copysignf(scale, difference);
 	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
-
 
 template <typename T>
 class RelativeL1Loss : public Loss<T> {

@@ -67,14 +67,13 @@ __global__ void l2_loss(
 	const float prediction = (float)predictions[i];
 
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
-	const float difference = prediction - targets[target_idx] / pdf;
+	const float difference = prediction - targets[target_idx];
 
-	values[i] = difference * difference / n_total;
+	values[i] = difference * difference / pdf / n_total;
 
-	float gradient = 2 * difference;
+	float gradient = 2 * difference / pdf;
 	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
-
 
 template <typename T>
 class L2Loss : public Loss<T> {

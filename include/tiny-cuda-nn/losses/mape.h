@@ -68,16 +68,15 @@ __global__ void mape_loss(
 
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
 	const float target = targets[target_idx];
-	const float difference = prediction - target / pdf;
+	const float difference = prediction - target;
 
-	const float scale = 1.0f / (fabsf(target) + 1e-2f);
+	const float scale = 1.0f / (fabsf(target) + 1e-2f) / pdf;
 
 	values[i] = fabsf(difference) * scale / n_total;
 
 	float gradient = copysignf(scale, difference);
 	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
-
 
 template <typename T>
 class MapeLoss : public Loss<T> {

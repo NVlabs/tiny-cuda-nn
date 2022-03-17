@@ -67,14 +67,13 @@ __global__ void l1_loss(
 	const float prediction = (float)predictions[i];
 
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
-	const float difference = prediction - targets[target_idx] / pdf;
+	const float difference = prediction - targets[target_idx];
 
-	values[i] = fabsf(difference) / n_total;
+	values[i] = fabsf(difference) / pdf / n_total;
 
-	float gradient = copysignf(1.0f, difference);
+	float gradient = copysignf(1.0f / pdf, difference);
 	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
-
 
 template <typename T>
 class L1Loss : public Loss<T> {

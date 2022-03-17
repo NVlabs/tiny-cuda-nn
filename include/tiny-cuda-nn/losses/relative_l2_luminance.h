@@ -79,14 +79,13 @@ __global__ void relative_l2_luminance_loss(
 	const float prediction_sq_plus_epsilon = luminance * luminance + 0.01f;
 
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
-	const float difference = prediction - targets[target_idx] / pdf;
+	const float difference = prediction - targets[target_idx];
 
-	values[i] = difference * difference / prediction_sq_plus_epsilon / n_total;
+	values[i] = difference * difference / prediction_sq_plus_epsilon / pdf / n_total;
 
-	float gradient = 2 * difference / prediction_sq_plus_epsilon;
+	float gradient = 2 * difference / prediction_sq_plus_epsilon / pdf;
 	gradients[i] = (T)(loss_scale * gradient / n_total);
 }
-
 
 template <typename T>
 class RelativeL2LuminanceLoss : public Loss<T> {
