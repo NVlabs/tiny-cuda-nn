@@ -113,25 +113,27 @@ public:
 
 	// Owning its memory as a GPUMemory<T>
 	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM)
-	: m_owned_data{m * n}, m_rows{m}, m_cols{n}, m_layout{layout} {
-		m_data = m_owned_data.data();
-		set_stride_dense();
+	: m_rows{m}, m_cols{n}, m_layout{layout} {
+		m_malloc_allocation = std::make_shared<GPUMemory<uint8_t>>(m * n * sizeof(T));
+		m_data = (T*)m_malloc_allocation->data();
+		set_stride_contiguous();
 	}
 
 	// Owning its memory as an allocation from a stream's memory arena
 	GPUMatrixDynamic(uint32_t m, uint32_t n, cudaStream_t stream, MatrixLayout layout = CM)
-	: m_arena_data{allocate_workspace(stream, m * n * sizeof(T))}, m_rows{m}, m_cols{n}, m_layout{layout} {
-		m_data = (T*)m_arena_data.data();
-		set_stride_dense();
+	: m_rows{m}, m_cols{n}, m_layout{layout} {
+		m_arena_allocation = std::make_shared<GPUMemoryArena::Allocation>(allocate_workspace(stream, m * n * sizeof(T)));
+		m_data = (T*)m_arena_allocation->data();
+		set_stride_contiguous();
 	}
 
 	// Pointing to external memory
-	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM, uint32_t stride = 0)
-	: m_data{data}, m_layout{layout} {
+	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM, uint32_t stride = 0, std::shared_ptr<GPUMemory<uint8_t>> malloc_allocation = nullptr, std::shared_ptr<GPUMemoryArena::Allocation> arena_allocation = nullptr)
+	: m_data{data}, m_layout{layout}, m_malloc_allocation{malloc_allocation}, m_arena_allocation{arena_allocation} {
 		set_size(m, n, stride);
 	}
 
-	GPUMatrixDynamic() : GPUMatrixDynamic(nullptr, 0, 0) {}
+	GPUMatrixDynamic() : GPUMatrixDynamic{nullptr, 0, 0} {}
 
 	GPUMatrixDynamic<T>& operator=(GPUMatrixDynamic<T>&& other) {
 		std::swap(m_data, other.m_data);
@@ -139,8 +141,8 @@ public:
 		std::swap(m_cols, other.m_cols);
 		std::swap(m_stride, other.m_stride);
 		std::swap(m_layout, other.m_layout);
-		std::swap(m_owned_data, other.m_owned_data);
-		std::swap(m_arena_data, other.m_arena_data);
+		std::swap(m_malloc_allocation, other.m_malloc_allocation);
+		std::swap(m_arena_allocation, other.m_arena_allocation);
 		return *this;
 	}
 
@@ -148,17 +150,7 @@ public:
 		*this = std::move(other);
 	}
 
-	explicit GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{other.m_owned_data.copy()} {
-		if (m_owned_data.data()) {
-			m_data = m_owned_data.data();
-		}
-
-		if (other.m_arena_data.data()) {
-			m_arena_data = allocate_workspace(other.m_arena_data.stream(), n_bytes());
-			m_data = (T*)m_arena_data.data();
-			CUDA_CHECK_THROW(cudaMemcpyAsync(data(), other.data(), n_bytes(), cudaMemcpyDeviceToDevice, m_arena_data.stream()));
-		}
-	}
+	GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) = delete;
 
 	virtual ~GPUMatrixDynamic() {}
 
@@ -168,7 +160,7 @@ public:
 		m_cols = cols;
 
 		if (stride == 0) {
-			set_stride_dense();
+			set_stride_contiguous();
 		} else {
 			m_stride = stride;
 		}
@@ -179,8 +171,16 @@ public:
 		set_size(rows, cols, stride);
 	}
 
-	void set_stride_dense() {
-		m_stride = m_layout == CM ? m() : n();
+	uint32_t stride_contiguous() const {
+		return m_layout == CM ? m() : n();
+	}
+
+	bool is_contiguous() const {
+		return m_stride == stride_contiguous();
+	}
+
+	void set_stride_contiguous() {
+		m_stride = stride_contiguous();
 	}
 
 	GPUMatrixDynamic<T> slice(uint32_t offset_rows, uint32_t new_rows, uint32_t offset_cols, uint32_t new_cols) const {
@@ -190,6 +190,8 @@ public:
 			new_cols,
 			layout(),
 			stride(),
+			m_malloc_allocation,
+			m_arena_allocation,
 		};
 	}
 
@@ -222,18 +224,21 @@ public:
 	T* data() const { return m_data; }
 
 	void memset(int value) {
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 		CUDA_CHECK_THROW(cudaMemset(data(), value, n_bytes()));
 	}
 
 	void memset_async(cudaStream_t stream, int value) {
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 		CUDA_CHECK_THROW(cudaMemsetAsync(data(), value, n_bytes(), stream));
 	}
 
 	// Various initializations
 	void initialize_xavier_uniform(pcg32& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 
 		// Define probability distribution
 		scale *= std::sqrt(6.0f / (float)(fan_in() + fan_out()));
@@ -249,9 +254,8 @@ public:
 	}
 
 	void initialize_fa_uniform_forward(pcg32& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 
 		// Define probability distribution
 		scale *= std::sqrt(1.0f / (float)fan_in());
@@ -267,9 +271,8 @@ public:
 	}
 
 	void initialize_fa_uniform_backward(pcg32& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 
 		// Define probability distribution
 		scale *= std::sqrt(1.0f / (float)fan_out());
@@ -285,9 +288,8 @@ public:
 	}
 
 	void initialize_siren_uniform(pcg32& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 
 		// Define probability distribution
 		scale *= std::sqrt(6.0f / (float)fan_in());
@@ -303,9 +305,8 @@ public:
 	}
 
 	void initialize_siren_uniform_first(pcg32& rnd, float scale = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 
 		// Define probability distribution
 
@@ -323,22 +324,17 @@ public:
 	}
 
 	void initialize_constant(float val) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
 
 		std::vector<T> new_data(n_elements(), (T)val);
 		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
 	}
 
 	void initialize_diagonal(float val = 1) {
-		if (!data()) {
-			throw std::runtime_error("Matrix has no allocated data");
-		}
-
-		if (n() != m()) {
-			throw std::runtime_error("Can only perform diagonal initialization if the matrix is square");
-		}
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
+		CHECK_THROW(n() == m()); // Must be square for diagonal init to make sense
 
 		std::vector<T> new_data(n_elements(), (T)0);
 		for (uint32_t i = 0; i < n(); ++i) {
@@ -349,15 +345,28 @@ public:
 	}
 
 	GPUMatrixDynamic<T> transposed() const {
-		return GPUMatrixDynamic<T>(data(), n(), m(), transposed_layout(), stride());
+		return GPUMatrixDynamic<T>(data(), n(), m(), transposed_layout(), stride(), m_malloc_allocation, m_arena_allocation);
+	}
+
+	GPUMatrix<T, RM> rm() const {
+		CHECK_THROW(m_layout == RM);
+		return GPUMatrix<T, RM>(data(), m(), n(), stride(), m_malloc_allocation, m_arena_allocation);
+	}
+
+	GPUMatrix<T, CM> cm() const {
+		CHECK_THROW(m_layout == CM);
+		return GPUMatrix<T, CM>(data(), m(), n(), stride(), m_malloc_allocation, m_arena_allocation);
 	}
 
 private:
 	T* m_data;
 	uint32_t m_rows, m_cols, m_stride;
 	MatrixLayout m_layout;
-	GPUMemory<T> m_owned_data;
-	GPUMemoryArena::Allocation m_arena_data;
+
+	// References to corresponding memory allocations. These ensure that
+	// m_data does not accidentally become dangling.
+	std::shared_ptr<GPUMemory<uint8_t>> m_malloc_allocation;
+	std::shared_ptr<GPUMemoryArena::Allocation> m_arena_allocation;
 };
 
 template <typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
@@ -375,10 +384,10 @@ public:
 	: GPUMatrixDynamic<T>{m, n, stream, static_layout} { }
 
 	// Pointing to external memory
-	explicit GPUMatrix(T* data, uint32_t m, uint32_t n, uint32_t stride = 0)
-	: GPUMatrixDynamic<T>{data, m, n, static_layout, stride} { }
+	explicit GPUMatrix(T* data, uint32_t m, uint32_t n, uint32_t stride = 0, std::shared_ptr<GPUMemory<uint8_t>> malloc_allocation = nullptr, std::shared_ptr<GPUMemoryArena::Allocation> arena_allocation = nullptr)
+	: GPUMatrixDynamic<T>{data, m, n, static_layout, stride, malloc_allocation, arena_allocation} { }
 
-	GPUMatrix() : GPUMatrix(nullptr, 0, 0) {}
+	GPUMatrix() : GPUMatrix{nullptr, 0, 0} {}
 
 	GPUMatrix<T, static_layout>& operator=(GPUMatrixDynamic<T>&& other) {
 		*((GPUMatrixDynamic<T>*)this) = std::move(other);
@@ -401,13 +410,7 @@ public:
 		*this = std::move(other);
 	}
 
-	// Only copy by reference. This is to prevent accidental deep copies of owned data.
-	explicit GPUMatrix(const GPUMatrixDynamic<T>& other)
-	: GPUMatrixDynamic<T>{const_cast<T*>(other.data()), other.rows(), other.cols(), other.layout()} {
-		if (static_layout != this->layout()) {
-			throw std::runtime_error{"GPUMatrix must be constructed from a GPUMatrixDynamic with matching layout."};
-		}
-	}
+	GPUMatrix(const GPUMatrixDynamic<T>& other) = delete;
 
 	virtual ~GPUMatrix() {}
 
@@ -424,7 +427,7 @@ public:
 	}
 
 	GPUMatrix<T, static_transposed_layout> transposed() const {
-		return GPUMatrix<T, static_transposed_layout>(this->data(), this->n(), this->m(), this->stride());
+		return ((GPUMatrixDynamic<T>*)this)->transposed();
 	}
 };
 
