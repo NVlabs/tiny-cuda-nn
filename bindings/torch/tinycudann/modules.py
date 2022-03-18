@@ -100,9 +100,9 @@ class _module_function_encoding_backward(torch.autograd.Function):
 	@staticmethod
 	def backward(ctx, dinput_grad, dweight_grad):
 		# NOTE: currently support:
-		#		✓	d(dL_ddLdinput)_d(doutput)	doutput_grad
-		#		✓	d(dL_ddLdinput)_d(params)	weight_grad
-		#		x	d(dL_ddLdinput)_d(input)
+		#		✓	d(dL_dinput)_d(dL_doutput)	doutput_grad
+		#		✓	d(dL_dinput)_d(params)		weight_grad
+		#		x	d(dL_dinput)_d(input)
 		#		x	d(dL_dparam)_d(...)
 		# assert dweight_grad is None, "currently do not support 2nd-order gradients from gradient of grid"
 		input, params, doutput = ctx.saved_tensors
