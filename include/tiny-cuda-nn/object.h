@@ -160,6 +160,17 @@ public:
 		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
+	virtual void backward_backward_input(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) = 0;
+
 	void input_gradient(
 		cudaStream_t stream,
 		uint32_t dim,

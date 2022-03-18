@@ -72,6 +72,17 @@ public:
 	size_t n_params() const override { return 0; }
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override { return {}; }
+
+	void backward_backward_input(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<float>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) override { throw std::runtime_error(std::string("Network::backward_backward_input: not implemented error")); }
 };
 
 template <typename T>

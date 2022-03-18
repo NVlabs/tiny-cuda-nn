@@ -64,6 +64,17 @@ public:
 	virtual uint32_t width(uint32_t layer) const = 0;
 	virtual uint32_t num_forward_activations() const = 0;
 	virtual std::pair<const PARAMS_T*, MatrixLayout> forward_activations(const Context& ctx, uint32_t layer) const = 0;
+
+	void backward_backward_input(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<PARAMS_T>& dL_doutput,
+		GPUMatrixDynamic<PARAMS_T>* dL_ddLdoutput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) override { throw std::runtime_error(std::string("Network::backward_backward_input: not implemented error")); }
 };
 
 template <typename T>

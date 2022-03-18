@@ -102,6 +102,22 @@ public:
 		m_model->backward(synced_stream.get(1), *ctx.ctx, input_matrix, output_matrix, dL_doutput_matrix, dL_dinput ? &dL_dinput_matrix : nullptr, false, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
 	}
 
+	void backward_backward_input(cudaStream_t stream, const Context& ctx, uint32_t n_elements, const float* dL_ddLdinput, const float* input, const void* dL_doutput, void* dL_dparams, void* dL_ddLdoutput, const void* params) override {
+		// from: dL_ddLdinput 
+		// to: 	 dL_ddLdoutput, dL_dparams
+		m_model->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
+
+		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
+		GPUMatrix<float, MatrixLayout::ColumnMajor> dL_ddLdinput_matrix((float*)dL_ddLdinput, m_model->input_width(), n_elements);
+
+		GPUMatrix<T, MatrixLayout::ColumnMajor> dL_doutput_matrix((T*)dL_doutput, m_model->padded_output_width(), n_elements);
+		GPUMatrix<T, MatrixLayout::ColumnMajor> dL_ddLdoutput_matrix((T*)dL_ddLdoutput, m_model->padded_output_width(), n_elements);
+
+		// TODO: check validness
+		SyncedMultiStream synced_stream{stream, 2};
+		m_model->backward_backward_input(synced_stream.get(1), *ctx.ctx, input_matrix, dL_ddLdinput_matrix, dL_doutput_matrix, dL_ddLdoutput ? &dL_ddLdoutput_matrix : nullptr, false, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
+	}
+
 	uint32_t n_input_dims() const override {
 		return m_model->input_width();
 	}
