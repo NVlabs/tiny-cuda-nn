@@ -82,7 +82,7 @@ public:
 		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
-	) override { throw std::runtime_error(std::string("Network::backward_backward_input: not implemented error")); }
+	) override { throw std::runtime_error(std::string("Encoding::backward_backward_input: not implemented error")); }
 };
 
 template <typename T>
