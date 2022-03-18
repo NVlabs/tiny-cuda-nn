@@ -506,7 +506,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	const float* __restrict__ positions_in,
 	const T* __restrict__ dL_dy
 ) {
-    const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
     if (i >= num_elements) return;
 
 	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
