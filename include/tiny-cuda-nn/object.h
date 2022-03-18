@@ -169,7 +169,7 @@ public:
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
-	) = 0;
+	) { throw std::runtime_error(std::string("DifferentiableObject::backward_backward_input: not implemented error")); }
 
 	void input_gradient(
 		cudaStream_t stream,

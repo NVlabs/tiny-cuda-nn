@@ -581,7 +581,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	// for N-linear interpolation
     #pragma unroll
     for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-        float grad_in = scale * ((float*)dL_ddLdx(i))[grad_dim] * pos_derivative[grad_dim];;
+        float grad_in = scale * ((float*)dL_ddLdx(i))[grad_dim] * pos_derivative[grad_dim];
         #pragma unroll
         for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
             float weight = grad_in;
