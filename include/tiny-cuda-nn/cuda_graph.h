@@ -100,7 +100,6 @@ public:
 				current_captures().pop_back();
 
 				if (m_synchronize_when_capture_done) {
-					std::cout << "Scheduled synchronize GO!" << std::endl;
 					CUDA_CHECK_THROW(cudaDeviceSynchronize());
 					m_synchronize_when_capture_done = false;
 				}
