@@ -54,7 +54,7 @@ public:
 	virtual ~GPUMatrixBase() {}
 
 	virtual size_t n_bytes() const = 0;
-	virtual void set_data(void* data) = 0;
+	virtual void set_data_unsafe(void* data) = 0;
 
 	static void allocate_shared_memory(GPUMemory<char>& memory, const std::vector<GPUMatrixBase*>& matrices) {
 		size_t total_n_bytes = 0;
@@ -71,7 +71,7 @@ public:
 
 		size_t offset = 0;
 		for (auto* matrix : matrices) {
-			matrix->set_data(memory.data() + offset);
+			matrix->set_data_unsafe(memory.data() + offset);
 			offset += matrix->n_bytes();
 		}
 	}
@@ -92,7 +92,7 @@ public:
 
 		size_t offset = 0;
 		for (auto* matrix : matrices) {
-			matrix->set_data(alloc.data() + offset);
+			matrix->set_data_unsafe(alloc.data() + offset);
 			offset += matrix->n_bytes();
 		}
 
@@ -130,7 +130,7 @@ public:
 	// Pointing to external memory
 	explicit GPUMatrixDynamic(T* data, uint32_t m, uint32_t n, MatrixLayout layout = CM, uint32_t stride = 0, std::shared_ptr<GPUMemory<uint8_t>> malloc_allocation = nullptr, std::shared_ptr<GPUMemoryArena::Allocation> arena_allocation = nullptr)
 	: m_data{data}, m_layout{layout}, m_malloc_allocation{malloc_allocation}, m_arena_allocation{arena_allocation} {
-		set_size(m, n, stride);
+		set(data, m, n, stride);
 	}
 
 	GPUMatrixDynamic() : GPUMatrixDynamic{nullptr, 0, 0} {}
@@ -154,8 +154,8 @@ public:
 
 	virtual ~GPUMatrixDynamic() {}
 
-	void set_data(void* data) override { m_data = (T*)data; }
-	void set_size(uint32_t rows, uint32_t cols, uint32_t stride = 0) {
+	void set_data_unsafe(void* data) override { m_data = (T*)data; }
+	void set_size_unsafe(uint32_t rows, uint32_t cols, uint32_t stride = 0) {
 		m_rows = rows;
 		m_cols = cols;
 
@@ -167,8 +167,23 @@ public:
 	}
 
 	void set(T* data, uint32_t rows, uint32_t cols, uint32_t stride = 0) {
-		set_data(data);
-		set_size(rows, cols, stride);
+		set_data_unsafe(data);
+		set_size_unsafe(rows, cols, stride);
+	}
+
+	void resize(uint32_t rows, uint32_t cols) {
+		if (m_arena_allocation) {
+			cudaStream_t stream = m_arena_allocation->stream();
+			m_arena_allocation.reset();
+			m_arena_allocation = std::make_shared<GPUMemoryArena::Allocation>(allocate_workspace(stream, rows * cols * sizeof(T)));
+		} else if (m_malloc_allocation) {
+			m_malloc_allocation.reset();
+			m_malloc_allocation = std::make_shared<GPUMemory<uint8_t>>(rows * cols * sizeof(T));
+		} else {
+			throw std::runtime_error{"GPUMatrix::resize is not permitted when the underlying memory is not owned. Use GPUMatrix::set instead."};
+		}
+
+		set_size_unsafe(rows, cols);
 	}
 
 	uint32_t stride_contiguous() const {
@@ -201,6 +216,10 @@ public:
 
 	GPUMatrixDynamic<T> slice_cols(uint32_t offset, uint32_t size) const {
 		return slice(0, rows(), offset, size);
+	}
+
+	GPUMatrixDynamic<T> view() const {
+		return slice(0, rows(), 0, cols());
 	}
 
 	uint32_t rows() const { return m_rows; }
@@ -424,6 +443,10 @@ public:
 
 	GPUMatrix<T, static_layout> slice_cols(uint32_t offset, uint32_t size) const {
 		return ((GPUMatrixDynamic<T>*)this)->slice_cols(offset, size);
+	}
+
+	GPUMatrix<T, static_layout> view() const {
+		return ((GPUMatrixDynamic<T>*)this)->view();
 	}
 
 	GPUMatrix<T, static_transposed_layout> transposed() const {

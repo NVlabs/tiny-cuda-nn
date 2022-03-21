@@ -108,54 +108,37 @@ public:
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
-	void allocate_training_buffers(uint32_t padded_output_width, uint32_t batch_size) {
-		m_perturbation.set_size(padded_output_width, batch_size);
-		m_perturbed_training_prediction_tmp.set_size(padded_output_width, batch_size);
-		m_training_prediction_tmp.set_size(padded_output_width, batch_size);
-		m_training_loss_gradient_tmp.set_size(padded_output_width, batch_size);
-		m_training_loss_tmp.set_size(padded_output_width, batch_size);
+	struct ForwardContext : public Context {
+		GPUMatrix<COMPUTE_T> perturbed_output;
+		GPUMatrix<COMPUTE_T> output;
+		GPUMatrix<COMPUTE_T> dL_doutput;
+		GPUMatrix<float> L;
+		std::unique_ptr<Context> model_ctx;
+	};
 
-		GPUMatrixBase::allocate_shared_memory(
-			m_training_buffer,
-			{
-				&m_perturbation,
-				&m_perturbed_training_prediction_tmp,
-				&m_training_prediction_tmp,
-				&m_training_loss_gradient_tmp,
-				&m_training_loss_tmp,
-			}
-		);
-	}
+	std::unique_ptr<ForwardContext> forward(cudaStream_t stream, const float loss_scale, const GPUMatrix<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+		CHECK_THROW(input.n() == target.n());
 
-	const GPUMatrix<COMPUTE_T>& forward(cudaStream_t stream, const GPUMatrix<T>& input) {
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = input.n();
-		if (m_training_prediction_tmp.n() != batch_size) {
-			allocate_training_buffers(m_model->padded_output_width(), batch_size);
-		}
+		const uint32_t batch_size = input.n();
 
-		m_training_ctx = m_model->forward(stream, input, &m_training_prediction_tmp);
-		return m_training_prediction_tmp;
-	}
+		auto forward = std::make_unique<ForwardContext>();
 
-	const GPUMatrix<COMPUTE_T>& forward(const GPUMatrix<T>& input) {
-		return forward(nullptr, input);
-	}
-
-	const GPUMatrix<float>& evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = target.n();
-		if (m_training_prediction_tmp.n() != batch_size) {
-			throw std::runtime_error{"Trainer: you must call `forward` before calling `evaluate_loss`"};
-		}
+		forward->output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+		forward->model_ctx = m_model->forward(stream, input, &forward->output);
 
 		if (m_perturbation_sigma > 0) {
-			const uint32_t n_elements = m_perturbation.n_elements();
-			generate_random_logistic<float>(stream, m_rng, n_elements, m_perturbation.data(), 0.0f, m_perturbation_sigma);
-			add<<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, m_training_prediction_tmp.data(), m_perturbation.data(), m_perturbed_training_prediction_tmp.data());
+			GPUMatrix<float> perturbation{m_model->padded_output_width(), batch_size, stream};
+			forward->perturbed_output = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+
+			const uint32_t n_elements = perturbation.n_elements();
+			generate_random_logistic<float>(stream, m_rng, n_elements, perturbation.data(), 0.0f, m_perturbation_sigma);
+			add<<<n_blocks_linear(n_elements), n_threads_linear, 0, stream>>>(n_elements, forward->output.data(), perturbation.data(), forward->perturbed_output.data());
 		}
 
-		auto& loss_input = m_perturbation_sigma > 0 ? m_perturbed_training_prediction_tmp : m_training_prediction_tmp;
+		auto& loss_input = m_perturbation_sigma > 0 ? forward->perturbed_output : forward->output;
+
+		forward->dL_doutput = GPUMatrix<COMPUTE_T>{m_model->padded_output_width(), batch_size, stream};
+		forward->L = GPUMatrix<float>{m_model->padded_output_width(), batch_size, stream};
 
 		m_loss->evaluate(
 			stream,
@@ -164,39 +147,28 @@ public:
 			loss_scale,
 			loss_input,
 			target,
-			m_training_loss_tmp,
-			m_training_loss_gradient_tmp,
+			forward->L,
+			forward->dL_doutput,
 			data_pdf
 		);
 
 		if (loss_value) {
-			*loss_value = reduce_sum(m_training_loss_tmp.data(), m_training_loss_tmp.n_elements(), stream);
+			*loss_value = reduce_sum(forward->L.data(), forward->L.n_elements(), stream);
 		}
 
-		return m_training_loss_tmp;
+		return forward;
 	}
 
-	void evaluate_loss(const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
-		evaluate_loss(nullptr, loss_scale, target, data_pdf, loss_value);
+	void forward(const float loss_scale, const GPUMatrix<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+		forward(nullptr, loss_scale, input, target, data_pdf, loss_value);
 	}
 
-	void backward(cudaStream_t stream, const GPUMatrix<T>& input) {
-		if (!m_training_ctx) {
-			throw std::runtime_error{"Trainer: must call forward() before calling backward()"};
-		}
-
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = input.n();
-		if (m_training_prediction_tmp.n() != batch_size) {
-			throw std::runtime_error{"Trainer: you must call `forward` and `evaluate_loss` before calling `backward`"};
-		}
-
-		m_model->backward(stream, *m_training_ctx, input, m_training_prediction_tmp, m_training_loss_gradient_tmp);
-		m_training_ctx.reset();
+	void backward(cudaStream_t stream, const ForwardContext& ctx, const GPUMatrix<T>& input) {
+		m_model->backward(stream, *ctx.model_ctx, input, ctx.output, ctx.dL_doutput);
 	}
 
-	void backward(const GPUMatrix<T>& input) {
-		backward(nullptr, input);
+	void backward(const ForwardContext& ctx, const GPUMatrix<T>& input) {
+		backward(nullptr, ctx, input);
 	}
 
 	void optimizer_step(cudaStream_t stream, float loss_scale) {
@@ -214,34 +186,22 @@ public:
 		float* loss_value = nullptr,
 		const GPUMatrix<float>* data_pdf = nullptr
 	) {
-		if (input.n() != target.n()) {
-			throw std::runtime_error(std::string("Input and target don't have matching batch size ") + std::to_string(input.n()) + "!=" + std::to_string(target.n()));
-		}
-
-		if (target.m() != m_model->output_width()) {
-			throw std::runtime_error(std::string("Target does not have the correct number of dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(m_model->output_width()));
-		}
-
-		// Make sure our temporary buffers have the correct size for the given batch size
-		uint32_t batch_size = input.n();
-		bool did_allocate = false;
-		if (m_training_prediction_tmp.n() != batch_size) {
-			allocate_training_buffers(m_model->padded_output_width(), batch_size);
-			did_allocate = true;
-		}
+		CHECK_THROW(input.n() == target.n());
+		CHECK_THROW(target.m() == m_model->output_width());
 
 		static const float loss_scale = 128;
 
-		m_graph.capture_and_execute(stream, did_allocate, [&]() {
-			forward(stream, input);
-			evaluate_loss(stream, loss_scale, target, data_pdf);
-			backward(stream, input);
+		GPUMatrix<float> loss;
+		m_graph.capture_and_execute(stream, false, [&]() {
+			auto ctx = forward(stream, loss_scale, input, target, data_pdf);
+			loss = ctx->L.view();
+			backward(stream, *ctx, input);
 		});
 
 		optimizer_step(stream, loss_scale);
 
 		if (loss_value) {
-			*loss_value = reduce_sum(m_training_loss_tmp.data(), m_training_loss_tmp.n_elements(), stream);
+			*loss_value = reduce_sum(loss.data(), loss.n_elements(), stream);
 		}
 	}
 
@@ -345,13 +305,6 @@ private:
 
 	float m_perturbation_sigma;
 
-	GPUMemory<char> m_training_buffer;
-
-	GPUMatrix<float> m_perturbation;
-	GPUMatrix<COMPUTE_T> m_perturbed_training_prediction_tmp;
-	GPUMatrix<COMPUTE_T> m_training_prediction_tmp;
-	GPUMatrix<COMPUTE_T> m_training_loss_gradient_tmp;
-	GPUMatrix<float> m_training_loss_tmp;
 	std::unique_ptr<Context> m_training_ctx;
 
 	pcg32 m_rng;
