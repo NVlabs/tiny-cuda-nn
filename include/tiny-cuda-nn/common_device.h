@@ -464,9 +464,8 @@ __device__ inline float quartic_cdf(const float x, const float inv_radius) {
 }
 
 __device__ inline uint32_t permute(uint32_t num, uint32_t size) {
-	const uint32_t A = 10002659; // Large prime number
-	const uint32_t B = 4234151;
-	return (num * A + B) % size;
+	const uint32_t A = 1434869437; // Large prime number
+	const uint32_t B = 2097192037;
 }
 
 template <typename T>
