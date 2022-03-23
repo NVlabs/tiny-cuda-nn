@@ -108,6 +108,7 @@ public:
 
 template <typename T>
 struct MatrixView {
+	TCNN_HOST_DEVICE MatrixView() : data{nullptr}, stride_i{0}, stride_j{0} {}
 	TCNN_HOST_DEVICE MatrixView(T* data, uint32_t stride_i, uint32_t stride_j) : data{data}, stride_i{stride_i}, stride_j{stride_j} {}
 	TCNN_HOST_DEVICE MatrixView(const MatrixView<std::remove_const_t<T>>& other) : data{other.data}, stride_i{other.stride_i}, stride_j{other.stride_j} {}
 
@@ -125,6 +126,10 @@ struct MatrixView {
 
 	TCNN_HOST_DEVICE void advance_cols(uint32_t n) {
 		advance(0, n);
+	}
+
+	TCNN_HOST_DEVICE explicit operator bool() const {
+		return data;
 	}
 
 	T* data;
