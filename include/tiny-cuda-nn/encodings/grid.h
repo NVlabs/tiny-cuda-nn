@@ -116,7 +116,7 @@ __device__ inline float random_val(uint32_t seed, uint32_t idx) {
 	return rng.next_float();
 }
 
-template <typename T, uint32_t N_POS_DIMS>
+template <typename T>
 __global__ void extract_position(
 	const uint32_t num_elements,
 	PitchedPtr<const float> data_in,
@@ -143,7 +143,7 @@ __global__ void kernel_grid(
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
 	const T* __restrict__ grid,
-	const float* __restrict__ positions_in,
+	MatrixView<const float> positions_in,
 	T* __restrict__ encoded_positions,
 	float* __restrict__ dy_dx
 ) {
@@ -190,12 +190,12 @@ __global__ void kernel_grid(
 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in[i + dim * num_elements], &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
 		}
 	} else {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in[i + dim * num_elements], &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative);
 		}
 	}
 
@@ -317,7 +317,7 @@ __global__ void kernel_grid_backward(
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
 	GRAD_T* __restrict__ grid_gradient,
-	const float* __restrict__ positions_in,
+	MatrixView<const float> positions_in,
 	const T* __restrict__ dL_dy
 ) {
 	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
@@ -370,12 +370,12 @@ __global__ void kernel_grid_backward(
 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in[i + dim * num_elements], &pos[dim], &pos_grid[dim], scale, identity_fun);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_grid[dim], scale, identity_fun);
 		}
 	} else {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in[i + dim * num_elements], &pos[dim], &pos_grid[dim], scale, smoothstep);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_grid[dim], scale, smoothstep);
 		}
 	}
 
@@ -465,7 +465,7 @@ __global__ void kernel_grid_backward_input(
 	const uint32_t num_grid_features,
 	const T* dL_dy_rm,
 	const float* __restrict__ dy_dx,
-	PitchedPtr<float> dL_dx
+	MatrixView<float> dL_dx
 ) {
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
@@ -482,7 +482,10 @@ __global__ void kernel_grid_backward_input(
 		}
 	}
 
-	*(vector_fullp_t<N_POS_DIMS>*)dL_dx(i) = result;
+	#pragma unroll
+	for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+		dL_dx(dim, i) = result[dim];
+	}
 }
 
 
@@ -763,7 +766,7 @@ public:
 		}
 	}
 
-	std::unique_ptr<Context> forward(
+	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
@@ -776,11 +779,6 @@ public:
 		if ((!output && !prepare_input_gradients) || m_n_padded_output_dims == 0 || num_elements == 0) {
 			return forward;
 		}
-
-		if (prepare_input_gradients) {
-			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), stream};
-		}
-		forward->positions = GPUMatrix<float, RM>{N_POS_DIMS, input.n(), stream};
 
 		SyncedMultiStream synced_streams{stream, m_n_to_pad > 0 ? 2u : 1u};
 
@@ -801,16 +799,6 @@ public:
 		// This way, only one level of the hashmap needs to fit into caches at a time (and it reused for consecutive
 		// elements) until it is time to process the next level.
 
-		// First step: extract positional input into consecutive memory for fast reading
-		const dim3 threads = { 64, N_POS_DIMS, 1 };
-		const uint32_t blocks = div_round_up(num_elements, threads.x);
-		extract_position<float, N_POS_DIMS><<<blocks, threads, 0, synced_streams.get(0)>>>(
-			num_elements,
-			input.pitched_ptr(),
-			forward->positions.data()
-		);
-
-		// Second step: compute encoding
 		static constexpr uint32_t N_THREADS_HASHGRID = 512;
 		const dim3 blocks_hashgrid = { div_round_up(num_elements, N_THREADS_HASHGRID), m_n_levels, 1 };
 
@@ -819,6 +807,10 @@ public:
 		if (output && output->layout() == AoS) {
 			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 			encoded_positions_soa = (T*)workspace.data();
+		}
+
+		if (prepare_input_gradients) {
+			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), stream};
 		}
 
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
@@ -833,13 +825,13 @@ public:
 			m_interpolation_type,
 			m_grid_type,
 			use_inference_params ? m_grid_inference : m_grid,
-			forward->positions.data(),
+			forward->positions.data() ? forward->positions.view() : input.view(),
 			encoded_positions_soa,
 			forward->dy_dx.data()
 		);
 
 		if (output && output->layout() == AoS) {
-			// Third step: transpose result (was stored row major due to coalescing)
+			// Transpose result (was stored row major due to coalescing)
 			const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_encoded_position<T><<<blocks_transpose, threads_transpose, 0, synced_streams.get(0)>>>(
@@ -852,7 +844,7 @@ public:
 		return forward;
 	}
 
-	void backward(
+	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,
@@ -921,7 +913,7 @@ public:
 				m_interpolation_type,
 				m_grid_type,
 				grid_gradient,
-				forward.positions.data(), // positions SoA
+				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
 				dL_dy_rm // gradients SoA
 			);
 
@@ -941,7 +933,7 @@ public:
 			m_n_features,
 			dL_dy_rm,
 			forward.dy_dx.data(),
-			dL_dinput->pitched_ptr()
+			dL_dinput->view()
 		);
 	}
 

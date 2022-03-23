@@ -464,9 +464,9 @@ __device__ inline float quartic_cdf(const float x, const float inv_radius) {
 }
 
 __device__ inline uint32_t permute(uint32_t num, uint32_t size) {
-	const uint32_t A = 10002659; // Large prime number
-	const uint32_t B = 4234151;
-	return (num * A + B) % size;
+	const uint32_t A = 1434869437; // Large prime number
+	const uint32_t B = 2097192037;
+	return ((uint64_t)num * A + B) % size;
 }
 
 template <typename T>
@@ -477,7 +477,7 @@ __global__ void shuffle(const uint32_t n_elements, const uint32_t stride, const 
 	const uint32_t elem_id = i / stride;
 	const uint32_t member_id = i % stride;
 
-	out[i] = in[permute(elem_id ^ seed, n_elements) * stride + member_id];
+	out[i] = in[permute(elem_id + seed, n_elements) * stride + member_id];
 }
 
 template <typename T>

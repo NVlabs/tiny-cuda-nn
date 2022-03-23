@@ -52,7 +52,7 @@ class Encoding : public DifferentiableObject<float, T, T> {
 public:
 	virtual ~Encoding() { }
 
-	void inference_mixed_precision(
+	void inference_mixed_precision_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
 		GPUMatrixDynamic<T>& output,

@@ -716,9 +716,7 @@ void compute_inference_layer(
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
-	this->check_inference_mixed_precision_args(input, output);
-
+void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 
@@ -745,9 +743,7 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision(cudaStream_t stream, con
 }
 
 template <typename T, int WIDTH>
-std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
-	this->check_forward_args(input, output);
-
+std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 	auto forward = allocate_forward_buffers(stream, batch_size);
@@ -775,7 +771,7 @@ std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward(cudaStream_t stream, c
 }
 
 template <typename T, int WIDTH>
-void FullyFusedMLP<T, WIDTH>::backward(
+void FullyFusedMLP<T, WIDTH>::backward_impl(
 	cudaStream_t stream,
 	const Context& ctx,
 	const GPUMatrixDynamic<T>& input,
@@ -785,8 +781,6 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	bool use_inference_params,
 	EGradientMode param_gradients_mode
 ) {
-	this->check_backward_args(input, output, dL_doutput, dL_dinput);
-
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
 
@@ -794,7 +788,7 @@ void FullyFusedMLP<T, WIDTH>::backward(
 	// (Needed in the fully-fused kernels.)
 	std::vector<GPUMatrix<T>> backward_tmp(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		backward_tmp[i].set_size(m_network_width, batch_size);
+		backward_tmp[i].set_size_unsafe(m_network_width, batch_size);
 	}
 	auto backward_tmp_alloc = GPUMatrixBase::allocate_shared_memory(stream, backward_tmp);
 
@@ -904,7 +898,7 @@ std::unique_ptr<typename FullyFusedMLP<T, WIDTH>::ForwardContext> FullyFusedMLP<
 	// (Needed in the fully-fused kernels.)
 	forward->hidden.resize(num_forward_activations());
 	for (uint32_t i = 0; i < num_forward_activations(); ++i) {
-		forward->hidden[i].set_size(m_network_width, batch_size);
+		forward->hidden[i].set_size_unsafe(m_network_width, batch_size);
 	}
 
 	forward->alloc = GPUMatrixBase::allocate_shared_memory(stream, forward->hidden);
@@ -916,10 +910,10 @@ template <typename T, int WIDTH>
 void FullyFusedMLP<T, WIDTH>::set_params(T* params, T* inference_params, T* backward_params, T* gradients) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
-		m_weight_matrices[i].set_data(params + current_pos);
-		m_weight_matrices_inference[i].set_data(inference_params + current_pos);
-		m_weight_matrices_backward[i].set_data((m_use_feedback_alignment ? backward_params : params) + current_pos);
-		m_gradient_matrices[i].set_data(gradients + current_pos);
+		m_weight_matrices[i].set_data_unsafe(params + current_pos);
+		m_weight_matrices_inference[i].set_data_unsafe(inference_params + current_pos);
+		m_weight_matrices_backward[i].set_data_unsafe((m_use_feedback_alignment ? backward_params : params) + current_pos);
+		m_gradient_matrices[i].set_data_unsafe(gradients + current_pos);
 		current_pos += m_weight_matrices[i].n_elements();
 	}
 }
@@ -930,7 +924,7 @@ void FullyFusedMLP<T, WIDTH>::initialize_params(pcg32& rnd, float* params_full_p
 
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
-		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
+		m_weight_matrices_full_precision[i].set_data_unsafe(params_full_precision + current_pos);
 		current_pos += m_weight_matrices_full_precision[i].n_elements();
 
 		if (m_activation == Activation::Sine) {

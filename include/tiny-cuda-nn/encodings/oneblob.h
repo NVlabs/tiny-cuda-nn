@@ -45,10 +45,10 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename F>
-__device__ inline float one_blob_subwarp_aligned(F kernel, const float* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
+__device__ inline float one_blob_subwarp_aligned(F kernel, MatrixView<const float> data_in, const uint32_t elem_index, const uint32_t encoded_index, const uint32_t num_bins_log2) {
 	const uint32_t n_bins = 1 << num_bins_log2;
 	const uint32_t bin_index = encoded_index & (n_bins - 1);
-	const float x = data_in[encoded_index >> num_bins_log2];
+	const float x = data_in(encoded_index >> num_bins_log2, elem_index);
 
 	const float left_boundary = scalbnf(bin_index, -num_bins_log2);
 	float left_cdf = kernel(left_boundary - x, n_bins) + kernel(left_boundary - x - 1.0f, n_bins) + kernel(left_boundary - x + 1.0f, n_bins);
@@ -88,7 +88,7 @@ __global__ void kernel_one_blob(
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
-	PitchedPtr<const float> data_in,
+	MatrixView<const float> data_in,
 	PitchedPtr<T> data_out
 ) {
 	const uint32_t fan_out_encoded = num_to_encode << num_bins_log2;
@@ -103,7 +103,7 @@ __global__ void kernel_one_blob(
 		// A value of 1 here allows the network to learn a bias-like thing.
 		data_out(i)[j] = 1;
 	} else {
-		data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in(i), j, num_bins_log2);
+		data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in, i, j, num_bins_log2);
 	}
 }
 
@@ -112,7 +112,7 @@ __global__ void kernel_one_blob_soa(
 	const uint32_t num_elements,
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
-	PitchedPtr<const float> data_in,
+	MatrixView<const float> data_in,
 	T* __restrict__ data_out
 ) {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -120,7 +120,7 @@ __global__ void kernel_one_blob_soa(
 	const uint32_t to_encode_index = j + i * blockDim.x;
 	if (to_encode_index >= num_elements * num_to_encode) return;
 
-	const float x = data_in(i)[j];
+	const float x = data_in(j, i);
 
 	const uint32_t n_bins = 1 << num_bins_log2;
 	T* out = (data_out + i + j * n_bins * num_elements);
@@ -143,17 +143,16 @@ __global__ void kernel_one_blob_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t num_bins_log2,
-	MatrixLayout output_layout,
-	PitchedPtr<const T> dL_dy,
-	PitchedPtr<const float> data_in,
-	PitchedPtr<float> dL_dx)
+	MatrixView<const T> dL_dy,
+	MatrixView<const float> data_in,
+	MatrixView<float> dL_dx)
 {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
 	const uint32_t to_encode_index = j + i * blockDim.x;
 	if (to_encode_index >= num_elements * n_dims_to_encode) return;
 
-	const float x = data_in(i)[j];
+	const float x = data_in(j, i);
 
 	const uint32_t n_bins = 1 << num_bins_log2;
 
@@ -170,12 +169,10 @@ __global__ void kernel_one_blob_backward(
 		left_cdf = right_cdf;
 
 		uint32_t encoded_dim = j * n_bins + k;
-		const T* grad = output_layout == AoS ? &dL_dy(i)[encoded_dim] : (dL_dy.ptr + i + encoded_dim * num_elements);
-
-		result += (float)*grad * deriv;
+		result += (float)dL_dy(encoded_dim, i) * deriv;
 	}
 
-	dL_dx(i)[j] = result;
+	dL_dx(j, i) = result;
 }
 
 template <typename T>
@@ -192,7 +189,7 @@ public:
 		}
 	}
 
-	std::unique_ptr<Context> forward(
+	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
@@ -216,7 +213,7 @@ public:
 				num_bins_log2,
 				m_n_dims_to_encode,
 				m_n_to_pad,
-				input.pitched_ptr(),
+				input.view(),
 				output->pitched_ptr()
 			);
 		} else {
@@ -229,7 +226,7 @@ public:
 				input.n(),
 				num_bins_log2,
 				m_n_dims_to_encode,
-				input.pitched_ptr(),
+				input.view(),
 				output->data()
 			);
 
@@ -242,7 +239,7 @@ public:
 		return std::make_unique<Context>();
 	}
 
-	void backward(
+	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,
@@ -256,8 +253,6 @@ public:
 			return;
 		}
 
-		CHECK_THROW(dL_doutput.layout() == output.layout());
-
 		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
 
 		const uint32_t min_n_threads = n_threads_linear;
@@ -269,10 +264,9 @@ public:
 			input.n(),
 			m_n_dims_to_encode,
 			num_bins_log2,
-			output.layout(),
-			dL_doutput.pitched_ptr(),
-			input.pitched_ptr(),
-			dL_dinput->pitched_ptr()
+			dL_doutput.view(),
+			input.view(),
+			dL_dinput->view()
 		);
 	}
 
