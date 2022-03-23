@@ -116,7 +116,7 @@ public:
 		std::unique_ptr<Context> model_ctx;
 	};
 
-	std::unique_ptr<ForwardContext> forward(cudaStream_t stream, const float loss_scale, const GPUMatrix<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+	std::unique_ptr<ForwardContext> forward(cudaStream_t stream, const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
 		CHECK_THROW(input.n() == target.n());
 
 		const uint32_t batch_size = input.n();
@@ -159,15 +159,15 @@ public:
 		return forward;
 	}
 
-	void forward(const float loss_scale, const GPUMatrix<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+	void forward(const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
 		forward(nullptr, loss_scale, input, target, data_pdf, loss_value);
 	}
 
-	void backward(cudaStream_t stream, const ForwardContext& ctx, const GPUMatrix<T>& input) {
+	void backward(cudaStream_t stream, const ForwardContext& ctx, const GPUMatrixDynamic<T>& input) {
 		m_model->backward(stream, *ctx.model_ctx, input, ctx.output, ctx.dL_doutput);
 	}
 
-	void backward(const ForwardContext& ctx, const GPUMatrix<T>& input) {
+	void backward(const ForwardContext& ctx, const GPUMatrixDynamic<T>& input) {
 		backward(nullptr, ctx, input);
 	}
 
@@ -181,7 +181,7 @@ public:
 
 	void training_step(
 		cudaStream_t stream,
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
 		float* loss_value = nullptr,
 		const GPUMatrix<float>* data_pdf = nullptr
@@ -194,7 +194,7 @@ public:
 		GPUMatrix<float> loss;
 		m_graph.capture_and_execute(stream, false, [&]() {
 			auto ctx = forward(stream, loss_scale, input, target, data_pdf);
-			loss = ctx->L.view();
+			loss = ctx->L.alias();
 			backward(stream, *ctx, input);
 		});
 
@@ -206,7 +206,7 @@ public:
 	}
 
 	void training_step(
-		const GPUMatrix<T>& input,
+		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
 		float* loss_value = nullptr,
 		const GPUMatrix<float>* data_pdf = nullptr

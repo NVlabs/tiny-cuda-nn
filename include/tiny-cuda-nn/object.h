@@ -93,13 +93,22 @@ class DifferentiableObject : public ParametricObject<PARAMS_T> {
 public:
 	virtual ~DifferentiableObject() { }
 
-	virtual void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) = 0;
+	virtual void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) = 0;
+	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) {
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(output.m() == padded_output_width());
+		CHECK_THROW(input.n() == output.n());
+
+		inference_mixed_precision_impl(stream, input, output, use_inference_params);
+	}
 	void inference_mixed_precision(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) {
 		inference_mixed_precision(nullptr, input, output, use_inference_params);
 	}
 
 	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
-		check_inference_args(input, output);
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(output.m() == output_width());
+		CHECK_THROW(input.n() == output.n());
 
 		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
 		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
@@ -122,13 +131,26 @@ public:
 		inference(nullptr, input, output);
 	}
 
-	virtual std::unique_ptr<Context> forward(
+	virtual std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	) = 0;
+	std::unique_ptr<Context> forward(
+		cudaStream_t stream,
+		const GPUMatrixDynamic<T>& input,
+		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
+		bool use_inference_params = false,
+		bool prepare_input_gradients = false
+	) {
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(!output || output->m() == padded_output_width());
+		CHECK_THROW(!output || input.n() == output->n());
+
+		return forward_impl(stream, input, output, use_inference_params, prepare_input_gradients);
+	}
 	std::unique_ptr<Context> forward(
 		const GPUMatrixDynamic<T>& input,
 		GPUMatrixDynamic<COMPUTE_T>* output = nullptr,
@@ -138,7 +160,7 @@ public:
 		return forward(nullptr, input, output, use_inference_params, prepare_input_gradients);
 	}
 
-	virtual void backward(
+	virtual void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
@@ -148,6 +170,29 @@ public:
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) = 0;
+	void backward(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<COMPUTE_T>& output,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) {
+		// Width
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(output.m() == padded_output_width());
+		CHECK_THROW(dL_doutput.m() == padded_output_width());
+		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
+
+		// Equal batch size
+		CHECK_THROW(input.n() == output.n());
+		CHECK_THROW(input.n() == dL_doutput.n());
+		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
+
+		backward_impl(stream, ctx, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
+	}
 	void backward(
 		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
@@ -192,42 +237,6 @@ public:
 	virtual uint32_t output_width() const = 0;
 
 	virtual uint32_t required_input_alignment() const = 0;
-
-	void check_inference_args(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
-		CHECK_THROW(input.m() == input_width());
-		CHECK_THROW(output.m() == output_width());
-		CHECK_THROW(input.n() == output.n());
-	}
-
-	void check_inference_mixed_precision_args(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output) {
-		CHECK_THROW(input.m() == input_width());
-		CHECK_THROW(output.m() == padded_output_width());
-		CHECK_THROW(input.n() == output.n());
-	}
-
-	void check_forward_args(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>* output) {
-		CHECK_THROW(input.m() == input_width());
-		CHECK_THROW(!output || output->m() == padded_output_width());
-		CHECK_THROW(!output || input.n() == output->n());
-	}
-
-	void check_backward_args(
-		const GPUMatrixDynamic<T>& input,
-		const GPUMatrixDynamic<COMPUTE_T>& output,
-		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
-		GPUMatrixDynamic<T>* dL_dinput
-	) {
-		// Width
-		CHECK_THROW(input.m() == input_width());
-		CHECK_THROW(output.m() == padded_output_width());
-		CHECK_THROW(dL_doutput.m() == padded_output_width());
-		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
-
-		// Equal batch size
-		CHECK_THROW(input.n() == output.n());
-		CHECK_THROW(input.n() == dL_doutput.n());
-		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
-	}
 };
 
 TCNN_NAMESPACE_END

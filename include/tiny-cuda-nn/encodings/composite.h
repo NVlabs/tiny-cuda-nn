@@ -99,7 +99,7 @@ public:
 		}
 	}
 
-	std::unique_ptr<Context> forward(
+	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
@@ -143,7 +143,7 @@ public:
 		return forward;
 	}
 
-	void backward(
+	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,

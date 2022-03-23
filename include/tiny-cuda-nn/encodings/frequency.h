@@ -49,8 +49,8 @@ __global__ void frequency_encoding(
 	const uint32_t n_frequencies,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
-	PitchedPtr<const float> data_in,
-	PitchedPtr<T> data_out,
+	MatrixView<const float> data_in,
+	MatrixView<T> data_out,
 	float* __restrict__ dy_dx)
 {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -70,7 +70,7 @@ __global__ void frequency_encoding(
 	 *     padding (value 1.f)
 	 */
 	if (j >= fan_out_encoded) {
-		data_out(i)[j] = 1;
+		data_out(j, i) = 1;
 	} else {
 		/* Layout of encoded features (e.g. when inputs abcd.. are XYZ positions):
 		 *     sin(a.x), cos(a.x) sin(2pi a.x), cos(2pi a.x) sin(4pi a.x) ...
@@ -84,9 +84,9 @@ __global__ void frequency_encoding(
 
 		const float phase_shift = (j % 2) * (PI/2);
 
-		const float x = scalbnf(data_in(i)[encoded_input_feature_i], log2_frequency);
+		const float x = scalbnf(data_in(encoded_input_feature_i, i), log2_frequency);
 		const float input = x * PI + phase_shift;
-		data_out(i)[j] = (T)__sinf(input);
+		data_out(j, i) = (T)__sinf(input);
 		if (dy_dx != nullptr) {
 			dy_dx[i * fan_out_encoded + j] = scalbnf(1.0f, log2_frequency) * PI * __cosf(input);
 		}
@@ -98,9 +98,9 @@ __global__ void frequency_encoding_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t n_frequencies,
-	PitchedPtr<const T> dL_dy,
+	MatrixView<const T> dL_dy,
 	const float* dy_dx,
-	PitchedPtr<float> dL_dx
+	MatrixView<float> dL_dx
 ) {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_elements) return;
@@ -112,9 +112,9 @@ __global__ void frequency_encoding_backward(
 
 	float result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(i)[j * outputs_per_input + k] * dy_dx[i * n_dims_to_encode * outputs_per_input + j * outputs_per_input + k];
+		result += (float)dL_dy(j * outputs_per_input + k, i) * dy_dx[i * n_dims_to_encode * outputs_per_input + j * outputs_per_input + k];
 	}
-	dL_dx(i)[j] = result;
+	dL_dx(j, i) = result;
 }
 
 template <typename T>
@@ -125,7 +125,7 @@ public:
 		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode * m_n_frequencies * 2;
 	}
 
-	std::unique_ptr<Context> forward(
+	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
@@ -147,15 +147,15 @@ public:
 			m_n_frequencies,
 			m_n_dims_to_encode,
 			m_n_to_pad,
-			input.pitched_ptr(),
-			output->pitched_ptr(),
+			input.view(),
+			output->view(),
 			forward->dy_dx.data()
 		);
 
 		return forward;
 	}
 
-	void backward(
+	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,
@@ -175,9 +175,9 @@ public:
 			input.n() * m_n_dims_to_encode,
 			m_n_dims_to_encode,
 			m_n_frequencies,
-			dL_doutput.pitched_ptr(),
+			dL_doutput.view(),
 			forward.dy_dx.data(),
-			dL_dinput->pitched_ptr()
+			dL_dinput->view()
 		);
 	}
 
