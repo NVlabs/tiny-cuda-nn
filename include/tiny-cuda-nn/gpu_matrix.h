@@ -107,6 +107,31 @@ public:
 };
 
 template <typename T>
+struct MatrixView {
+	TCNN_HOST_DEVICE MatrixView(T* data, uint32_t stride_i, uint32_t stride_j) : data{data}, stride_i{stride_i}, stride_j{stride_j} {}
+	TCNN_HOST_DEVICE MatrixView(const MatrixView<std::remove_const_t<T>>& other) : data{other.data}, stride_i{other.stride_i}, stride_j{other.stride_j} {}
+
+	TCNN_HOST_DEVICE T& operator()(uint32_t i, uint32_t j = 0) const {
+		return data[i * stride_i + j * stride_j];
+	}
+
+	TCNN_HOST_DEVICE void advance(uint32_t m, uint32_t n) {
+		data = &(*this)(m, n);
+	}
+
+	TCNN_HOST_DEVICE void advance_rows(uint32_t m) {
+		advance(m, 0);
+	}
+
+	TCNN_HOST_DEVICE void advance_cols(uint32_t n) {
+		advance(0, n);
+	}
+
+	T* data;
+	uint32_t stride_i, stride_j;
+};
+
+template <typename T>
 class GPUMatrixDynamic : public GPUMatrixBase {
 public:
 	using Type = T;
@@ -218,8 +243,12 @@ public:
 		return slice(0, rows(), offset, size);
 	}
 
-	GPUMatrixDynamic<T> view() const {
+	GPUMatrixDynamic<T> alias() const {
 		return slice(0, rows(), 0, cols());
+	}
+
+	MatrixView<T> view() const {
+		return {data(), layout() == CM ? 1u : stride(), layout() == CM ? stride() : 1u};
 	}
 
 	uint32_t rows() const { return m_rows; }
@@ -445,8 +474,8 @@ public:
 		return ((GPUMatrixDynamic<T>*)this)->slice_cols(offset, size);
 	}
 
-	GPUMatrix<T, static_layout> view() const {
-		return ((GPUMatrixDynamic<T>*)this)->view();
+	GPUMatrix<T, static_layout> alias() const {
+		return ((GPUMatrixDynamic<T>*)this)->alias();
 	}
 
 	GPUMatrix<T, static_transposed_layout> transposed() const {
