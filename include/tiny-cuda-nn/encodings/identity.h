@@ -51,9 +51,8 @@ __global__ void identity(
 	const uint32_t num_to_pad,
 	const float scale,
 	const float offset,
-	MatrixLayout output_layout,
-	PitchedPtr<const float> data_in,
-	PitchedPtr<T> data_out)
+	MatrixView<const float> data_in,
+	MatrixView<T> data_out)
 {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_outputs) return;
@@ -62,12 +61,10 @@ __global__ void identity(
 	const uint32_t i = encoded_index / fan_out;
 	const uint32_t j = encoded_index - i * fan_out;
 
-	T* out = output_layout == AoS ? &data_out(i)[j] : (data_out.ptr + i + j * num_elements);
-
 	if (j >= num_to_encode) {
-		*out = 1;
+		data_out(j, i) = 1;
 	} else {
-		*out = data_in(i)[j] * scale + offset;
+		data_out(j, i) = data_in(j, i) * scale + offset;
 	}
 }
 
@@ -77,9 +74,8 @@ __global__ void identity_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const float scale,
-	MatrixLayout output_layout,
-	PitchedPtr<const T> dL_dy,
-	PitchedPtr<float> dL_dx)
+	MatrixView<const T> dL_dy,
+	MatrixView<float> dL_dx)
 {
 	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (output_index >= num_outputs) return;
@@ -87,10 +83,8 @@ __global__ void identity_backward(
 	const uint32_t i = output_index / n_dims_to_encode;
 	const uint32_t j = output_index - i * n_dims_to_encode;
 
-	const T* grad = output_layout == AoS ? &dL_dy(i)[j] : (dL_dy.ptr + i + j * num_elements);
-
 	// The identity encoding can simply pass through the derivative.
-	dL_dx(i)[j] = (T)((float)*grad * scale);
+	dL_dx(j, i) = (T)((float)dL_dy(j, i) * scale);
 }
 
 template <typename T>
@@ -119,9 +113,8 @@ public:
 			m_n_to_pad,
 			m_scale,
 			m_offset,
-			output->layout(),
-			input.pitched_ptr(),
-			output->pitched_ptr()
+			input.view(),
+			output->view()
 		);
 
 		return std::make_unique<Context>();
@@ -141,16 +134,13 @@ public:
 			return;
 		}
 
-		CHECK_THROW(dL_doutput.layout() == output.layout());
-
 		linear_kernel(identity_backward<T>, 0, stream,
 			input.n() * m_n_dims_to_encode,
 			input.n(),
 			m_n_dims_to_encode,
 			m_scale,
-			output.layout(),
-			dL_doutput.pitched_ptr(),
-			dL_dinput->pitched_ptr()
+			dL_doutput.view(),
+			dL_dinput->view()
 		);
 	}
 

@@ -49,8 +49,8 @@ __global__ void triangle_wave_encoding(
 	const uint32_t n_frequencies,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
-	PitchedPtr<const float> data_in,
-	PitchedPtr<T> data_out,
+	MatrixView<const float> data_in,
+	MatrixView<T> data_out,
 	float* __restrict__ dy_dx)
 {
 	const uint32_t fan_out_encoded = num_to_encode * n_frequencies;
@@ -63,18 +63,18 @@ __global__ void triangle_wave_encoding(
 	const uint32_t j = encoded_index - i * fan_out;
 
 	if (j >= fan_out_encoded) {
-		data_out(i)[j] = 1;
+		data_out(j, i) = 1;
 	} else {
 		const uint32_t encoded_input_feature_i = j / n_frequencies;
 		const int log2_frequency = j - encoded_input_feature_i * n_frequencies;
 
-		const float x = scalbnf(data_in(i)[encoded_input_feature_i], log2_frequency-1);
+		const float x = scalbnf(data_in(encoded_input_feature_i, i), log2_frequency-1);
 
 		// Small log2_frequency-based phase shift to help disambiguate locations
 		const float val = x + log2_frequency * 0.25f;
 		const float result = fabsf(val - floorf(val) - 0.5f) * 4 - 1;
 
-		data_out(i)[j] = (T)result;
+		data_out(j, i) = (T)result;
 		if (dy_dx != nullptr) {
 			dy_dx[i * fan_out_encoded + j] = scalbnf((int)floorf(val*2.0f) % 2 == 0 ? -1.0f : 1.0f, log2_frequency+1);
 		}
@@ -86,9 +86,9 @@ __global__ void triangle_wave_encoding_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t n_frequencies,
-	PitchedPtr<const T> dL_dy,
+	MatrixView<const T> dL_dy,
 	const float* dy_dx,
-	PitchedPtr<float> dL_dx
+	MatrixView<float> dL_dx
 ) {
 	const uint32_t fan_out = n_dims_to_encode;
 
@@ -103,9 +103,9 @@ __global__ void triangle_wave_encoding_backward(
 
 	float result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(i)[j * outputs_per_input + k] * dy_dx[i * fan_out_encoded + j * outputs_per_input + k];
+		result += (float)dL_dy(j * outputs_per_input + k, i) * dy_dx[i * fan_out_encoded + j * outputs_per_input + k];
 	}
-	dL_dx(i)[j] = result;
+	dL_dx(j, i) = result;
 }
 
 template <typename T>
@@ -138,8 +138,8 @@ public:
 			m_n_frequencies,
 			m_n_dims_to_encode,
 			m_n_to_pad,
-			input.pitched_ptr(),
-			output->pitched_ptr(),
+			input.view(),
+			output->view(),
 			forward->dy_dx.data()
 		);
 
@@ -166,9 +166,9 @@ public:
 			input.n() * m_n_dims_to_encode,
 			m_n_dims_to_encode,
 			m_n_frequencies,
-			dL_doutput.pitched_ptr(),
+			dL_doutput.view(),
 			forward.dy_dx.data(),
-			dL_dinput->pitched_ptr()
+			dL_dinput->view()
 		);
 	}
 
