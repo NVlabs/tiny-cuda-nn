@@ -125,7 +125,7 @@ public:
 		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode * m_n_frequencies * 2;
 	}
 
-	std::unique_ptr<Context> forward(
+	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
@@ -155,7 +155,7 @@ public:
 		return forward;
 	}
 
-	void backward(
+	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,
