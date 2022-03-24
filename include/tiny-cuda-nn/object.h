@@ -205,7 +205,7 @@ public:
 		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
-	virtual void backward_backward_input(
+	virtual void backward_backward_input_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<T>& input,
@@ -214,7 +214,41 @@ public:
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
-	) { throw std::runtime_error(std::string("DifferentiableObject::backward_backward_input: not implemented error")); }
+	) { throw std::runtime_error(std::string("DifferentiableObject::backward_backward_input_impl: not implemented error")); }
+	void backward_backward_input(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) {
+		// Width
+		CHECK_THROW(input.m() == input_width());
+		CHECK_THROW(dL_ddLdinput.m() == input_width());
+		CHECK_THROW(dL_doutput.m() == padded_output_width());
+		CHECK_THROW(!dL_ddLdoutput || dL_ddLdoutput->m() == padded_output_width());
+
+		// Equal batch size
+		CHECK_THROW(input.n() == dL_ddLdinput.n());
+		CHECK_THROW(input.n() == dL_doutput.n());
+		CHECK_THROW(!dL_ddLdoutput || input.n() == dL_ddLdoutput->n());
+
+		backward_backward_input_impl(stream, ctx, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, use_inference_params, param_gradients_mode);
+	}
+	void backward_backward_input(
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
+		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) {
+		backward_backward_input(nullptr, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, use_inference_params, param_gradients_mode);
+	}
 
 	void input_gradient(
 		cudaStream_t stream,

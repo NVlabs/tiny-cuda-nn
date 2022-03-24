@@ -505,8 +505,8 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	// outputs
 	GRAD_T* __restrict__ grid_gradient,
 	// inputs
-	PitchedPtr<const float> dL_ddLdx,
-	const float* __restrict__ positions_in,
+	MatrixView<const float> dL_ddLdx,
+	MatrixView<const float> positions_in,
 	const T* __restrict__ dL_dy
 ) {
     const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
@@ -560,12 +560,12 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in[i + dim * num_elements], &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
 		}
 	} else {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in[i + dim * num_elements], &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative);
 		}
 	}
 
@@ -584,7 +584,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	// for N-linear interpolation
     #pragma unroll
     for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-        float grad_in = scale * ((float*)dL_ddLdx(i))[grad_dim] * pos_derivative[grad_dim];
+        float grad_in = scale * dL_ddLdx(grad_dim, i);
         #pragma unroll
         for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
             float weight = grad_in;
@@ -604,11 +604,12 @@ __global__ void kernel_grid_backward_input_backward_grid(
             }
 
             // left
+			float weight_1st = weight * pos_derivative[grad_dim]
             pos_grid_local[grad_dim] = pos_grid[grad_dim];
-            add_grid_gradient(pos_grid_local, grad, -weight);
+            add_grid_gradient(pos_grid_local, grad, -weight_1st);
             // right
             pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
-            add_grid_gradient(pos_grid_local, grad, weight);
+            add_grid_gradient(pos_grid_local, grad, weight_1st);
         }
     }
 
@@ -619,7 +620,7 @@ __global__ void kernel_grid_backward_input_backward_dLdoutput(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
 	// inputs
-	PitchedPtr<const float> dL_ddLdx,
+	MatrixView<const float> dL_ddLdx,
 	const float* __restrict__ dy_dx,
 	const T* dL_dy_rm,
 	// ouputs
@@ -628,16 +629,14 @@ __global__ void kernel_grid_backward_input_backward_dLdoutput(
     const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_elements) return;
 
-    auto dL_ddLdx_local = dL_ddLdx(i);
     auto dL_ddLdy_local = dL_ddLdy(i);
 
     for (uint32_t k=0; k < num_grid_features; ++k) {
         auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
         float result = 0;
-        // grad_dim=0,1,2
         #pragma unroll
         for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) { 
-            result += dy_dx_local[grad_dim] * dL_ddLdx_local[grad_dim];
+            result += dy_dx_local[grad_dim] * dL_ddLdx(grad_dim, i);
         }
         dL_ddLdy_local[k] = (T)result;
     }
@@ -937,7 +936,7 @@ public:
 		);
 	}
 
-	void backward_backward_input(
+	void backward_backward_input_impl(
 		cudaStream_t stream,
 		const Context& ctx,
 		const GPUMatrixDynamic<float>& input,
@@ -1006,9 +1005,9 @@ public:
 				m_interpolation_type,
 				m_grid_type,
 				grid_gradient,
-				dL_ddLdinput.pitched_ptr(),
-				forward.positions.data(), // positions SoA
-				dL_dy_rm
+				dL_ddLdinput.view(),
+				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
+				dL_dy_rm // gradients SoA
 			);
 
 			if (!std::is_same<grad_t, T>::value) {
@@ -1025,7 +1024,7 @@ public:
 		linear_kernel(kernel_grid_backward_input_backward_dLdoutput<T, N_POS_DIMS>, 0, stream, 
 			num_elements,
 			m_n_features,
-			dL_ddLdinput.pitched_ptr(),
+			dL_ddLdinput.view(),
 			forward.dy_dx.data(),
 			dL_dy_rm,
 			dL_ddLdoutput->pitched_ptr()
