@@ -788,21 +788,21 @@ __global__ void kernel_grid_backward_input_backward_dLdoutput(
 	const float* __restrict__ dy_dx,
 	const T* dL_dy_rm,
 	// ouputs
-	tcnn::PitchedPtr<T> dL_ddLdy
+	tcnn::MatrixView<T> dL_ddLdy
 ) {
 	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_elements) return;
 
-	auto dL_ddLdy_local = dL_ddLdy(i);
-
 	for (uint32_t k=0; k < num_grid_features; ++k) {
 		auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+
 		float result = 0;
 		#pragma unroll
 		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
 			result += dy_dx_local[grad_dim] * dL_ddLdx(grad_dim, i);
 		}
-		dL_ddLdy_local[k] = (T)result;
+
+		dL_ddLdy(k, i) = (T)result;
 	}
 }
 
@@ -1194,7 +1194,7 @@ public:
 				forward.dy_dx.data(),
 				dL_dy_rm,
 				// outputs
-				dL_ddLdoutput->pitched_ptr()
+				dL_ddLdoutput->view()
 			);
 		}
 
