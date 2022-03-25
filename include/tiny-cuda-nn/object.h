@@ -212,6 +212,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_ddLdinput,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) { throw std::runtime_error(std::string("DifferentiableObject::backward_backward_input_impl: not implemented error")); }
@@ -222,6 +223,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_ddLdinput,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) {
@@ -230,13 +232,15 @@ public:
 		CHECK_THROW(dL_ddLdinput.m() == input_width());
 		CHECK_THROW(dL_doutput.m() == padded_output_width());
 		CHECK_THROW(!dL_ddLdoutput || dL_ddLdoutput->m() == padded_output_width());
+		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
 
 		// Equal batch size
 		CHECK_THROW(input.n() == dL_ddLdinput.n());
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_ddLdoutput || input.n() == dL_ddLdoutput->n());
+		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
 
-		backward_backward_input_impl(stream, ctx, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, use_inference_params, param_gradients_mode);
+		backward_backward_input_impl(stream, ctx, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 	void backward_backward_input(
 		const Context& ctx,
@@ -244,10 +248,11 @@ public:
 		const GPUMatrixDynamic<T>& dL_ddLdinput,
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) {
-		backward_backward_input(nullptr, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, use_inference_params, param_gradients_mode);
+		backward_backward_input(nullptr, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
 	void input_gradient(

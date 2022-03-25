@@ -71,7 +71,7 @@ public:
 	virtual void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) = 0;
 	virtual Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) = 0;
 	virtual void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void* output, const void* params) = 0;
-	virtual void backward_backward_input(cudaStream_t stream, const Context& ctx, uint32_t n_elements, const float* dL_ddLdinput, const float* input, const void* dL_doutput, void* dL_dparams, void* dL_ddLdoutput, const void* params) = 0;
+	virtual void backward_backward_input(cudaStream_t stream, const Context& ctx, uint32_t n_elements, const float* dL_ddLdinput, const float* input, const void* dL_doutput, void* dL_dparams, void* dL_ddLdoutput, float* dL_dinput, const void* params) = 0;
 
 	virtual uint32_t n_input_dims() const = 0;
 

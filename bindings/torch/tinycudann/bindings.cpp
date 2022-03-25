@@ -146,9 +146,9 @@ public:
 		return { dL_dinput, dL_dparams };
 	}
 
-	std::tuple<torch::Tensor, torch::Tensor> bwd_bwd_input(const tcnn::cpp::Context& ctx, torch::Tensor input, torch::Tensor params, torch::Tensor dL_ddLdinput, torch::Tensor dL_doutput) {
+	std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> bwd_bwd_input(const tcnn::cpp::Context& ctx, torch::Tensor input, torch::Tensor params, torch::Tensor dL_ddLdinput, torch::Tensor dL_doutput) {
 		// from: dL_ddLdinput 
-		// to: 	 dL_ddLdoutput, dL_dparams
+		// to: 	 dL_ddLdoutput, dL_dparams, dL_dinput
 		
 		if (!ctx.ctx) {
 			throw std::runtime_error{"Module::bwd_bwd_input: called with invalid context. fwd likely (mistakenly) ran in inference mode."};
@@ -166,6 +166,7 @@ public:
 		CHECK_THROW(dL_ddLdinput.size(1) == n_input_dims());
 		CHECK_THROW(params.size(0) == n_params());
 		CHECK_THROW(dL_doutput.size(0) == input.size(0));
+		CHECK_THROW(dL_ddLdinput.size(0) == input.size(0));
 
 		uint32_t batch_size = input.size(0);
 
@@ -181,6 +182,11 @@ public:
 			dL_dparams = torch::zeros({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(torch::kCUDA));
 		}
 
+		torch::Tensor dL_dinput;
+		if (input.requires_grad()) {
+			dL_dinput = torch::zeros({ batch_size, n_input_dims() }, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+		}
+
 		if (dL_doutput.requires_grad() || params.requires_grad()) {
 			m_module->backward_backward_input(
 				stream, 
@@ -188,14 +194,15 @@ public:
 				batch_size,
 				dL_ddLdinput.data_ptr<float>(),
 				input.data_ptr<float>(),
-				params.requires_grad() ? void_data_ptr(dL_doutput) : nullptr,
+				(params.requires_grad() || input.requires_grad() ) ? void_data_ptr(dL_doutput) : nullptr,
 				params.requires_grad() ? void_data_ptr(dL_dparams) : nullptr,
 				dL_doutput.requires_grad() ? void_data_ptr(dL_ddLdoutput) : nullptr,
+				input.requires_grad() ? dL_dinput.data_ptr<float>() : nullptr,
 				void_data_ptr(params)
 			);
 		}
 
-		return {dL_ddLdoutput, dL_dparams};
+		return {dL_ddLdoutput, dL_dparams, dL_dinput};
 	}
 
 	torch::Tensor initial_params(size_t seed) {
