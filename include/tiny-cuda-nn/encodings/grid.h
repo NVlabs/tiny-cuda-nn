@@ -508,8 +508,8 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	// outputs
 	GRAD_T* __restrict__ grid_gradient
 ) {
-    const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
-    if (i >= num_elements) return;
+	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
+	if (i >= num_elements) return;
 
 	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
@@ -581,36 +581,35 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	}
 
 	// for N-linear interpolation
-    #pragma unroll
-    for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-        float grad_in = scale * dL_ddLdx(grad_dim, i) * pos_derivative[grad_dim];
-        #pragma unroll
-        for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
-            float weight = grad_in;
-            uint32_t pos_grid_local[N_POS_DIMS];
-        
-            #pragma unroll
-            for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
-                const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
+	#pragma unroll
+	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+		float grad_in = scale * dL_ddLdx(grad_dim, i) * pos_derivative[grad_dim];
+		#pragma unroll
+		for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
+			float weight = grad_in;
+			uint32_t pos_grid_local[N_POS_DIMS];
 
-                if ((idx & 1<<non_grad_dim) == 0) {
-                    weight *= 1 - pos[dim];
-                    pos_grid_local[dim] = pos_grid[dim];
-                } else {
-                    weight *= pos[dim];
-                    pos_grid_local[dim] = pos_grid[dim] + 1;
-                }
-            }
+			#pragma unroll
+			for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
+				const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
 
-            // left
-            pos_grid_local[grad_dim] = pos_grid[grad_dim];
-            add_grid_gradient(pos_grid_local, grad, -weight);
-            // right
-            pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
-            add_grid_gradient(pos_grid_local, grad, weight);
-        }
-    }
+				if ((idx & 1<<non_grad_dim) == 0) {
+					weight *= 1 - pos[dim];
+					pos_grid_local[dim] = pos_grid[dim];
+				} else {
+					weight *= pos[dim];
+					pos_grid_local[dim] = pos_grid[dim] + 1;
+				}
+			}
 
+			// left
+			pos_grid_local[grad_dim] = pos_grid[grad_dim];
+			add_grid_gradient(pos_grid_local, grad, -weight);
+			// right
+			pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
+			add_grid_gradient(pos_grid_local, grad, weight);
+		}
+	}
 }
 
 template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
@@ -633,8 +632,8 @@ __global__ void kernel_grid_backward_input_backward_input(
 	// outputs
 	MatrixView<float> dL_dx
 ) {
-    const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
-    if (i >= num_elements) return;
+	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
+	if (i >= num_elements) return;
 
 	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
@@ -707,19 +706,19 @@ __global__ void kernel_grid_backward_input_backward_input(
 	}
 
 	static constexpr bool dimension_greater_than_1 = (N_POS_DIMS > 1);
-    #pragma unroll
-    for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+	#pragma unroll
+	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
 		float grad_out = 0;
-        #pragma unroll
-        for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
+		#pragma unroll
+		for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
 			// from diagonal part of Hessian; d(doutput_d[grad_dim])_d[grad_dim]
 			// NOTE: LinearInterpolations' diagonal part is 0.
 			if (interpolation_type == InterpolationType::Smoothstep) {
 				float weight_2nd_diag = grad_in_diag[grad_dim];
 				uint32_t pos_grid_local[N_POS_DIMS];
-				
+
 				#pragma unroll
-				for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {	
+				for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
 					const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
 					// real non_grad_dim
 					if ((idx & 1<<non_grad_dim) == 0) {
@@ -765,7 +764,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 							pos_grid_local[dim] = pos_grid[dim] + 1;
 						}
 					}
-					
+
 					// left
 					pos_grid_local[real_other_grad_dim] = pos_grid[real_other_grad_dim];
 					grad_out += calc_dLdx(pos_grid_local, -weight_2nd_other);
@@ -791,20 +790,20 @@ __global__ void kernel_grid_backward_input_backward_dLdoutput(
 	// ouputs
 	tcnn::PitchedPtr<T> dL_ddLdy
 ) {
-    const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= num_elements) return;
+	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= num_elements) return;
 
-    auto dL_ddLdy_local = dL_ddLdy(i);
+	auto dL_ddLdy_local = dL_ddLdy(i);
 
-    for (uint32_t k=0; k < num_grid_features; ++k) {
-        auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
-        float result = 0;
-        #pragma unroll
-        for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) { 
-            result += dy_dx_local[grad_dim] * dL_ddLdx(grad_dim, i);
-        }
-        dL_ddLdy_local[k] = (T)result;
-    }
+	for (uint32_t k=0; k < num_grid_features; ++k) {
+		auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+		float result = 0;
+		#pragma unroll
+		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+			result += dy_dx_local[grad_dim] * dL_ddLdx(grad_dim, i);
+		}
+		dL_ddLdy_local[k] = (T)result;
+	}
 }
 
 template <typename T>
@@ -1187,7 +1186,7 @@ public:
 
 		if (dL_ddLdoutput) {
 			// from dL_d(dL_dx) to dL_doutput
-			linear_kernel(kernel_grid_backward_input_backward_dLdoutput<T, N_POS_DIMS>, 0, stream, 
+			linear_kernel(kernel_grid_backward_input_backward_dLdoutput<T, N_POS_DIMS>, 0, stream,
 				num_elements,
 				m_n_features,
 				// inputs

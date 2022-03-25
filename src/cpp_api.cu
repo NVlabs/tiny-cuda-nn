@@ -103,8 +103,8 @@ public:
 	}
 
 	void backward_backward_input(cudaStream_t stream, const Context& ctx, uint32_t n_elements, const float* dL_ddLdinput, const float* input, const void* dL_doutput, void* dL_dparams, void* dL_ddLdoutput, float* dL_dinput, const void* params) override {
-		// from: dL_ddLdinput 
-		// to: 	 dL_ddLdoutput, dL_dparams
+		// from: dL_ddLdinput
+		// to:   dL_ddLdoutput, dL_dparams
 		m_model->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);

@@ -170,7 +170,7 @@ __global__ void kernel_mlp_fused_backward(
 	// Indices
 	const uint32_t li = threadIdx.x; // index in warp ("lane index")
 	const uint32_t wi = threadIdx.y; // index in block ("warp index")
-	const uint32_t bi = blockIdx.x;	 // block index
+	const uint32_t bi = blockIdx.x;  // block index
 
 	// Shared memory contains the intermediate activations of blockDim.y*16 elements.
 	// A skew is applied to the matrix storage to avoid bank conflicts.

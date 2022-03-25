@@ -147,9 +147,9 @@ public:
 	}
 
 	std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> bwd_bwd_input(const tcnn::cpp::Context& ctx, torch::Tensor input, torch::Tensor params, torch::Tensor dL_ddLdinput, torch::Tensor dL_doutput) {
-		// from: dL_ddLdinput 
-		// to: 	 dL_ddLdoutput, dL_dparams, dL_dinput
-		
+		// from: dL_ddLdinput
+		// to:   dL_ddLdoutput, dL_dparams, dL_dinput
+
 		if (!ctx.ctx) {
 			throw std::runtime_error{"Module::bwd_bwd_input: called with invalid context. fwd likely (mistakenly) ran in inference mode."};
 		}
@@ -189,7 +189,7 @@ public:
 
 		if (dL_doutput.requires_grad() || params.requires_grad()) {
 			m_module->backward_backward_input(
-				stream, 
+				stream,
 				ctx,
 				batch_size,
 				dL_ddLdinput.data_ptr<float>(),
