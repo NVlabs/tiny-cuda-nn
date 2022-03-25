@@ -401,12 +401,12 @@ __device__ inline float identity_2nd_derivative(float val) {
 }
 
 template <typename F, typename FPRIME, typename FPRIMEPRIME>
-__device__ inline void pos_fract(const float input, float* pos, float* pos_derivative, float* pos_2nd_derivative, uint32_t* pos_grid, float scale, F interpolation_fun, FPRIME interpolation_fun_derivative, FPRIMEPRIME interpolcation_fun_2nd_derivative) {
+__device__ inline void pos_fract(const float input, float* pos, float* pos_derivative, float* pos_2nd_derivative, uint32_t* pos_grid, float scale, F interpolation_fun, FPRIME interpolation_fun_derivative, FPRIMEPRIME interpolation_fun_2nd_derivative) {
 	*pos = input * scale + 0.5f;
 	int tmp = floorf(*pos);
 	*pos_grid = (uint32_t)tmp;
 	*pos -= (float)tmp;
-	*pos_2nd_derivative = interpolcation_fun_2nd_derivative(*pos);
+	*pos_2nd_derivative = interpolation_fun_2nd_derivative(*pos);
 	*pos_derivative = interpolation_fun_derivative(*pos);
 	*pos = interpolation_fun(*pos);
 }
