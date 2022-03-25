@@ -1159,6 +1159,7 @@ public:
 
 			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
+			// from dL_d(dL_dx) to dL_dgrid
 			kernel_grid_backward_input_backward_grid<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
@@ -1185,6 +1186,7 @@ public:
 		}
 
 		if (dL_ddLdoutput) {
+			// from dL_d(dL_dx) to dL_doutput
 			linear_kernel(kernel_grid_backward_input_backward_dLdoutput<T, N_POS_DIMS>, 0, stream, 
 				num_elements,
 				m_n_features,

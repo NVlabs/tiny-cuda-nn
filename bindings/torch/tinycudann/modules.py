@@ -71,11 +71,8 @@ class _module_function_backward(torch.autograd.Function):
 		#       x   d(dL_dparam)_d(...)
 		input, params, doutput = ctx.saved_tensors
 		# assert dweight_grad is None, "currently do not support 2nd-order gradients from gradient of grid"
-		# assert not input.requires_grad, "currently do not support 2nd-order gradients from gradient of dLdx to input"
 		with torch.enable_grad():
-			# NOTE: preserves requires_grad info
-			# NOTE: be cautious when multiplying and dividing loss_scale:
-   			# dinput_grad = dinput_grad * ctx.ctx_fwd.loss_scale
+			# NOTE: preserves requires_grad info (this function is in no_grad() context by default when invoking loss.backward())
 			doutput = doutput * ctx.ctx_fwd.loss_scale
 		with torch.no_grad():
 			doutput_grad, weight_grad, input_grad = ctx.ctx_fwd.native_tcnn_module.bwd_bwd_input(
@@ -85,11 +82,10 @@ class _module_function_backward(torch.autograd.Function):
 				dinput_grad,
 				doutput
 			)
-			# NOTE:
+			# NOTE: be cautious when multiplying and dividing loss_scale
 			#       doutput_grad uses dinput_grad
 			#       weight_grad  uses dinput_grad * doutput
 			#       input_grad   uses dinput_grad * doutput
-			# doutput_grad = None if doutput_grad is None else (doutput_grad / ctx.ctx_fwd.loss_scale)
 			weight_grad = None if weight_grad is None else (weight_grad / ctx.ctx_fwd.loss_scale)
 			input_grad = None if input_grad is None else (input_grad / ctx.ctx_fwd.loss_scale)
 
