@@ -24,10 +24,9 @@
  */
 
 /** @file   grid.h
- *  @author Thomas Müller & Alex Evans, NVIDIA
+ *  @author Thomas Müller, NVIDIA & Alex Evans, NVIDIA & Jianfei Guo, Shanghai AI Lab
  *  @brief  Trainable hierarchy of N-D grids of floating point values.
- *          The grids can be backed by dense memory, tiled memory, or by
- *          hash tables.
+ *          The grids can be backed by dense memory, tiled memory, or by hash tables.
  */
 
 #pragma once
