@@ -393,7 +393,11 @@ __device__ inline float identity_fun(float val) {
 }
 
 __device__ inline float identity_derivative(float val) {
-	return 1;
+	return 1.0f;
+}
+
+__device__ inline float identity_2nd_derivative(float val) {
+	return 0.0f;
 }
 
 template <typename F, typename FPRIME, typename FPRIMEPRIME>

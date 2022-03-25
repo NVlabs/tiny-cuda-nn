@@ -114,6 +114,8 @@ public:
 		GPUMatrix<T, MatrixLayout::ColumnMajor> dL_ddLdoutput_matrix((T*)dL_ddLdoutput, m_model->padded_output_width(), n_elements);
 		GPUMatrix<float, MatrixLayout::ColumnMajor> dL_dinput_matrix((float*)dL_dinput, m_model->input_width(), n_elements);
 
+		// Run on our own custom stream to ensure CUDA graph capture is possible.
+		// (Significant possible speedup.)
 		SyncedMultiStream synced_stream{stream, 2};
 		m_model->backward_backward_input(synced_stream.get(1), *ctx.ctx, input_matrix, dL_ddLdinput_matrix, dL_doutput_matrix, dL_ddLdoutput ? &dL_ddLdoutput_matrix : nullptr, dL_dinput ? &dL_dinput_matrix : nullptr, false, dL_dparams ? EGradientMode::Overwrite : EGradientMode::Ignore);
 	}

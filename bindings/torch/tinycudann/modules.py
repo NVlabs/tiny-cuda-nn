@@ -91,7 +91,7 @@ class _module_function_backward(torch.autograd.Function):
 
 		# ctx_fwd,   doutput,      input,      params,      output
 		return None, doutput_grad, input_grad, weight_grad, None
-		
+
 class Module(torch.nn.Module):
 	def __init__(self, seed=1337):
 		super(Module, self).__init__()

@@ -487,7 +487,6 @@ __global__ void kernel_grid_backward_input(
 	}
 }
 
-
 template <typename T, typename GRAD_T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
 __global__ void kernel_grid_backward_input_backward_grid(
 	const uint32_t num_elements,
@@ -655,13 +654,13 @@ __global__ void kernel_grid_backward_input_backward_input(
 
 	float pos[N_POS_DIMS];
 	float pos_derivative[N_POS_DIMS];
-	float pos_2nd_derivative[N_POS_DIMS] = {0};
+	float pos_2nd_derivative[N_POS_DIMS];
 	uint32_t pos_grid[N_POS_DIMS];
 
 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative, identity_2nd_derivative);
 		}
 	} else {
 		#pragma unroll
