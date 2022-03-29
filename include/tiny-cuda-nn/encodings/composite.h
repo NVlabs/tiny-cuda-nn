@@ -59,18 +59,27 @@ public:
 		uint32_t total_nested_dims_to_encode = 0;
 		for (size_t i = 0; i < nested.size(); ++i) {
 			total_nested_dims_to_encode += nested[i].value("n_dims_to_encode", 0);
+			if (nested[i].contains("dims_to_encode_begin")) {
+				total_nested_dims_to_encode = 0xFFFFFFFF;
+				break;
+			}
 		}
 
-		if (total_nested_dims_to_encode > n_dims_to_encode) {
-			throw std::runtime_error{"CompositeEncoding:' nested encodings must not encode more dims than composite"};
+		if (total_nested_dims_to_encode != 0xFFFFFFFF && total_nested_dims_to_encode > n_dims_to_encode) {
+			throw std::runtime_error{"CompositeEncoding: nested encodings must not encode more dims than composite"};
 		}
 
-		uint32_t unspecified_dims_to_encode = n_dims_to_encode - total_nested_dims_to_encode;
+		uint32_t unspecified_dims_to_encode = total_nested_dims_to_encode == 0xFFFFFFFF ? 0xFFFFFFFF : (n_dims_to_encode - total_nested_dims_to_encode);
+		uint32_t offset = 0;
 
 		// Create encodings with somewhat arbitrary alignment
 		for (size_t i = 0; i < nested.size(); ++i) {
 			uint32_t nested_dims_to_encode;
 			if (nested[i].contains("n_dims_to_encode")) {
+				if (nested[i].contains("dims_to_encode_begin")) {
+					offset = nested[i]["dims_to_encode_begin"];
+				}
+
 				nested_dims_to_encode = nested[i]["n_dims_to_encode"];
 			} else {
 				if (unspecified_dims_to_encode == 0xFFFFFFFF) {
@@ -82,7 +91,10 @@ public:
 
 			if (nested_dims_to_encode > 0) {
 				m_nested.emplace_back(create_encoding<T>(nested_dims_to_encode, nested[i], 1));
+				m_dims_to_encode_begin.emplace_back(offset);
 			}
+
+			offset += nested_dims_to_encode;
 		}
 
 		// Fix alignment such that min_alignment of each individual encoding's output is ensured
@@ -115,11 +127,11 @@ public:
 
 		SyncedMultiStream synced_streams{stream, m_nested.size()};
 
-		uint32_t input_offset = 0;
 		uint32_t output_offset = 0;
 
 		for (size_t i = 0; i < m_nested.size(); ++i) {
 			const auto& nested = m_nested[i];
+			uint32_t input_offset = m_dims_to_encode_begin[i];
 			uint32_t input_width = nested->input_width();
 			uint32_t output_width = nested->output_width();
 
@@ -164,11 +176,11 @@ public:
 
 		SyncedMultiStream synced_streams{stream, m_nested.size()};
 
-		uint32_t input_offset = 0;
 		uint32_t output_offset = 0;
 
 		for (size_t i = 0; i < m_nested.size(); ++i) {
 			const auto& nested = m_nested[i];
+			uint32_t input_offset = m_dims_to_encode_begin[i];
 			uint32_t input_width = nested->input_width();
 			uint32_t output_width = nested->output_width();
 
@@ -188,7 +200,6 @@ public:
 				param_gradients_mode
 			);
 
-			input_offset += input_width;
 			output_offset += output_width;
 		}
 	}
@@ -292,6 +303,7 @@ private:
 	};
 
 	std::vector<std::unique_ptr<Encoding<T>>> m_nested;
+	std::vector<uint32_t> m_dims_to_encode_begin;
 	uint32_t m_n_dims_to_encode;
 
 	MatrixLayout m_output_layout = AoS;
