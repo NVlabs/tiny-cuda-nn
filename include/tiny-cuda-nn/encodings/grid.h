@@ -810,6 +810,9 @@ public:
 	virtual uint32_t n_pos_dims() const = 0;
 	virtual uint32_t n_features_per_level() const = 0;
 
+	virtual size_t level_n_params(uint32_t level) const = 0;
+	virtual size_t level_params_offset(uint32_t level) const = 0;
+
 	float max_level() const {
 		return m_max_level;
 	}
@@ -880,9 +883,9 @@ public:
 	m_grid_type{grid_type}
 	{
 		m_n_levels = div_round_up(m_n_features, N_FEATURES_PER_LEVEL);
-		assert(m_n_levels <= 32 && "too many levels for the offset table");
-		uint32_t offsets_table_host[33];
 		uint32_t offset = 0;
+
+		m_hashmap_offsets_table_cpu.resize(m_n_levels + 1);
 
 		for (uint32_t i = 0; i < m_n_levels; ++i) {
 			// Compute dense params required for the given level
@@ -907,7 +910,7 @@ public:
 				throw std::runtime_error{std::string{"GridEncoding: invalid grid type "} + to_string(grid_type)};
 			}
 
-			offsets_table_host[i] = offset;
+			m_hashmap_offsets_table_cpu[i] = offset;
 			offset += params_in_level;
 
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
@@ -915,10 +918,10 @@ public:
 #endif
 		}
 
-		offsets_table_host[m_n_levels] = offset;
-		m_n_params = offsets_table_host[m_n_levels] * N_FEATURES_PER_LEVEL;
+		m_hashmap_offsets_table_cpu[m_n_levels] = offset;
+		m_n_params = m_hashmap_offsets_table_cpu[m_n_levels] * N_FEATURES_PER_LEVEL;
 		m_hashmap_offsets_table.resize(m_n_levels + 1);
-		CUDA_CHECK_THROW(cudaMemcpy(m_hashmap_offsets_table.data(), offsets_table_host, (m_n_levels+1) * sizeof(uint32_t), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(m_hashmap_offsets_table.data(), m_hashmap_offsets_table_cpu.data(), (m_n_levels+1) * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
 		m_n_padded_output_dims = m_n_output_dims = m_n_features;
 
@@ -1272,6 +1275,14 @@ public:
 		return m_n_params;
 	}
 
+	size_t level_n_params(uint32_t level) const override {
+		return level_params_offset(level + 1) - level_params_offset(level);
+	}
+
+	size_t level_params_offset(uint32_t level) const override {
+		return m_hashmap_offsets_table_cpu.at(level);
+	}
+
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override {
 		// Even though we have parameters, they can't really be considered a "layer".
 		// So we return an empty array here.
@@ -1313,6 +1324,7 @@ private:
 	uint32_t m_n_features;
 	uint32_t m_n_levels;
 	uint32_t m_n_params;
+	std::vector<uint32_t> m_hashmap_offsets_table_cpu;
 	GPUMemory<uint32_t> m_hashmap_offsets_table;
 	uint32_t m_log2_hashmap_size;
 	uint32_t m_base_resolution;
