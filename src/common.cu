@@ -66,7 +66,11 @@ size_t cuda_memory_granularity(int device) {
 	prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 	prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
 	prop.location.id = 0;
-	CU_CHECK_THROW(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+	CUresult granularity_result = cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+	if (granularity_result == CUDA_ERROR_NOT_SUPPORTED) {
+		return 1;
+	}
+	CU_CHECK_THROW(granularity_result);
 	return granularity;
 }
 
