@@ -116,7 +116,7 @@ public:
 		std::unique_ptr<Context> model_ctx;
 	};
 
-	std::unique_ptr<ForwardContext> forward(cudaStream_t stream, const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+	std::unique_ptr<ForwardContext> forward(cudaStream_t stream, const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr) {
 		CHECK_THROW(input.n() == target.n());
 
 		const uint32_t batch_size = input.n();
@@ -152,10 +152,6 @@ public:
 			data_pdf
 		);
 
-		if (loss_value) {
-			*loss_value = reduce_sum(forward->L.data(), forward->L.n_elements(), stream);
-		}
-
 		return forward;
 	}
 
@@ -179,11 +175,10 @@ public:
 		optimizer_step(nullptr, loss_scale);
 	}
 
-	void training_step(
+	std::unique_ptr<ForwardContext> training_step(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		float* loss_value = nullptr,
 		const GPUMatrix<float>* data_pdf = nullptr
 	) {
 		CHECK_THROW(input.n() == target.n());
@@ -191,27 +186,30 @@ public:
 
 		static const float loss_scale = 128;
 
-		GPUMatrix<float> loss;
+		std::unique_ptr<ForwardContext> result;
 		m_graph.capture_and_execute(stream, false, [&]() {
-			auto ctx = forward(stream, loss_scale, input, target, data_pdf);
-			loss = ctx->L.alias();
-			backward(stream, *ctx, input);
+			result = forward(stream, loss_scale, input, target, data_pdf);
+			backward(stream, *result, input);
 		});
 
 		optimizer_step(stream, loss_scale);
-
-		if (loss_value) {
-			*loss_value = reduce_sum(loss.data(), loss.n_elements(), stream);
-		}
+		return result;
 	}
 
-	void training_step(
+	std::unique_ptr<ForwardContext> training_step(
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		float* loss_value = nullptr,
 		const GPUMatrix<float>* data_pdf = nullptr
 	) {
-		training_step(nullptr, input, target, loss_value, data_pdf);
+		return training_step(nullptr, input, target, data_pdf);
+	}
+
+	float loss(cudaStream_t stream, const ForwardContext& ctx) const {
+		return reduce_sum(ctx.L.data(), ctx.L.n_elements(), stream);
+	}
+
+	float loss(const ForwardContext& ctx) const {
+		return loss(nullptr, ctx);
 	}
 
 	void update_hyperparams(const json& params) override {

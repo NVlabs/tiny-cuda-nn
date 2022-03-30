@@ -254,24 +254,22 @@ int main(int argc, char* argv[]) {
 				for (uint32_t i = 0; i < n_iterations; i += STEPS_INCREMENT) {
 					bool print_loss = i % print_interval == 0;
 
-					float loss_value;
 					for (uint32_t j = 0; j < STEPS_INCREMENT; ++j) {
 						// Compute reference values at random coordinates
 						generate_random_uniform<float>(training_stream, rng, batch_size * num_dims_encoded, batch.data());
 						linear_kernel(eval_image<num_output_dims>, 0, training_stream, batch_size, texture, filter, width, height, batch.data(), bench_target.data());
 
-						// Training step
-						float* p_loss = j == (STEPS_INCREMENT - 1) ? &loss_value : nullptr;
 						encoding->inference_mixed_precision(training_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_obe_out);
-						trainer->training_step(training_stream, bench_obe_out, bench_target, p_loss);
+						auto ctx = trainer->training_step(training_stream, bench_obe_out, bench_target);
+						if (j == STEPS_INCREMENT-1) {
+							tmp_loss += trainer->loss(training_stream, *ctx);
+							++tmp_loss_counter;
+						}
 					}
-
-					tmp_loss += loss_value;
-					++tmp_loss_counter;
 
 					// Debug outputs
 					if (print_loss) {
-						cudaDeviceSynchronize();
+						CUDA_CHECK_THROW(cudaDeviceSynchronize());
 						std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 						auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
 						double throughput = print_interval * batch_size / ((double)microseconds / 1000000.0);

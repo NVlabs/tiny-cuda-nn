@@ -267,12 +267,13 @@ int main(int argc, char* argv[]) {
 			}
 
 			// Training step
-			float loss_value;
-			bool get_loss = i % std::min(interval, (uint32_t)100) == 0;
-			trainer->training_step(training_stream, training_batch, training_target, get_loss ? &loss_value : nullptr);
-			if (get_loss) {
-				tmp_loss += loss_value;
-				++tmp_loss_counter;
+			{
+				auto ctx = trainer->training_step(training_stream, training_batch, training_target);
+
+				if (i % std::min(interval, (uint32_t)100) == 0) {
+					tmp_loss += trainer->loss(training_stream, *ctx);
+					++tmp_loss_counter;
+				}
 			}
 
 			// Debug outputs
