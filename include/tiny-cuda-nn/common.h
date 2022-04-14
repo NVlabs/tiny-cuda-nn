@@ -285,7 +285,7 @@ inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T 
 	if (n_elements <= 0) {
 		return;
 	}
-	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>((uint32_t)n_elements, args...);
+	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>(n_elements, args...);
 }
 
 template <typename F>
