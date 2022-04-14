@@ -193,7 +193,7 @@ public:
 	}
 
 	const std::shared_ptr<Encoding<T>>& encoding() const {
-		return m_encoding.get();
+		return m_encoding;
 	}
 
 	json hyperparams() const override {
