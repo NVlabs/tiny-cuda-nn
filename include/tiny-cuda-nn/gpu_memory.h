@@ -386,8 +386,19 @@ struct Interval {
 	// Inclusive start, exclusive end
 	size_t start, end;
 
+	/*
 	bool operator<(const Interval& other) const {
 		return end < other.end;
+	}*/
+
+	
+	bool operator<(const Interval& other) const {
+		if(end < other.end)
+			return 1;
+		else if (end == other.end)
+			return start < other.start;
+		else
+			return 0;
 	}
 
 	bool overlaps(const Interval& other) const {
@@ -511,11 +522,11 @@ public:
 
 		Interval interval = {start, m_allocated_intervals[start]};
 		m_allocated_intervals.erase(start);
-
-		m_free_intervals.insert(
-			std::upper_bound(std::begin(m_free_intervals), std::end(m_free_intervals), interval),
-			interval
-		);
+		if(interval.start != interval.end)
+			m_free_intervals.insert(
+				std::upper_bound(std::begin(m_free_intervals), std::end(m_free_intervals), interval),
+				interval
+			);
 
 		merge_adjacent_intervals();
 	}
