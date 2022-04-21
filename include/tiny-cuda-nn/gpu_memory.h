@@ -387,13 +387,10 @@ struct Interval {
 	size_t start, end;
 
 	bool operator<(const Interval& other) const {
-		if (end < other.end) {
-			return true;
-		} else if (end == other.end) {
-			return start < other.start;
-		} else {
-			return false;
-		}
+		// This operator is used to sort non-overlapping intervals. Since intervals
+		// may be empty, the second half of the following expression is required to
+		// resolve ambiguity when `end` of adjacent empty intervals is equal.
+		return end < other.end || (end == other.end && start < other.start);
 	}
 
 	bool overlaps(const Interval& other) const {
@@ -503,6 +500,9 @@ public:
 		}
 
 		size_t start = best_candidate->start;
+
+		// Note: the += operator can turn `best_candidate` into an empty interval, which is fine because it will
+		// be absorbed into adjacent free intervals in later calls to `merge_adjacent_intervals`.
 		m_allocated_intervals[start] = best_candidate->start += n_bytes;
 
 		enlarge(size());
