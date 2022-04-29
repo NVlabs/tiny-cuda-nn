@@ -37,7 +37,6 @@
 #include <tiny-cuda-nn/encoding.h>
 #include <tiny-cuda-nn/encodings/oneblob.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
 
 #include <numeric>
 #include <stdexcept>
