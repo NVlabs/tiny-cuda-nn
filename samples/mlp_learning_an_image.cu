@@ -311,6 +311,11 @@ int main(int argc, char* argv[]) {
 			network->inference(inference_stream, inference_batch, prediction);
 			save_image(prediction.data(), sampling_width, sampling_height, 3, n_output_dims, argv[4]);
 		}
+
+		free_all_gpu_memory_arenas();
+
+		// If only the memory arenas pertaining to a single stream are to be freed, use
+		//free_gpu_memory_arena(stream);
 	} catch (std::exception& e) {
 		std::cout << "Uncaught exception: " << e.what() << std::endl;
 	}
