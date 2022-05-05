@@ -251,14 +251,18 @@ public:
 	}
 
 	MatrixLayout preferred_output_layout() const override {
-		// All encodings support AoS, so if any prefers AoS, use that.
+		// Majority vote (with a bias toward SoA, because that's usually faster.)
+		size_t n_aos = 0;
+		size_t n_soa = 0;
 		for (const auto& nested : m_nested) {
 			if (nested->preferred_output_layout() == AoS) {
-				return AoS;
+				++n_aos;
+			} else {
+				++n_soa;
 			}
 		}
 
-		return SoA;
+		return n_aos > n_soa ? AoS : SoA;
 	}
 
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
