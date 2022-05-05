@@ -155,8 +155,8 @@ public:
 		return forward;
 	}
 
-	void forward(const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
-		forward(nullptr, loss_scale, input, target, data_pdf, loss_value);
+	void forward(const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr) {
+		forward(nullptr, loss_scale, input, target, data_pdf);
 	}
 
 	void backward(cudaStream_t stream, const ForwardContext& ctx, const GPUMatrixDynamic<T>& input) {
