@@ -174,14 +174,8 @@ int main(int argc, char* argv[]) {
 		texDesc.addressMode[1] = cudaAddressModeClamp;
 		texDesc.addressMode[2] = cudaAddressModeClamp;
 
-		cudaResourceViewDesc viewDesc;
-		memset(&viewDesc, 0, sizeof(viewDesc));
-		viewDesc.format = cudaResViewFormatFloat4;
-		viewDesc.width = width;
-		viewDesc.height = height;
-
 		cudaTextureObject_t texture;
-		CUDA_CHECK_THROW(cudaCreateTextureObject(&texture, &resDesc, &texDesc, &viewDesc));
+		CUDA_CHECK_THROW(cudaCreateTextureObject(&texture, &resDesc, &texDesc, nullptr));
 
 		// Third step: sample a reference image to dump to disk. Visual comparison of this reference image and the learned
 		//             function will be eventually possible.
