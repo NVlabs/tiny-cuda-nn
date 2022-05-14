@@ -110,6 +110,10 @@ if (MIN_GPU_ARCH LESS_EQUAL 70)
 	)
 endif()
 
+if (CUDA_VERSION VERSION_LESS 10.2)
+	message(FATAL_ERROR "CUDA version too low. tiny-cuda-nn require CUDA 10.2 or higher.")
+endif()
+
 list(APPEND TCNN_DEFINITIONS -DTCNN_MIN_GPU_ARCH=${MIN_GPU_ARCH})
 if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
 	# Only compile the shampoo optimizer if
