@@ -80,7 +80,7 @@ __device__ uint32_t fast_hash(const uint32_t pos_grid[N_DIMS]) {
 	// While 1 is technically not a good prime for hashing (or a prime at all), it helps memory coherence
 	// and is sufficient for our use case of obtaining a uniformly colliding index from high-dimensional
 	// coordinates.
-	constexpr uint32_t primes[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+	constexpr uint32_t primes[7] = {1u, 2654435761u, 805459861u, 3674653429u, 2097192037u, 1434869437u, 2165219737u};
 
 	uint32_t result = 0;
 	#pragma unroll
