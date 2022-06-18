@@ -253,6 +253,19 @@ public:
 		return n_aos > n_soa ? AoS : SoA;
 	}
 
+	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
+		size_t offset = 0;
+		for (auto& nested : m_nested) {
+			nested->set_params(
+				params + offset,
+				inference_params + offset,
+				backward_params + offset,
+				gradients + offset
+			);
+			offset += nested->n_params();
+		}
+	}
+
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
 		size_t offset = 0;
 		for (auto& nested : m_nested) {
