@@ -149,6 +149,7 @@ float reduce_sum(T* device_pointer, F fun, uint32_t n_elements, cudaStream_t str
 
 	float sum;
 	CUDA_CHECK_THROW(cudaMemcpyAsync(&sum, workspace_data, sizeof(float), cudaMemcpyDeviceToHost, stream));
+	CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 	return sum;
 }
 
