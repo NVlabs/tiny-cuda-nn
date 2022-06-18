@@ -125,8 +125,6 @@ public:
 		auto forward = std::make_unique<ForwardContext>();
 		forward->nested.resize(m_nested.size());
 
-		SyncedMultiStream synced_streams{stream, m_nested.size()};
-
 		uint32_t output_offset = 0;
 
 		for (size_t i = 0; i < m_nested.size(); ++i) {
@@ -141,7 +139,7 @@ public:
 			}
 
 			forward->nested[i] = nested->forward(
-				stream,
+				stream, // TODO: use SyncedMultiStream but ensure memory arena allocations happen on `stream`
 				input.slice_rows(input_offset, input_width),
 				output ? &sliced_output : nullptr,
 				use_inference_params,
@@ -240,16 +238,6 @@ public:
 		return 1;
 	}
 
-	bool supports_output_layout(MatrixLayout layout) const {
-		// Only supports layout if all nested encodings do
-		bool result = true;
-		for (const auto& nested : m_nested) {
-			result &= nested->supports_output_layout(layout);
-		}
-
-		return result;
-	}
-
 	MatrixLayout preferred_output_layout() const override {
 		// Majority vote (with a bias toward SoA, because that's usually faster.)
 		size_t n_aos = 0;
@@ -309,8 +297,6 @@ private:
 	std::vector<std::unique_ptr<Encoding<T>>> m_nested;
 	std::vector<uint32_t> m_dims_to_encode_begin;
 	uint32_t m_n_dims_to_encode;
-
-	MatrixLayout m_output_layout = AoS;
 };
 
 TCNN_NAMESPACE_END
