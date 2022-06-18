@@ -239,18 +239,8 @@ public:
 	}
 
 	MatrixLayout preferred_output_layout() const override {
-		// Majority vote (with a bias toward SoA, because that's usually faster.)
-		size_t n_aos = 0;
-		size_t n_soa = 0;
-		for (const auto& nested : m_nested) {
-			if (nested->preferred_output_layout() == AoS) {
-				++n_aos;
-			} else {
-				++n_soa;
-			}
-		}
-
-		return n_aos > n_soa ? AoS : SoA;
+		// Output layout of first nested encoding (tends to be the most significant, i.e. hash encoding)
+		return m_nested.empty() ? AoS : m_nested.front()->preferred_output_layout();
 	}
 
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
