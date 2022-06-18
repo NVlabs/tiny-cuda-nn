@@ -29,9 +29,11 @@
  */
 
 #include <tiny-cuda-nn/common_device.h>
+
+#include <tiny-cuda-nn/config.h>
+
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
-#include <tiny-cuda-nn/encodings/oneblob.h>
 
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/loss.h>
@@ -215,15 +217,11 @@ int main(int argc, char* argv[]) {
 				json config = json::parse(f, nullptr, true, /*skip_comments=*/true);
 
 				json encoding_opts = config.value("encoding", json::object());
-				std::shared_ptr<Encoding<precision_t>> encoding{create_encoding<precision_t>(num_dims_encoded, encoding_opts, 16)};
-				const uint32_t padded_num_input_dims = encoding->padded_output_width();
 
 				// Auxiliary matrices for training
-				GPUMatrix<precision_t> bench_obe_out(padded_num_input_dims, batch_size);
 				GPUMatrix<float> bench_target(num_output_dims, batch_size);
 
 				// Auxiliary matrices for evaluation
-				GPUMatrix<precision_t> eval_obe_out(padded_num_input_dims, n_coords);
 				GPUMemory<float> prediction_data(num_output_dims * n_coords);
 				GPUMatrix<float> prediction(prediction_data.data(), num_output_dims, n_coords);
 
@@ -231,14 +229,13 @@ int main(int argc, char* argv[]) {
 				json optimizer_opts = config.value("optimizer", json::object());
 				json network_opts = config.value("network", json::object());
 				network_opts["otype"] = method == "cutlass" ? "MLP" : "FullyFusedMLP";
-				network_opts["n_output_dims"] = num_output_dims;
-				network_opts["n_input_dims"] = padded_num_input_dims;
 
 				std::shared_ptr<Loss<precision_t>> loss{create_loss<precision_t>(loss_opts)};
 				std::shared_ptr<Optimizer<precision_t>> optimizer{create_optimizer<precision_t>(optimizer_opts)};
-				std::shared_ptr<Network<precision_t>> network{create_network<precision_t>(network_opts)};
 
-				auto trainer = std::make_shared<Trainer<precision_t, precision_t>>(network, optimizer, loss);
+				std::shared_ptr<NetworkWithInputEncoding<precision_t>> network = std::make_shared<NetworkWithInputEncoding<precision_t>>(num_dims_encoded, num_output_dims, encoding_opts, network_opts);
+
+				auto trainer = std::make_shared<Trainer<float, precision_t, precision_t>>(network, optimizer, loss);
 
 				std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
@@ -259,8 +256,7 @@ int main(int argc, char* argv[]) {
 						generate_random_uniform<float>(training_stream, rng, batch_size * num_dims_encoded, batch.data());
 						linear_kernel(eval_image<num_output_dims>, 0, training_stream, batch_size, texture, filter, width, height, batch.data(), bench_target.data());
 
-						encoding->inference_mixed_precision(training_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_obe_out);
-						auto ctx = trainer->training_step(training_stream, bench_obe_out, bench_target);
+						auto ctx = trainer->training_step(training_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_target);
 						if (j == STEPS_INCREMENT-1) {
 							tmp_loss += trainer->loss(training_stream, *ctx);
 							++tmp_loss_counter;
@@ -289,8 +285,7 @@ int main(int argc, char* argv[]) {
 				mean_training_throughput /= (double)mean_counter;
 
 				// Dump learned image for sanity checking
-				encoding->inference_mixed_precision(inference_stream, GPUMatrix<float>{xs_and_ys.data(), num_dims_encoded, n_coords}, eval_obe_out);
-				network->inference(inference_stream, eval_obe_out, prediction);
+				network->inference(inference_stream, GPUMatrix<float>{xs_and_ys.data(), num_dims_encoded, n_coords}, prediction);
 
 				save_image(prediction_data.data(), sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".jpg");
 
@@ -311,8 +306,7 @@ int main(int argc, char* argv[]) {
 					generate_random_uniform<float>(inference_stream, rng, batch_size * num_dims_encoded, batch.data());
 
 					// Inference step
-					encoding->inference_mixed_precision(inference_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_obe_out);
-					network->inference(inference_stream, bench_obe_out, bench_target);
+					network->inference(inference_stream, GPUMatrix<float>{batch.data(), num_dims_encoded, batch_size}, bench_target);
 
 					// Debug outputs
 					if (print_loss) {
