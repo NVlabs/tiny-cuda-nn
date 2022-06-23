@@ -82,7 +82,6 @@ string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
 string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
 string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
 set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
-set(CUDA_VERSION ${CUDA_VERSION} PARENT_SCOPE)
 
 # Remove unsupported architectures
 list(FILTER CMAKE_CUDA_ARCHITECTURES EXCLUDE REGEX "PTX")
@@ -108,6 +107,7 @@ list(GET CMAKE_CUDA_ARCHITECTURES 0 MIN_GPU_ARCH)
 message(STATUS "Targeting GPU architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 if (TCNN_HAS_PARENT)
 	set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES} PARENT_SCOPE)
+	set(CUDA_VERSION ${CUDA_VERSION} PARENT_SCOPE)
 endif()
 
 if (MIN_GPU_ARCH LESS_EQUAL 70)
@@ -129,7 +129,6 @@ if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
 	list(APPEND TCNN_DEFINITIONS -DTCNN_SHAMPOO)
 endif()
 
-add_definitions(${TCNN_DEFINITIONS})
 if (TCNN_HAS_PARENT)
 	set(TCNN_DEFINITIONS ${TCNN_DEFINITIONS} PARENT_SCOPE)
 endif()
@@ -157,11 +156,6 @@ find_library(
 	${CUDA_TOOLKIT_ROOT_DIR}/lib64
 	${CUDA_TOOLKIT_ROOT_DIR}/lib
 )
-include_directories("include")
-include_directories("dependencies")
-include_directories("dependencies/cutlass/include")
-include_directories("dependencies/cutlass/tools/util/include")
-
 
 ###############################################################################
 # tiny-cuda-nn library, samples, and benchmarks
@@ -172,7 +166,37 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR})
 
-add_subdirectory("src")
+set(TCNN_SOURCES
+	src/common.cu
+	src/common_device.cu
+	src/cpp_api.cu
+	src/cutlass_mlp.cu
+	src/encoding.cu
+	src/loss.cu
+	src/network.cu
+	src/object.cu
+	src/optimizer.cu
+	src/reduce_sum.cu
+)
+
+if (MIN_GPU_ARCH GREATER_EQUAL 70)
+	list(APPEND TCNN_SOURCES src/fully_fused_mlp.cu)
+endif()
+
+###############################################################################
+# Linker / library
+###############################################################################
+
+add_library(tiny-cuda-nn STATIC ${TCNN_SOURCES})
+target_compile_definitions(tiny-cuda-nn PUBLIC ${TCNN_DEFINITIONS})
+target_compile_options(tiny-cuda-nn PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
+target_include_directories(tiny-cuda-nn PUBLIC
+	"include"
+	"dependencies"
+	"dependencies/cutlass/include"
+	"dependencies/cutlass/tools/util/include"
+)
+target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda cublas)
 
 if (TCNN_BUILD_EXAMPLES)
 	add_subdirectory("samples")

@@ -26,5 +26,4 @@
 
 add_executable(mlp_learning_an_image mlp_learning_an_image.cu ../dependencies/stbi/stbi_wrapper.cpp)
 target_link_libraries(mlp_learning_an_image PUBLIC ${CUDA_LIBRARIES} tiny-cuda-nn)
-target_compile_options(mlp_learning_an_image PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
 
