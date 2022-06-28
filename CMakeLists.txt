@@ -22,7 +22,7 @@
 
 cmake_minimum_required(VERSION 3.18)
 
-PROJECT(
+project(
 	tiny-cuda-nn
 	VERSION 1.6
 	DESCRIPTION "Lightning fast & tiny C++/CUDA neural network framework"
@@ -31,6 +31,7 @@ PROJECT(
 
 option(TCNN_BUILD_BENCHMARK "Build tiny-cuda-nn example benchmark?" ON)
 option(TCNN_BUILD_EXAMPLES "Build tiny-cuda-nn example applications?" ON)
+set(TCNN_CUDA_ARCHITECTURES "" CACHE STRING "Build tiny-cuda-nn for a specific GPU architecture.")
 
 ###############################################################################
 # Build type and C++ compiler setup
@@ -85,8 +86,9 @@ string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
 if (DEFINED ENV{TCNN_CUDA_ARCHITECTURES})
 	message(STATUS "Obtained target architecture from environment variable TCNN_CUDA_ARCHITECTURES=$ENV{TCNN_CUDA_ARCHITECTURES}")
 	set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES})
-elseif (DEFINED CMAKE_CUDA_ARCHITECTURES)
-	message(STATUS "Obtained target architecture from parent CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
+elseif (TCNN_CUDA_ARCHITECTURES)
+	message(STATUS "Obtained target architecture from CMake variable TCNN_CUDA_ARCHITECTURES=${TCNN_CUDA_ARCHITECTURES}")
+	set(CMAKE_CUDA_ARCHITECTURES ${TCNN_CUDA_ARCHITECTURES})
 else()
 	set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
 endif()
