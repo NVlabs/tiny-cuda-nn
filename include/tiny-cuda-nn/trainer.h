@@ -75,22 +75,14 @@ public:
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
 #endif
 
-		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
-		m_params_buffer.memset(0);
-
-		m_params_full_precision = (float*)(m_params_buffer.data());
-		m_params                = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params);
-		m_params_backward       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params);
-		m_param_gradients       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params * 2);
-
 		// Allocate auxiliary optimizer buffers
 		m_optimizer->allocate(m_model);
 
-		// Use the optimizer's custom params for inference, if they exist.
-		m_params_inference = m_optimizer->custom_weights();
-		if (m_params_inference == nullptr) {
-			m_params_inference = m_params;
-		}
+		// Allocate trainer buffers
+		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
+		m_params_buffer.memset(0);
+
+		setup_params_pointers();
 
 		m_model->initialize_params(
 			m_rng,
@@ -266,7 +258,7 @@ public:
 
 		json data;
 		data["n_params"] = n_params;
-		data["params_binary"] = gpu_memory_to_json_binary(m_params_inference, sizeof(PARAMS_T)*n_params);
+		data["params_binary"] = m_params_buffer;
 
 		if (serialize_optimizer) {
 			data["optimizer"] = m_optimizer->serialize();
@@ -276,14 +268,43 @@ public:
 	}
 
 	void deserialize(const json& data) {
-		json::binary_t params_binary = data["params_binary"];
-		set_params((PARAMS_T*)params_binary.data(), params_binary.size()/sizeof(PARAMS_T));
+
+		m_params_buffer = data["params_binary"];
 
 		if (data.contains("optimizer")) {
 			m_optimizer->deserialize(data["optimizer"]);
 		}
 
-		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+		setup_params_pointers();
+
+		size_t n_params = m_model->n_params();
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params_inference=m_params_inference] __device__ (size_t i) {
+			params_fp[i] = (float)params_inference[i];
+		});
+
+		m_model->set_params(
+			m_params,
+			m_params_inference,
+			m_params_backward,
+			m_param_gradients
+		);
+	}
+
+private:
+	void setup_params_pointers()
+	{
+		size_t n_params = m_model->n_params();
+
+		m_params_full_precision = (float*)(m_params_buffer.data());
+		m_params                = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params);
+		m_params_backward       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params);
+		m_param_gradients       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params * 2);
+
+		// Use the optimizer's custom params for inference, if they exist.
+		m_params_inference = m_optimizer->custom_weights();
+		if (m_params_inference == nullptr) {
+			m_params_inference = m_params;
+		}
 	}
 
 private:
