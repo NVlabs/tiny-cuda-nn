@@ -387,11 +387,11 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 	const int N = B.n();
 
 	if (C.m() != M || C.n() != N) {
-		throw std::runtime_error(std::string("Matrix C has incorrect size ") + std::to_string(C.m()) + "," + std::to_string(C.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix C has incorrect size {}x{} != {}x{}", C.m(), C.n(), M, N)};
 	}
 
 	if (D.m() != M || D.n() != N) {
-		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix D has incorrect size {}x{} != {}x{}", D.m(), D.n(), M, N)};
 	}
 
 	if (transfer) {
@@ -473,11 +473,11 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	const int N = B.n();
 
 	if (C.m() != M || C.n() != N) {
-		throw std::runtime_error(std::string("Matrix C has incorrect size ") + std::to_string(C.m()) + "," + std::to_string(C.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix C has incorrect size {}x{} != {}x{}", C.m(), C.n(), M, N)};
 	}
 
 	if (D.m() != M || D.n() != N) {
-		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix D has incorrect size {}x{} != {}x{}", D.m(), D.n(), M, N)};
 	}
 
 	using Gemm = SplitKGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;

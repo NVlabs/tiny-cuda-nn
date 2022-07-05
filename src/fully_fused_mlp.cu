@@ -598,7 +598,7 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
 
 	if (batch_size % (16 * N_ITERS) != 0) {
-		throw std::runtime_error{"Batch size must be a multiple of " + std::to_string(16 * N_ITERS) + "."};
+		throw std::runtime_error{fmt::format("Batch size must be a multiple of {}.", 16 * N_ITERS)};
 	}
 
 	const dim3 threads = { 32u, N_BLOCK_ROWS, 1 }; // 32 threads = 1 warp, N_BLOCK_ROWS warps per block for 16 rows, up to 2x 8 warps can share input (does not help vs. 1)

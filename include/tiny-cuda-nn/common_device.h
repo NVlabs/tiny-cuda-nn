@@ -275,7 +275,7 @@ template <typename T>
 void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* in, T* out) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{std::string{"activation_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{fmt::format("activation_gpu: number of elements must be a multiple of {}", ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation::None is a noop
@@ -289,7 +289,7 @@ void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Acti
 template <typename T>
 void activation_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output) {
 	if (input.n() != output.n() || input.m() != output.m()) {
-		throw std::runtime_error(std::string{"Input and output don't have matching size: "} + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
+		throw std::runtime_error{fmt::format("Input and output don't have matching size: {} != {}", input.n(), output.n())};
 	}
 
 	activation_gpu(stream, input.n_elements(), activation, input.data(), output.data());
@@ -299,7 +299,7 @@ template <typename T>
 void activation_backward_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ values, const T* gradients_out, T* gradients_in) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{std::string{"activation_backward_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{fmt::format("activation_backward_gpu: number of elements must be a multiple of {}", ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation transfer is a noop for Activation::None
@@ -313,7 +313,7 @@ void activation_backward_gpu(cudaStream_t stream, const uint32_t num_elements, c
 template <typename T>
 void activation_backward_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& values, GPUMatrixDynamic<T>& gradients) {
 	if (values.n() != gradients.n() || values.m() != gradients.m()) {
-		throw std::runtime_error(std::string("Values and gradients don't have matching size: ") + std::to_string(values.n()) + "!=" + std::to_string(gradients.n()));
+		throw std::runtime_error{fmt::format("Values and gradients don't have matching size: {} != {}", values.n(), gradients.n())};
 	}
 
 	activation_backward_gpu(stream, values.n_elements(), activation, values.data(), gradients.data(), gradients.data());
@@ -323,7 +323,7 @@ template <typename T>
 void activation_backward_output_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ output_values, const T* gradients_out, T* gradients_in) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{std::string{"activation_backward_output_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{fmt::format("activation_backward_output_gpu: number of elements must be a multiple of {}", ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation transfer is a noop for Activation::None

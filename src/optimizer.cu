@@ -73,7 +73,7 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 		throw std::runtime_error{"The Shampoo optimizer is only available when compiling with CUDA 11 or higher."};
 #endif
 	} else {
-		throw std::runtime_error{std::string{"Invalid optimizer type: "} + optimizer_type};
+		throw std::runtime_error{fmt::format("Invalid optimizer type: {}", optimizer_type)};
 	}
 }
 

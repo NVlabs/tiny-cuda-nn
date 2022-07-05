@@ -149,7 +149,7 @@ public:
 		} catch (std::runtime_error error) {
 			// Don't need to report on memory-free problems when the driver is shutting down.
 			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
-				fprintf(stderr, "Could not free memory: %s\n", error.what());
+				std::cerr << "Could not free memory: " << error.what() << std::endl;
 			}
 		}
 #endif
@@ -165,7 +165,7 @@ public:
 				try {
 					free_memory();
 				} catch (std::runtime_error error) {
-					throw std::runtime_error(std::string("Could not free memory: ") + error.what());
+					throw std::runtime_error{fmt::format("Could not free memory: {}", error.what())};
 				}
 			}
 
@@ -173,7 +173,7 @@ public:
 				try {
 					allocate_memory(size * sizeof(T));
 				} catch (std::runtime_error error) {
-					throw std::runtime_error(std::string("Could not allocate memory: ") + error.what());
+					throw std::runtime_error{fmt::format("Could not allocate memory: {}", error.what())};
 				}
 			}
 
@@ -195,14 +195,10 @@ public:
 	/// Sets the memory of the first num_elements to value
 	void memset(const int value, const size_t num_elements, const size_t offset = 0) {
 		if (num_elements + offset > m_size) {
-			throw std::runtime_error("Could not set memory: Number of elements larger than allocated memory");
+			throw std::runtime_error{fmt::format("Could not set memory: Number of elements {}+{} larger than allocated memory {}.", num_elements, offset, m_size)};
 		}
 
-		try {
-			CUDA_CHECK_THROW(cudaMemset(m_data + offset, value, num_elements * sizeof(T)));
-		} catch (std::runtime_error error) {
-			throw std::runtime_error(std::string("Could not set memory: ") + error.what());
-		}
+		CUDA_CHECK_THROW(cudaMemset(m_data + offset, value, num_elements * sizeof(T)));
 	}
 
 	/// Sets the memory of the all elements to value
@@ -216,17 +212,13 @@ public:
 	 */
 	/// Copy data of num_elements from the raw pointer on the host
 	void copy_from_host(const T* host_data, const size_t num_elements) {
-		try {
-			CUDA_CHECK_THROW(cudaMemcpy(data(), host_data, num_elements * sizeof(T), cudaMemcpyHostToDevice));
-		} catch (std::runtime_error error) {
-			throw std::runtime_error(std::string("Could not copy from host: ") + error.what());
-		}
+		CUDA_CHECK_THROW(cudaMemcpy(data(), host_data, num_elements * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
 	/// Copy num_elements from the host vector
 	void copy_from_host(const std::vector<T>& data, const size_t num_elements) {
 		if (data.size() < num_elements) {
-			throw std::runtime_error(std::string("Trying to copy ") + std::to_string(num_elements) + std::string(" elements, but vector size is only ") + std::to_string(data.size()));
+			throw std::runtime_error{fmt::format("Trying to copy {} elements, but vector size is only {}.", num_elements, data.size())};
 		}
 		copy_from_host(data.data(), num_elements);
 	}
@@ -271,7 +263,7 @@ public:
 	/// Copies the entire host vector to the device. Fails if there is not enough space available.
 	void copy_from_host(const std::vector<T>& data) {
 		if (data.size() < m_size) {
-			throw std::runtime_error(std::string("Trying to copy ") + std::to_string(m_size) + std::string(" elements, but vector size is only ") + std::to_string(data.size()));
+			throw std::runtime_error{fmt::format("Trying to copy {} elements, but vector size is only {}.", m_size, data.size())};
 		}
 		copy_from_host(data.data(), m_size);
 	}
@@ -279,20 +271,18 @@ public:
 	/// Copies num_elements of data from the raw host pointer to the device. Fails if there is not enough space available.
 	void copy_to_host(T* host_data, const size_t num_elements) const {
 		if (num_elements > m_size) {
-			throw std::runtime_error(std::string("Trying to copy ") + std::to_string(num_elements) + std::string(" elements, but vector size is only ") + std::to_string(m_size));
+			throw std::runtime_error{fmt::format("Trying to copy {} elements, but memory size is only {}.", num_elements, m_size)};
 		}
-		try {
-			CUDA_CHECK_THROW(cudaMemcpy(host_data, data(), num_elements * sizeof(T), cudaMemcpyDeviceToHost));
-		} catch (std::runtime_error error) {
-			throw std::runtime_error(std::string("Could not copy to host: ") + error.what());
-		}
+
+		CUDA_CHECK_THROW(cudaMemcpy(host_data, data(), num_elements * sizeof(T), cudaMemcpyDeviceToHost));
 	}
 
 	/// Copies num_elements from the device to a vector on the host
 	void copy_to_host(std::vector<T>& data, const size_t num_elements) const {
 		if (data.size() < num_elements) {
-			throw std::runtime_error(std::string("Trying to copy ") + std::to_string(num_elements) + std::string(" elements, but vector size is only ") + std::to_string(data.size()));
+			throw std::runtime_error{fmt::format("Trying to copy {} elements, but vector size is only {}.", num_elements, data.size())};
 		}
+
 		copy_to_host(data.data(), num_elements);
 	}
 
@@ -304,8 +294,9 @@ public:
 	/// Copies all elements from the device to a vector on the host
 	void copy_to_host(std::vector<T>& data) const {
 		if (data.size() < m_size) {
-			throw std::runtime_error(std::string("Trying to copy ") + std::to_string(m_size) + std::string(" elements, but vector size is only ") + std::to_string(data.size()));
+			throw std::runtime_error{fmt::format("Trying to copy {} elements, but vector size is only {}", m_size, data.size())};
 		}
+
 		copy_to_host(data.data(), m_size);
 	}
 
@@ -319,11 +310,7 @@ public:
 			resize(size);
 		}
 
-		try {
-			CUDA_CHECK_THROW(cudaMemcpy(m_data, other.m_data, size * sizeof(T), cudaMemcpyDeviceToDevice));
-		} catch (std::runtime_error error) {
-			throw std::runtime_error(std::string("Could not copy from device: ") + error.what());
-		}
+		CUDA_CHECK_THROW(cudaMemcpy(m_data, other.m_data, size * sizeof(T), cudaMemcpyDeviceToDevice));
 	}
 
 	/// Copies data from another device array to this one, automatically resizing it
@@ -467,7 +454,7 @@ public:
 		} catch (std::runtime_error error) {
 			// Don't need to report on memory-free problems when the driver is shutting down.
 			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
-				fprintf(stderr, "Could not free memory: %s\n", error.what());
+				std::cerr << "Could not free memory: " << error.what() << std::endl;
 			}
 		}
 	}

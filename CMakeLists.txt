@@ -152,7 +152,7 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 
 ###############################################################################
-# Include files
+# Dependencies
 ###############################################################################
 
 if (MSVC)
@@ -164,6 +164,8 @@ find_library(
 	${CUDA_TOOLKIT_ROOT_DIR}/lib64
 	${CUDA_TOOLKIT_ROOT_DIR}/lib
 )
+
+add_subdirectory("dependencies/fmt")
 
 ###############################################################################
 # tiny-cuda-nn library, samples, and benchmarks
@@ -204,7 +206,7 @@ target_include_directories(tiny-cuda-nn PUBLIC
 	"dependencies/cutlass/include"
 	"dependencies/cutlass/tools/util/include"
 )
-target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda cublas)
+target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda cublas fmt)
 
 if (TCNN_BUILD_EXAMPLES)
 	add_subdirectory("samples")

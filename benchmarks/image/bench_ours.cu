@@ -41,6 +41,8 @@
 
 #include <tiny-cuda-nn/trainer.h>
 
+#include <fmt/core.h>
+
 #include <stbi/stbi_wrapper.h>
 
 #include <chrono>
@@ -281,7 +283,7 @@ int main(int argc, char* argv[]) {
 				// Dump learned image for sanity checking
 				network->inference(inference_stream, GPUMatrix<float>{xs_and_ys.data(), num_dims_encoded, n_coords}, prediction);
 
-				save_image(prediction_data.data(), sampling_width, sampling_height, 3, num_output_dims, std::to_string(batch_size) + "-after-" + std::to_string(n_iterations) + "-iters-" + method + ".jpg");
+				save_image(prediction_data.data(), sampling_width, sampling_height, 3, num_output_dims, fmt::format("{}-after-{}-iters-{}.jpg", batch_size, n_iterations, method));
 
 				std::cout << "Finished training benchmark. Mean throughput is " << mean_training_throughput << "/s. Waiting 10 seconds for GPU to cool down." << std::endl;
 				std::this_thread::sleep_for(std::chrono::seconds{10});
