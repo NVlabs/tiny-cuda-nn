@@ -78,11 +78,10 @@ public:
 		// Allocate auxiliary optimizer buffers
 		m_optimizer->allocate(m_model);
 
-		// Allocate trainer buffers
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);
 
-		setup_params_pointers();
+		set_param_pointers();
 
 		m_model->initialize_params(
 			m_rng,
@@ -258,7 +257,7 @@ public:
 
 		json data;
 		data["n_params"] = n_params;
-		data["params_binary"] = m_params_buffer;
+		data["params_binary"] = gpu_memory_to_json_binary(m_params_inference, sizeof(PARAMS_T)*n_params);
 
 		if (serialize_optimizer) {
 			data["optimizer"] = m_optimizer->serialize();
@@ -275,24 +274,12 @@ public:
 			m_optimizer->deserialize(data["optimizer"]);
 		}
 
-		setup_params_pointers();
-
-		size_t n_params = m_model->n_params();
-		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params_inference=m_params_inference] __device__ (size_t i) {
-			params_fp[i] = (float)params_inference[i];
-		});
-
-		m_model->set_params(
-			m_params,
-			m_params_inference,
-			m_params_backward,
-			m_param_gradients
-		);
+		set_param_pointers();
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
 private:
-	void setup_params_pointers()
-	{
+	void set_param_pointers() {
 		size_t n_params = m_model->n_params();
 
 		m_params_full_precision = (float*)(m_params_buffer.data());
@@ -301,13 +288,14 @@ private:
 		m_param_gradients       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params * 2);
 
 		// Use the optimizer's custom params for inference, if they exist.
-		m_params_inference = m_optimizer->custom_weights();
+		m_params_inference = m_optimizer ? m_optimizer->custom_weights() : nullptr;
 		if (m_params_inference == nullptr) {
 			m_params_inference = m_params;
 		}
+
+		m_model->set_params(m_params, m_params_inference, m_params_backward, m_param_gradients);
 	}
 
-private:
 	std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> m_model;
 	std::shared_ptr<Optimizer<PARAMS_T>> m_optimizer;
 	std::shared_ptr<Loss<COMPUTE_T>> m_loss;
