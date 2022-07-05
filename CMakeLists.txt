@@ -165,6 +165,7 @@ find_library(
 	${CUDA_TOOLKIT_ROOT_DIR}/lib
 )
 
+set(BUILD_SHARED_LIBS OFF)
 add_subdirectory("dependencies/fmt")
 
 ###############################################################################
