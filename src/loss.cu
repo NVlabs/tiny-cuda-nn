@@ -62,7 +62,7 @@ Loss<T>* create_loss(const json& loss) {
 	} else if (equals_case_insensitive(loss_type, "CrossEntropy")) {
 		return new CrossEntropyLoss<T>{};
 	} else {
-		throw std::runtime_error{std::string{"Invalid loss type: "} + loss_type};
+		throw std::runtime_error{fmt::format("Invalid loss type: {}", loss_type)};
 	}
 }
 

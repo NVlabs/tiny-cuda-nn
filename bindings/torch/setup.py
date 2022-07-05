@@ -68,7 +68,10 @@ if torch.cuda.is_available():
 
 	print(f"Targeting compute capability {compute_capability}")
 
-	definitions = [f"-DTCNN_MIN_GPU_ARCH={compute_capability}"]
+	definitions = [
+		f"-DTCNN_MIN_GPU_ARCH={compute_capability}",
+		"-DFMT_HEADER_ONLY=1",
+	]
 	nvcc_flags += definitions
 	cflags += definitions
 
@@ -106,6 +109,7 @@ if torch.cuda.is_available():
 			"%s/dependencies" % root_dir,
 			"%s/dependencies/cutlass/include" % root_dir,
 			"%s/dependencies/cutlass/tools/util/include" % root_dir,
+			"%s/dependencies/fmt/include" % root_dir,
 		],
 		extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
 		libraries=["cuda", "cudadevrt", "cudart_static"],

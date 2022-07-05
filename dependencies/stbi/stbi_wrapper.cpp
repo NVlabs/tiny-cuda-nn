@@ -16,19 +16,21 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#include <fmt/core.h>
+
 #include <cmath>
 #include <stdexcept>
 #include <vector>
 
 void save_stbi(const uint8_t* data, int width, int height, int n_channels, const char* outfilename) {
 	if (stbi_write_jpg(outfilename, width, height, n_channels, data, 100) == 0) {
-		throw std::runtime_error{std::string{"Failed to write image "} + outfilename};
+		throw std::runtime_error{fmt::format("Failed to write image {}", outfilename)};
 	}
 }
 
 void save_stbi(const float* data, int width, int height, int n_channels, const char* outfilename) {
 	if (stbi_write_hdr(outfilename, width, height, n_channels, data) == 0) {
-		throw std::runtime_error{std::string{"Failed to write image "} + outfilename};
+		throw std::runtime_error{fmt::format("Failed to write image {}", outfilename)};
 	}
 }
 

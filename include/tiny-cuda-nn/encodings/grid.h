@@ -61,7 +61,7 @@ inline GridType string_to_grid_type(const std::string& grid_type) {
 		return GridType::Tiled;
 	}
 
-	throw std::runtime_error{std::string{"Invalid grid type: "} + grid_type};
+	throw std::runtime_error{fmt::format("Invalid grid type: {}", grid_type)};
 }
 
 inline std::string to_string(GridType grid_type) {
@@ -69,7 +69,7 @@ inline std::string to_string(GridType grid_type) {
 		case GridType::Hash: return "Hash";
 		case GridType::Dense: return "Dense";
 		case GridType::Tiled: return "Tiled";
-		default: throw std::runtime_error{std::string{"Invalid grid type"}};
+		default: throw std::runtime_error{"Invalid grid type."};
 	}
 }
 
@@ -907,7 +907,7 @@ public:
 				// If hash table needs fewer params than dense, then use fewer and rely on the hash.
 				params_in_level = std::min(params_in_level, (1u << log2_hashmap_size));
 			} else {
-				throw std::runtime_error{std::string{"GridEncoding: invalid grid type "} + to_string(grid_type)};
+				throw std::runtime_error{fmt::format("GridEncoding: invalid grid type {}", to_string(grid_type))};
 			}
 
 			m_hashmap_offsets_table_cpu[i] = offset;
@@ -926,7 +926,7 @@ public:
 		m_n_padded_output_dims = m_n_output_dims = m_n_features;
 
 		if (n_features % N_FEATURES_PER_LEVEL != 0) {
-			throw std::runtime_error{"GridEncoding: number of grid features must be a multiple of n_features_per_level"};
+			throw std::runtime_error{fmt::format("GridEncoding: n_features={} must be a multiple of N_FEATURES_PER_LEVEL={}", n_features, N_FEATURES_PER_LEVEL)};
 		}
 	}
 

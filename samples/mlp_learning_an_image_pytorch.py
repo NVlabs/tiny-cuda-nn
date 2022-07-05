@@ -57,13 +57,15 @@ IMAGES_DIR = os.path.join(DATA_DIR, "images")
 class Image(torch.nn.Module):
 	def __init__(self, filename, device):
 		super(Image, self).__init__()
-		self.data = torch.from_numpy(read_image(filename)).float().to(device)
+		self.data = read_image(filename)
+		self.shape = self.data.shape
+		self.data = torch.from_numpy(self.data).float().to(device)
 
 	def forward(self, xs):
 		with torch.no_grad():
 			# Bilinearly filtered lookup from the image. Not super fast,
 			# but less than ~20% of the overall runtime of this example.
-			shape = self.data.shape
+			shape = self.shape
 
 			xs = xs * torch.tensor([shape[1], shape[0]], device=xs.device).float()
 			indices = xs.long()

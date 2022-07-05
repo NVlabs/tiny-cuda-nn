@@ -87,18 +87,11 @@ public:
 		const GPUMatrix<float>& target,
 		GPUMatrix<float>& values,
 		GPUMatrix<T>& gradients,
-		const GPUMatrix<float>* data_pdf = nullptr) const override {
-		if (prediction.n() != target.n()) {
-			throw std::runtime_error(std::string("Prediction and target don't have matching batch size ") + std::to_string(prediction.n()) + "!=" + std::to_string(target.n()));
-		}
-
-		if (prediction.m() != stride) {
-			throw std::runtime_error(std::string("Prediction does not have appropriate dimensions ") + std::to_string(prediction.m()) + "!=" + std::to_string(stride));
-		}
-
-		if (target.m() != dims) {
-			throw std::runtime_error(std::string("Target does not have appropriate dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(dims));
-		}
+		const GPUMatrix<float>* data_pdf = nullptr
+	) const override {
+		CHECK_THROW(prediction.n() == target.n());
+		CHECK_THROW(prediction.m() == stride);
+		CHECK_THROW(target.m() == dims);
 
 		linear_kernel(l1_loss<T>, 0, stream,
 			prediction.n_elements(),

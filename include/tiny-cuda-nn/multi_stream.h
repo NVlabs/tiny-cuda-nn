@@ -115,7 +115,7 @@ public:
 
 	cudaStream_t get(size_t idx) {
 		if (idx >= m_n_streams) {
-			throw std::runtime_error{std::string{"MultiStream: invalid stream index requested: "} + std::to_string(idx) + "/" + std::to_string(m_n_streams)};
+			throw std::runtime_error{fmt::format("MultiStream: invalid stream index requested: {}/{}", idx, m_n_streams)};
 		}
 		return m_streams.at(idx).get();
 	}
