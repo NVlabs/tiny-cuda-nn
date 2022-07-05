@@ -205,6 +205,7 @@ target_include_directories(tiny-cuda-nn PUBLIC
 	"dependencies"
 	"dependencies/cutlass/include"
 	"dependencies/cutlass/tools/util/include"
+	"dependencies/fmt/include"
 )
 target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda cublas fmt)
 
