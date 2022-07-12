@@ -191,7 +191,7 @@ set(TCNN_SOURCES
 	src/reduce_sum.cu
 )
 
-if (MIN_GPU_ARCH GREATER_EQUAL 70)
+if (MIN_GPU_ARCH GREATER 70)
 	list(APPEND TCNN_SOURCES src/fully_fused_mlp.cu)
 endif()
 

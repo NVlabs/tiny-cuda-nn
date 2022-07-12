@@ -95,7 +95,7 @@ if torch.cuda.is_available():
 			"../../src/cutlass_mlp.cu",
 		]
 
-		if compute_capability >= 70:
+		if compute_capability > 70:
 			source_files.append("../../src/fully_fused_mlp.cu")
 	else:
 		nvcc_flags.append("-DTCNN_NO_NETWORKS")
