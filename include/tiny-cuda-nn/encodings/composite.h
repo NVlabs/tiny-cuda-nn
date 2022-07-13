@@ -32,9 +32,9 @@
 #pragma once
 
 #include <tiny-cuda-nn/common.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/encoding.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
 #include <numeric>

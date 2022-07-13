@@ -128,13 +128,22 @@ private:
 	cudaEvent_t m_event;
 };
 
-inline std::map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& multi_streams() {
-	static std::map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
+inline std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& stream_multi_streams() {
+	static std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
 	return s_multi_streams;
 }
 
+inline std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>>& global_multi_streams() {
+	static std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
+	return s_multi_streams;
+}
+
+inline std::stack<std::shared_ptr<MultiStream>>& get_multi_stream_stack(cudaStream_t parent_stream) {
+	return parent_stream ? stream_multi_streams()[parent_stream] : global_multi_streams()[cuda_device()];
+}
+
 inline std::shared_ptr<MultiStream> reserve_multi_stream(cudaStream_t parent_stream, size_t n_streams) {
-	auto& stack = multi_streams()[parent_stream];
+	auto& stack = get_multi_stream_stack(parent_stream);
 	if (stack.empty()) {
 		stack.push(std::make_shared<MultiStream>());
 	}
@@ -146,17 +155,18 @@ inline std::shared_ptr<MultiStream> reserve_multi_stream(cudaStream_t parent_str
 }
 
 inline void return_multi_stream(cudaStream_t parent_stream, std::shared_ptr<MultiStream> multi_stream) {
-	if (multi_streams().count(parent_stream) == 0) {
+	if (parent_stream ? (stream_multi_streams().count(parent_stream) == 0) : (global_multi_streams().count(cuda_device()) == 0)) {
 		throw std::runtime_error{"Attempted to return multi stream to the wrong parent stream."};
 	}
 
-	auto& stack = multi_streams()[parent_stream];
+	auto& stack = get_multi_stream_stack(parent_stream);
 	stack.push(multi_stream);
 }
 
 // RAII wrapper around MultiStream
 struct SyncedMultiStream {
 public:
+	SyncedMultiStream() = default;
 	SyncedMultiStream(cudaStream_t stream, size_t n_streams) : m_main_stream{stream}, m_n_streams{n_streams} {
 		if (m_n_streams == 0) {
 			throw std::runtime_error{"SyncedMultiStream: must request at least one stream"};
@@ -184,6 +194,10 @@ public:
 	}
 
 	cudaStream_t get(size_t idx) {
+		if (m_n_streams == 0) {
+			throw std::runtime_error{"SyncedMultiStream: must have at least one stream"};
+		}
+
 		if (idx == 0) {
 			return m_main_stream;
 		} else {
@@ -198,7 +212,7 @@ public:
 private:
 	std::shared_ptr<MultiStream> m_multi_stream = nullptr;
 	cudaStream_t m_main_stream = nullptr;
-	size_t m_n_streams;
+	size_t m_n_streams = 0;
 };
 
 TCNN_NAMESPACE_END

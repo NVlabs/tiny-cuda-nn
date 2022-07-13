@@ -32,6 +32,7 @@
 #include <tiny-cuda-nn/networks/cutlass_mlp.h>
 
 #include <tiny-cuda-nn/cutlass_matmul.h>
+#include <tiny-cuda-nn/multi_stream.h>
 
 TCNN_NAMESPACE_BEGIN
 
@@ -89,25 +90,6 @@ m_can_fuse_activation{activation != Activation::Sine}
 	m_total_n_params = 0;
 	for (const auto& m : m_weight_matrices) {
 		m_total_n_params += m.n_elements();
-	}
-
-	// 1 stream per matrix.
-	m_training_splitk_streams.resize(m_n_hidden_layers + 1);
-	m_training_splitk_events.resize(m_n_hidden_layers + 1);
-
-	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		CUDA_CHECK_THROW(cudaStreamCreate(&m_training_splitk_streams[i]));
-		CUDA_CHECK_THROW(cudaEventCreate(&m_training_splitk_events[i]));
-	}
-}
-
-template <typename T>
-CutlassMLP<T>::~CutlassMLP() {
-	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		free_gpu_memory_arena(m_training_splitk_streams[i]);
-
-		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
-		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));
 	}
 }
 
@@ -265,102 +247,77 @@ void CutlassMLP<T>::backward_impl(
 
 	const float param_gradient_beta = param_gradients_mode == EGradientMode::Accumulate ? 1.0f : 0.0f;
 
-	{
-		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+	std::vector<SyncedMultiStream> multi_streams;
 
-		int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
+	const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
+	int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
 
-		// If there are no hidden layers, the network is just a simple matmul
-		if (m_n_hidden_layers == 0) {
-			if (param_gradients_mode != EGradientMode::Ignore) {
-				cudaEventRecord(m_training_splitk_events.at(0), stream);
-				cudaStreamWaitEvent(m_training_splitk_streams.at(0), m_training_splitk_events.at(0), 0);
+	const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
 
-				// Compute weight gradients
-				fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(0), tmp_dL_doutput, input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
-
-				cudaEventRecord(m_training_splitk_events.at(0), m_training_splitk_streams.at(0));
-			}
-
-			if (dL_dinput) {
-				fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, *dL_dinput);
-			}
-
-			if (param_gradients_mode != EGradientMode::Ignore) {
-				cudaStreamWaitEvent(stream, m_training_splitk_events.at(0), 0);
-			}
-			return;
+	// If there are no hidden layers, the network is just a simple matmul
+	if (m_n_hidden_layers == 0) {
+		if (param_gradients_mode != EGradientMode::Ignore) {
+			multi_streams.emplace_back(stream, 2);
+			fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 		}
 
-		uint32_t tmp_idx = (m_can_fuse_activation ? (m_n_hidden_matmuls+1) : ((m_n_hidden_matmuls+1) * 2)) - 1;
-		uint32_t backward_tmp_idx = 0;
+		if (dL_dinput) {
+			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, *dL_dinput);
+		}
+
+		return;
+	}
+
+	uint32_t tmp_idx = (m_can_fuse_activation ? (m_n_hidden_matmuls+1) : ((m_n_hidden_matmuls+1) * 2)) - 1;
+	uint32_t backward_tmp_idx = 0;
+
+	// Output layer
+	if (param_gradients_mode != EGradientMode::Ignore) {
+		multi_streams.emplace_back(stream, 2);
+		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
+
+	}
+
+	if (!m_can_fuse_activation) {
+		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx));
+		activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
+	} else {
+		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+	}
+
+	tmp_idx -= m_can_fuse_activation ? 1 : 2;
+	++backward_tmp_idx;
+
+	// layers
+	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
+		uint32_t matrix_idx = m_n_hidden_matmuls - i - 1;
 
 		if (param_gradients_mode != EGradientMode::Ignore) {
-			// Output layer
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
-			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-
-			// Compute weight gradients
-			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
-
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
+			multi_streams.emplace_back(stream, 2);
+			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 		}
 
 		if (!m_can_fuse_activation) {
-			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx));
+			fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 			activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
 		} else {
-			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+			fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
 		}
 
 		tmp_idx -= m_can_fuse_activation ? 1 : 2;
 		++backward_tmp_idx;
-
-		// layers
-		for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-			uint32_t matrix_idx = m_n_hidden_matmuls - i - 1;
-
-			if (param_gradients_mode != EGradientMode::Ignore) {
-				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
-				cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
-				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
-			}
-
-			if (!m_can_fuse_activation) {
-				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), backward_tmp.at(backward_tmp_idx));
-				activation_backward_gpu(stream, m_activation, forward.hidden.at(tmp_idx-1), backward_tmp.at(backward_tmp_idx));
-			} else {
-				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_params, matrix_idx).transposed(), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
-			}
-
-			tmp_idx -= m_can_fuse_activation ? 1 : 2;
-			++backward_tmp_idx;
-		}
-
-		if (param_gradients_mode != EGradientMode::Ignore) {
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
-			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
-		}
-
-		// If requested, compute sensitivity of loss w.r.t. inputs
-		if (dL_dinput) {
-			// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-			fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
-		}
 	}
 
 	if (param_gradients_mode != EGradientMode::Ignore) {
-		// All the per-layer split-k matrix multiplications summing over
-		// the batch are computed in parallel streams to the actual
-		// backpropagation. Here, we need to wait for all of these to complete.
-		for (auto& event : m_training_splitk_events) {
-			cudaStreamWaitEvent(stream, event, 0);
-		}
+		multi_streams.emplace_back(stream, 2);
+		fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
+	}
+
+	// If requested, compute sensitivity of loss w.r.t. inputs
+	if (dL_dinput) {
+		// optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
+		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
 
