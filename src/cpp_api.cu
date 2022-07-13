@@ -56,6 +56,14 @@ void free_temporary_memory() {
 	tcnn::free_all_gpu_memory_arenas();
 }
 
+int cuda_device() {
+	return tcnn::cuda_device();
+}
+
+void set_cuda_device(int device) {
+	tcnn::set_cuda_device(device);
+}
+
 template <typename T>
 class DifferentiableObject : public Module {
 public:

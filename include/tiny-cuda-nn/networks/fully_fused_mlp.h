@@ -44,7 +44,6 @@ template <typename T, int WIDTH>
 class FullyFusedMLP : public Network<T> {
 public:
 	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, bool use_feedback_alignment, Activation activation, Activation output_activation);
-	~FullyFusedMLP() override;
 
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
@@ -179,10 +178,6 @@ private:
 	bool m_use_feedback_alignment = false;
 
 	static const uint32_t tensorcore_width = 16;
-
-	// Streams and events
-	std::vector<cudaStream_t> m_training_splitk_streams;
-	std::vector<cudaEvent_t> m_training_splitk_events;
 
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;

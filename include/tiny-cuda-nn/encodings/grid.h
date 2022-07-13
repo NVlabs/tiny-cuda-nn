@@ -920,8 +920,16 @@ public:
 
 		m_hashmap_offsets_table_cpu[m_n_levels] = offset;
 		m_n_params = m_hashmap_offsets_table_cpu[m_n_levels] * N_FEATURES_PER_LEVEL;
-		m_hashmap_offsets_table.resize(m_n_levels + 1);
-		CUDA_CHECK_THROW(cudaMemcpy(m_hashmap_offsets_table.data(), m_hashmap_offsets_table_cpu.data(), (m_n_levels+1) * sizeof(uint32_t), cudaMemcpyHostToDevice));
+
+		int current_device = cuda_device();
+
+		m_hashmap_offsets_tables.resize(cuda_device_count());
+		for (int i = 0; i < (int)m_hashmap_offsets_tables.size(); ++i) {
+			set_cuda_device(i);
+			m_hashmap_offsets_tables[i].resize_and_copy_from_host(m_hashmap_offsets_table_cpu);
+		}
+
+		set_cuda_device(current_device);
 
 		m_n_padded_output_dims = m_n_output_dims = m_n_features;
 
@@ -980,7 +988,7 @@ public:
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
 			num_elements,
 			m_n_features,
-			m_hashmap_offsets_table.data(),
+			m_hashmap_offsets_tables.at(cuda_device()).data(),
 			m_base_resolution,
 			std::log2(m_per_level_scale),
 			this->m_quantize_threshold,
@@ -1068,7 +1076,7 @@ public:
 			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
-				m_hashmap_offsets_table.data(),
+				m_hashmap_offsets_tables.at(cuda_device()).data(),
 				m_base_resolution,
 				std::log2(m_per_level_scale),
 				this->m_max_level,
@@ -1163,7 +1171,7 @@ public:
 			kernel_grid_backward_input_backward_grid<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
-				m_hashmap_offsets_table.data(),
+				m_hashmap_offsets_tables.at(cuda_device()).data(),
 				m_base_resolution,
 				std::log2(m_per_level_scale),
 				this->m_max_level,
@@ -1209,7 +1217,7 @@ public:
 			kernel_grid_backward_input_backward_input<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
-				m_hashmap_offsets_table.data(),
+				m_hashmap_offsets_tables.at(cuda_device()).data(),
 				m_base_resolution,
 				std::log2(m_per_level_scale),
 				this->m_quantize_threshold,
@@ -1325,7 +1333,7 @@ private:
 	uint32_t m_n_levels;
 	uint32_t m_n_params;
 	std::vector<uint32_t> m_hashmap_offsets_table_cpu;
-	GPUMemory<uint32_t> m_hashmap_offsets_table;
+	std::vector<GPUMemory<uint32_t>> m_hashmap_offsets_tables;
 	uint32_t m_log2_hashmap_size;
 	uint32_t m_base_resolution;
 

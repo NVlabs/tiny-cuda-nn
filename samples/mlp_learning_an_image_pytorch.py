@@ -110,7 +110,7 @@ if __name__ == "__main__":
 	image = Image(args.image, device)
 	n_channels = image.data.shape[2]
 
-	model = tcnn.NetworkWithInputEncoding(n_input_dims=2, n_output_dims=n_channels, encoding_config=config["encoding"], network_config=config["network"])
+	model = tcnn.NetworkWithInputEncoding(n_input_dims=2, n_output_dims=n_channels, encoding_config=config["encoding"], network_config=config["network"]).to(device)
 	print(model)
 
 	#===================================================================================================

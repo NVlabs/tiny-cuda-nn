@@ -48,6 +48,16 @@ int cuda_device() {
 	return device;
 }
 
+void set_cuda_device(int device) {
+	CUDA_CHECK_THROW(cudaSetDevice(device));
+}
+
+int cuda_device_count() {
+	int device_count;
+	CUDA_CHECK_THROW(cudaGetDeviceCount(&device_count));
+	return device_count;
+}
+
 bool cuda_supports_virtual_memory(int device) {
 	int supports_vmm;
 	CU_CHECK_THROW(cuDeviceGetAttribute(&supports_vmm, CU_DEVICE_ATTRIBUTE_VIRTUAL_ADDRESS_MANAGEMENT_SUPPORTED, device));

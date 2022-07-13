@@ -59,6 +59,9 @@ uint32_t batch_size_granularity();
 
 void free_temporary_memory();
 
+int cuda_device();
+void set_cuda_device(int device);
+
 struct Context {
 	std::unique_ptr<tcnn::Context> ctx;
 };

@@ -31,8 +31,9 @@
 
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
 
-#include <tiny-cuda-nn/cutlass_matmul.h>
 #include <tiny-cuda-nn/common_device.h>
+#include <tiny-cuda-nn/cutlass_matmul.h>
+#include <tiny-cuda-nn/multi_stream.h>
 
 #include <mma.h>
 
@@ -683,25 +684,6 @@ m_output_activation{output_activation}
 	for (const auto& m : m_weight_matrices) {
 		m_total_n_params += m.n_elements();
 	}
-
-	// 1 stream per matmul
-	m_training_splitk_streams.resize(m_n_hidden_layers + 1);
-	m_training_splitk_events.resize(m_n_hidden_layers + 1);
-
-	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		CUDA_CHECK_THROW(cudaStreamCreate(&m_training_splitk_streams[i]));
-		CUDA_CHECK_THROW(cudaEventCreate(&m_training_splitk_events[i]));
-	}
-}
-
-template <typename T, int WIDTH>
-FullyFusedMLP<T, WIDTH>::~FullyFusedMLP() {
-	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		free_gpu_memory_arena(m_training_splitk_streams[i]);
-
-		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
-		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));
-	}
 }
 
 template <typename CutlassLayer, MatrixLayout input_layout, typename T>
@@ -807,86 +789,68 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 	const WeightUsage weight_usage = use_inference_params ? WeightUsage::Inference : WeightUsage::Backward;
 	const float param_gradient_beta = param_gradients_mode == EGradientMode::Accumulate ? 1.0f : 0.0f;
 
-	{
-		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+	std::vector<SyncedMultiStream> multi_streams;
 
-		int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
+	const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
+	int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
 
-		uint32_t tmp_idx = m_n_hidden_matmuls;
-		uint32_t backward_tmp_idx = 0;
+	const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
+
+	uint32_t tmp_idx = m_n_hidden_matmuls;
+	uint32_t backward_tmp_idx = 0;
+
+	// Output layer
+	if (param_gradients_mode != EGradientMode::Ignore) {
+		multi_streams.emplace_back(stream, 2);
+		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
+	}
+
+	// If the output width is larger than 16 dims, we use cutlass to backpropagate through the last layer
+	// rather than fusing it with our kernel.
+	if (m_output_width > 16) {
+		fc_multiply<FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+	}
+
+	// Only let the fully fused kernel compute gradients w.r.t. the input, if the input layer has the same size & layout as the other layers
+	auto dL_dinput_fused = input.m() == forward.hidden.at(0).m() && input.layout() == CM ? dL_dinput : nullptr;
+
+	// ASSUMPTION: weight matrices & forward_tmp matrices are contiguous in memory
+	switch (m_activation) {
+		case Activation::None:        mlp_fused_backward<WIDTH, T, Activation::None>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+		case Activation::Exponential: mlp_fused_backward<WIDTH, T, Activation::Exponential>(stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+		case Activation::Sigmoid:     mlp_fused_backward<WIDTH, T, Activation::Sigmoid>(    stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+		case Activation::ReLU:        mlp_fused_backward<WIDTH, T, Activation::ReLU>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+		case Activation::Squareplus:  mlp_fused_backward<WIDTH, T, Activation::Squareplus>( stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+		case Activation::Softplus:    mlp_fused_backward<WIDTH, T, Activation::Softplus>(   stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
+		default: throw std::runtime_error{"Unsupported activation."};
+	}
+
+	tmp_idx -= 1;
+	++backward_tmp_idx;
+
+	// layers
+	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
+		uint32_t matrix_idx = m_n_hidden_matmuls - i - 1;
 
 		if (param_gradients_mode != EGradientMode::Ignore) {
-			// Output layer
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
-			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-
-			// Compute weight gradients
-			fc_multiply_split_k<LastLayerK>(m_training_splitk_streams.at(backward_tmp_idx), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
-
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
-		}
-
-		// If the output width is larger than 16 dims, we use cutlass to backpropagate through the last layer
-		// rather than fusing it with our kernel.
-		if (m_output_width > 16) {
-			fc_multiply<FullLayer>(stream, output_weight_matrix(weight_usage).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
-		}
-
-		// Only let the fully fused kernel compute gradients w.r.t. the input, if the input layer has the same size & layout as the other layers
-		auto dL_dinput_fused = input.m() == forward.hidden.at(0).m() && input.layout() == CM ? dL_dinput : nullptr;
-
-		// ASSUMPTION: weight matrices & forward_tmp matrices are contiguous in memory
-		switch (m_activation) {
-			case Activation::None:        mlp_fused_backward<WIDTH, T, Activation::None>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Exponential: mlp_fused_backward<WIDTH, T, Activation::Exponential>(stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Sigmoid:     mlp_fused_backward<WIDTH, T, Activation::Sigmoid>(    stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::ReLU:        mlp_fused_backward<WIDTH, T, Activation::ReLU>(       stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Squareplus:  mlp_fused_backward<WIDTH, T, Activation::Squareplus>( stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			case Activation::Softplus:    mlp_fused_backward<WIDTH, T, Activation::Softplus>(   stream, input_weight_matrix(weight_usage), weight_matrix_at(weight_usage, 0), tmp_dL_doutput, backward_tmp.at(backward_tmp_idx), forward.hidden.at(0), dL_dinput_fused, m_n_hidden_matmuls); break;
-			default: throw std::runtime_error{"Unsupported activation."};
+			multi_streams.emplace_back(stream, 2);
+			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 		}
 
 		tmp_idx -= 1;
 		++backward_tmp_idx;
-
-		// layers
-		for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-			uint32_t matrix_idx = m_n_hidden_matmuls - i - 1;
-
-			if (param_gradients_mode != EGradientMode::Ignore) {
-				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
-				cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-				fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
-				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
-			}
-
-			tmp_idx -= 1;
-			++backward_tmp_idx;
-		}
-
-		if (param_gradients_mode != EGradientMode::Ignore) {
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), stream);
-			cudaStreamWaitEvent(m_training_splitk_streams.at(backward_tmp_idx), m_training_splitk_events.at(backward_tmp_idx), 0);
-			fc_multiply_split_k<FullLayerK>(m_training_splitk_streams.at(backward_tmp_idx), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
-			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
-		}
-
-		// If requested and if the fully fused kernel didn't already take care of it, compute sensitivity of loss w.r.t. inputs
-		if (dL_dinput && !dL_dinput_fused) {
-			// TODO: optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-			fc_multiply<FullLayer>(stream, input_weight_matrix(weight_usage).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
-		}
 	}
 
 	if (param_gradients_mode != EGradientMode::Ignore) {
-		// All the per-layer split-k matrix multiplications summing over
-		// the batch are computed in parallel streams to the actual
-		// backpropagation. Here, we need to wait for all of these to complete.
-		for (auto& event : m_training_splitk_events) {
-			cudaStreamWaitEvent(stream, event, 0);
-		}
+		multi_streams.emplace_back(stream, 2);
+		fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
+	}
+
+	// If requested and if the fully fused kernel didn't already take care of it, compute sensitivity of loss w.r.t. inputs
+	if (dL_dinput && !dL_dinput_fused) {
+		// TODO: optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
+		fc_multiply<FullLayer>(stream, input_weight_matrix(weight_usage).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
 

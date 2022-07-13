@@ -51,7 +51,6 @@ public:
 		uint32_t input_width, uint32_t network_width, uint32_t output_width, uint32_t n_hidden_layers,
 		Activation activation, Activation output_activation
 	);
-	~CutlassMLP() override;
 
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
@@ -169,10 +168,6 @@ private:
 	bool m_can_fuse_activation;
 
 	static const uint32_t tensorcore_width = 8;
-
-	// Streams and events
-	std::vector<cudaStream_t> m_training_splitk_streams;
-	std::vector<cudaEvent_t> m_training_splitk_events;
 
 	// Graphs
 	CudaGraph m_inference_graph;

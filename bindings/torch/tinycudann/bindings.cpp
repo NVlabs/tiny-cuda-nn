@@ -36,6 +36,7 @@
 #endif
 
 #include <ATen/cuda/CUDAUtils.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #ifdef snprintf
 #undef snprintf
@@ -69,11 +70,16 @@ void* void_data_ptr(torch::Tensor& tensor) {
 	}
 }
 
+#define CHECK_INPUT(x) CHECK_THROW(x.device().is_cuda()); CHECK_THROW(x.is_contiguous())
+
 class Module {
 public:
 	Module(tcnn::cpp::Module* module) : m_module{module} {}
 
 	std::tuple<tcnn::cpp::Context, torch::Tensor> fwd(torch::Tensor input, torch::Tensor params) {
+		CHECK_INPUT(input);
+		CHECK_INPUT(params);
+
 		// Types
 		CHECK_THROW(input.scalar_type() == torch::kFloat32);
 		CHECK_THROW(params.scalar_type() == c10_param_precision());
@@ -82,10 +88,16 @@ public:
 		CHECK_THROW(input.size(1) == n_input_dims());
 		CHECK_THROW(params.size(0) == n_params());
 
+		// Device
+		at::Device device = input.device();
+		CHECK_THROW(device == params.device());
+
+		const at::cuda::CUDAGuard device_guard{device};
 		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
 		uint32_t batch_size = input.size(0);
-		torch::Tensor output = torch::empty({ batch_size, n_output_dims() }, torch::TensorOptions().dtype(c10_output_precision()).device(torch::kCUDA));
+
+		torch::Tensor output = torch::empty({ batch_size, n_output_dims() }, torch::TensorOptions().dtype(c10_output_precision()).device(device));
 
 		tcnn::cpp::Context ctx;
 		if (!input.requires_grad() && !params.requires_grad()) {
@@ -102,6 +114,11 @@ public:
 			throw std::runtime_error{"Module::bwd: called with invalid context. fwd likely (mistakenly) ran in inference mode."};
 		}
 
+		CHECK_INPUT(input);
+		CHECK_INPUT(params);
+		CHECK_INPUT(output);
+		CHECK_INPUT(dL_doutput);
+
 		// Types
 		CHECK_THROW(input.scalar_type() == torch::kFloat32);
 		CHECK_THROW(params.scalar_type() == c10_param_precision());
@@ -115,18 +132,25 @@ public:
 		CHECK_THROW(output.size(0) == input.size(0));
 		CHECK_THROW(dL_doutput.size(0) == input.size(0));
 
-		uint32_t batch_size = input.size(0);
+		// Device
+		at::Device device = input.device();
+		CHECK_THROW(device == params.device());
+		CHECK_THROW(device == output.device());
+		CHECK_THROW(device == dL_doutput.device());
 
+		const at::cuda::CUDAGuard device_guard{device};
 		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+		uint32_t batch_size = input.size(0);
 
 		torch::Tensor dL_dinput;
 		if (input.requires_grad()) {
-			dL_dinput = torch::empty({ batch_size, input.size(1) }, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+			dL_dinput = torch::empty({ batch_size, input.size(1) }, torch::TensorOptions().dtype(torch::kFloat32).device(device));
 		}
 
 		torch::Tensor dL_dparams;
 		if (params.requires_grad()) {
-			dL_dparams = torch::empty({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(torch::kCUDA));
+			dL_dparams = torch::empty({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(device));
 		}
 
 		if (input.requires_grad() || params.requires_grad()) {
@@ -154,6 +178,11 @@ public:
 			throw std::runtime_error{"Module::bwd_bwd_input: called with invalid context. fwd likely (mistakenly) ran in inference mode."};
 		}
 
+		CHECK_INPUT(input);
+		CHECK_INPUT(params);
+		CHECK_INPUT(dL_ddLdinput);
+		CHECK_INPUT(dL_doutput);
+
 		// Types
 		CHECK_THROW(input.scalar_type() == torch::kFloat32);
 		CHECK_THROW(dL_ddLdinput.scalar_type() == torch::kFloat32);
@@ -168,23 +197,30 @@ public:
 		CHECK_THROW(dL_doutput.size(0) == input.size(0));
 		CHECK_THROW(dL_ddLdinput.size(0) == input.size(0));
 
-		uint32_t batch_size = input.size(0);
+		// Device
+		at::Device device = input.device();
+		CHECK_THROW(device == params.device());
+		CHECK_THROW(device == dL_ddLdinput.device());
+		CHECK_THROW(device == dL_doutput.device());
 
+		const at::cuda::CUDAGuard device_guard{device};
 		cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+		uint32_t batch_size = input.size(0);
 
 		torch::Tensor dL_ddLdoutput;
 		if (dL_doutput.requires_grad()) {
-			dL_ddLdoutput = torch::zeros({ batch_size, n_output_dims() }, torch::TensorOptions().dtype(c10_output_precision()).device(torch::kCUDA));
+			dL_ddLdoutput = torch::zeros({ batch_size, n_output_dims() }, torch::TensorOptions().dtype(c10_output_precision()).device(device));
 		}
 
 		torch::Tensor dL_dparams;
 		if (params.requires_grad()) {
-			dL_dparams = torch::zeros({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(torch::kCUDA));
+			dL_dparams = torch::zeros({ n_params() }, torch::TensorOptions().dtype(c10_param_precision()).device(device));
 		}
 
 		torch::Tensor dL_dinput;
 		if (input.requires_grad()) {
-			dL_dinput = torch::zeros({ batch_size, n_input_dims() }, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+			dL_dinput = torch::zeros({ batch_size, n_input_dims() }, torch::TensorOptions().dtype(torch::kFloat32).device(device));
 		}
 
 		if (dL_doutput.requires_grad() || params.requires_grad()) {
