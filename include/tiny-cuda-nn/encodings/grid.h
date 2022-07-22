@@ -46,6 +46,12 @@
 
 TCNN_NAMESPACE_BEGIN
 
+struct GridOffsetTable {
+	static const uint32_t MAX_N_LEVELS = 128;
+	uint32_t data[MAX_N_LEVELS+1] = {};
+	uint32_t size = 0;
+};
+
 enum class GridType {
 	Hash,
 	Dense,
@@ -133,7 +139,7 @@ template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL>
 __global__ void kernel_grid(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
-	const uint32_t* hashmap_offset_table,
+	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
 	const float log2_per_level_scale,
 	const float quantize_threshold,
@@ -176,8 +182,8 @@ __global__ void kernel_grid(
 		return;
 	}
 
-	grid += hashmap_offset_table[level] * N_FEATURES_PER_LEVEL;
-	const uint32_t hashmap_size = hashmap_offset_table[level + 1] - hashmap_offset_table[level];
+	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
@@ -307,7 +313,7 @@ template <typename T, typename GRAD_T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_
 __global__ void kernel_grid_backward(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
-	const uint32_t* hashmap_offset_table,
+	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
 	const float log2_per_level_scale,
 	float max_level,
@@ -335,8 +341,8 @@ __global__ void kernel_grid_backward(
 		return;
 	}
 
-	grid_gradient += hashmap_offset_table[level] * N_FEATURES_PER_LEVEL;
-	const uint32_t hashmap_size = hashmap_offset_table[level + 1] - hashmap_offset_table[level];
+	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
@@ -491,7 +497,7 @@ template <typename T, typename GRAD_T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_
 __global__ void kernel_grid_backward_input_backward_grid(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
-	const uint32_t* hashmap_offset_table,
+	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
 	const float log2_per_level_scale,
 	float max_level,
@@ -522,8 +528,8 @@ __global__ void kernel_grid_backward_input_backward_grid(
 		return;
 	}
 
-	grid_gradient += hashmap_offset_table[level] * N_FEATURES_PER_LEVEL;
-	const uint32_t hashmap_size = hashmap_offset_table[level + 1] - hashmap_offset_table[level];
+	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
@@ -614,7 +620,7 @@ template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32
 __global__ void kernel_grid_backward_input_backward_input(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
-	const uint32_t* hashmap_offset_table,
+	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
 	const float log2_per_level_scale,
 	const float quantize_threshold,
@@ -646,8 +652,8 @@ __global__ void kernel_grid_backward_input_backward_input(
 		return;
 	}
 
-	grid += hashmap_offset_table[level] * N_FEATURES_PER_LEVEL;
-	const uint32_t hashmap_size = hashmap_offset_table[level + 1] - hashmap_offset_table[level];
+	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
@@ -885,7 +891,9 @@ public:
 		m_n_levels = div_round_up(m_n_features, N_FEATURES_PER_LEVEL);
 		uint32_t offset = 0;
 
-		m_hashmap_offsets_table_cpu.resize(m_n_levels + 1);
+		if (m_n_levels > GridOffsetTable::MAX_N_LEVELS) {
+			throw std::runtime_error{fmt::format("GridEncoding: m_n_levels={} must be at most GridOffsetTable::MAX_N_LEVELS={}", m_n_levels, GridOffsetTable::MAX_N_LEVELS)};
+		}
 
 		for (uint32_t i = 0; i < m_n_levels; ++i) {
 			// Compute dense params required for the given level
@@ -910,7 +918,7 @@ public:
 				throw std::runtime_error{fmt::format("GridEncoding: invalid grid type {}", to_string(grid_type))};
 			}
 
-			m_hashmap_offsets_table_cpu[i] = offset;
+			m_offset_table.data[i] = offset;
 			offset += params_in_level;
 
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
@@ -918,18 +926,10 @@ public:
 #endif
 		}
 
-		m_hashmap_offsets_table_cpu[m_n_levels] = offset;
-		m_n_params = m_hashmap_offsets_table_cpu[m_n_levels] * N_FEATURES_PER_LEVEL;
+		m_offset_table.data[m_n_levels] = offset;
+		m_offset_table.size = m_n_levels+1;
 
-		int current_device = cuda_device();
-
-		m_hashmap_offsets_tables.resize(cuda_device_count());
-		for (int i = 0; i < (int)m_hashmap_offsets_tables.size(); ++i) {
-			set_cuda_device(i);
-			m_hashmap_offsets_tables[i].resize_and_copy_from_host(m_hashmap_offsets_table_cpu);
-		}
-
-		set_cuda_device(current_device);
+		m_n_params = m_offset_table.data[m_n_levels] * N_FEATURES_PER_LEVEL;
 
 		m_n_padded_output_dims = m_n_output_dims = m_n_features;
 
@@ -988,7 +988,7 @@ public:
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
 			num_elements,
 			m_n_features,
-			m_hashmap_offsets_tables.at(cuda_device()).data(),
+			m_offset_table,
 			m_base_resolution,
 			std::log2(m_per_level_scale),
 			this->m_quantize_threshold,
@@ -1076,7 +1076,7 @@ public:
 			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
-				m_hashmap_offsets_tables.at(cuda_device()).data(),
+				m_offset_table,
 				m_base_resolution,
 				std::log2(m_per_level_scale),
 				this->m_max_level,
@@ -1171,7 +1171,7 @@ public:
 			kernel_grid_backward_input_backward_grid<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
-				m_hashmap_offsets_tables.at(cuda_device()).data(),
+				m_offset_table,
 				m_base_resolution,
 				std::log2(m_per_level_scale),
 				this->m_max_level,
@@ -1217,7 +1217,7 @@ public:
 			kernel_grid_backward_input_backward_input<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
-				m_hashmap_offsets_tables.at(cuda_device()).data(),
+				m_offset_table,
 				m_base_resolution,
 				std::log2(m_per_level_scale),
 				this->m_quantize_threshold,
@@ -1288,7 +1288,11 @@ public:
 	}
 
 	size_t level_params_offset(uint32_t level) const override {
-		return m_hashmap_offsets_table_cpu.at(level);
+		if (level >= m_offset_table.size) {
+			throw std::runtime_error{"Out of bounds params offset request."};
+		}
+
+		return m_offset_table.data[level];
 	}
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override {
@@ -1332,8 +1336,7 @@ private:
 	uint32_t m_n_features;
 	uint32_t m_n_levels;
 	uint32_t m_n_params;
-	std::vector<uint32_t> m_hashmap_offsets_table_cpu;
-	std::vector<GPUMemory<uint32_t>> m_hashmap_offsets_tables;
+	GridOffsetTable m_offset_table;
 	uint32_t m_log2_hashmap_size;
 	uint32_t m_base_resolution;
 
