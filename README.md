@@ -113,7 +113,7 @@ $ cd tiny-cuda-nn
 Then, use CMake to build the project: (on Windows, this must be in a [developer command prompt](https://docs.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-160#developer_command_prompt))
 ```sh
 tiny-cuda-nn$ cmake . -B build
-tiny-cuda-nn$ cmake --build build --config RelWithDebInfo -j 16
+tiny-cuda-nn$ cmake --build build --config RelWithDebInfo -j
 ```
 
 
