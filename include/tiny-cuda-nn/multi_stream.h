@@ -36,6 +36,8 @@
 
 TCNN_NAMESPACE_BEGIN
 
+void free_multi_streams(cudaStream_t parent_stream);
+
 // Synchronization helpers
 struct StreamAndEvent {
 public:
@@ -46,6 +48,8 @@ public:
 
 	~StreamAndEvent() {
 		if (m_stream) {
+			free_multi_streams(m_stream);
+			free_gpu_memory_arena(m_stream);
 			cudaStreamDestroy(m_stream);
 		}
 
@@ -55,10 +59,16 @@ public:
 	}
 
 	// Only allow moving of these guys. No copying.
+	StreamAndEvent& operator=(const StreamAndEvent&) = delete;
 	StreamAndEvent(const StreamAndEvent&) = delete;
-	StreamAndEvent(StreamAndEvent&& other) : m_stream{other.m_stream}, m_event{other.m_event} {
-		other.m_stream = {};
-		other.m_event = {};
+	StreamAndEvent& operator=(StreamAndEvent&& other) {
+		std::swap(m_stream, other.m_stream);
+		std::swap(m_event, other.m_event);
+		return *this;
+	}
+
+	StreamAndEvent(StreamAndEvent&& other) {
+		*this = std::move(other);
 	}
 
 	void wait_for(cudaEvent_t event) {
@@ -75,8 +85,8 @@ public:
 	}
 
 private:
-	cudaStream_t m_stream;
-	cudaEvent_t m_event;
+	cudaStream_t m_stream = {};
+	cudaEvent_t m_event = {};
 };
 
 struct MultiStream {
@@ -88,6 +98,11 @@ public:
 	~MultiStream() {
 		cudaEventDestroy(m_event);
 	}
+
+	MultiStream& operator=(const MultiStream&) = delete;
+	MultiStream(const MultiStream&) = delete;
+	MultiStream& operator=(MultiStream&&) = delete;
+	MultiStream(MultiStream&&) = delete;
 
 	void signal(cudaStream_t outer_stream) {
 		for (size_t i = 0; i < m_n_streams; ++i) {
@@ -142,6 +157,11 @@ inline std::stack<std::shared_ptr<MultiStream>>& get_multi_stream_stack(cudaStre
 	return parent_stream ? stream_multi_streams()[parent_stream] : global_multi_streams()[cuda_device()];
 }
 
+inline void free_multi_streams(cudaStream_t parent_stream) {
+	CHECK_THROW(parent_stream);
+	stream_multi_streams().erase(parent_stream);
+}
+
 inline std::shared_ptr<MultiStream> reserve_multi_stream(cudaStream_t parent_stream, size_t n_streams) {
 	auto& stack = get_multi_stream_stack(parent_stream);
 	if (stack.empty()) {
@@ -186,11 +206,18 @@ public:
 	}
 
 	// Only allow moving of these guys. No copying.
+	SyncedMultiStream& operator=(const SyncedMultiStream& other) = delete;
 	SyncedMultiStream(const SyncedMultiStream&) = delete;
-	SyncedMultiStream(SyncedMultiStream&& other) {
+
+	SyncedMultiStream& operator=(SyncedMultiStream&& other) {
 		std::swap(m_multi_stream, other.m_multi_stream);
 		std::swap(m_main_stream, other.m_main_stream);
 		std::swap(m_n_streams, other.m_n_streams);
+		return *this;
+	}
+
+	SyncedMultiStream(SyncedMultiStream&& other) {
+		*this = std::move(other);
 	}
 
 	cudaStream_t get(size_t idx) {
