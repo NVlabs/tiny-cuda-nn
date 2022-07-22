@@ -32,6 +32,8 @@
 
 #include <json/json.hpp>
 
+#include <cuda_runtime.h>
+
 #include <memory>
 #include <string>
 
