@@ -46,8 +46,8 @@
 
 TCNN_NAMESPACE_BEGIN
 
+static constexpr uint32_t MAX_N_LEVELS = 128;
 struct GridOffsetTable {
-	static const uint32_t MAX_N_LEVELS = 128;
 	uint32_t data[MAX_N_LEVELS+1] = {};
 	uint32_t size = 0;
 };
@@ -891,8 +891,8 @@ public:
 		m_n_levels = div_round_up(m_n_features, N_FEATURES_PER_LEVEL);
 		uint32_t offset = 0;
 
-		if (m_n_levels > GridOffsetTable::MAX_N_LEVELS) {
-			throw std::runtime_error{fmt::format("GridEncoding: m_n_levels={} must be at most GridOffsetTable::MAX_N_LEVELS={}", m_n_levels, GridOffsetTable::MAX_N_LEVELS)};
+		if (m_n_levels > MAX_N_LEVELS) {
+			throw std::runtime_error{fmt::format("GridEncoding: m_n_levels={} must be at most MAX_N_LEVELS={}", m_n_levels, MAX_N_LEVELS)};
 		}
 
 		for (uint32_t i = 0; i < m_n_levels; ++i) {
