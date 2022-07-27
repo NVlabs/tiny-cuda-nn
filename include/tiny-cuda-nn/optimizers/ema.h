@@ -96,8 +96,10 @@ public:
 		m_weights_ema.resize(size);
 		m_weights_ema.memset(0);
 
-		m_tmp.resize(size);
-		m_tmp.memset(0);
+		if (m_full_precision) {
+			m_tmp.resize(size);
+			m_tmp.memset(0);
+		}
 	}
 
 	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
@@ -188,8 +190,10 @@ public:
 
 	void deserialize(const json& data) override {
 		m_weights_ema = data["weights_ema_binary"];
-		m_tmp.resize(m_weights_ema.size());
-		linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.size(), m_weights_ema.data(), m_tmp.data());
+		if (m_full_precision) {
+			m_tmp.resize(m_weights_ema.size());
+			linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.size(), m_weights_ema.data(), m_tmp.data());
+		}
 		m_nested->deserialize(data["nested"]);
 	}
 
