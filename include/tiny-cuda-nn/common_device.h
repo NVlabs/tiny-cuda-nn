@@ -159,7 +159,7 @@ __host__ __device__ void warp_activation_backward_in(Activation activation, cons
 		case Activation::Softplus:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {
-				float tmp = expf((float)frag.x[t] * K_ACT);
+				float tmp = expf((float)forward_frag_in.x[t] * K_ACT);
 				result.x[t] = frag.x[t] * (T)(tmp / (tmp + 1));
 			}
 			return;
