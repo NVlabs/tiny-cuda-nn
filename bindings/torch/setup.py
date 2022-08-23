@@ -69,8 +69,7 @@ if torch.cuda.is_available():
 	print(f"Targeting compute capability {compute_capability}")
 
 	definitions = [
-		f"-DTCNN_MIN_GPU_ARCH={compute_capability}",
-		"-DFMT_HEADER_ONLY=1",
+		f"-DTCNN_MIN_GPU_ARCH={compute_capability}"
 	]
 	nvcc_flags += definitions
 	cflags += definitions
@@ -83,6 +82,8 @@ if torch.cuda.is_available():
 	root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
 	source_files = [
 		"tinycudann/bindings.cpp",
+		"../../dependencies/fmt/src/format.cc",
+		"../../dependencies/fmt/src/os.cc",
 		"../../src/cpp_api.cu",
 		"../../src/common.cu",
 		"../../src/common_device.cu",
