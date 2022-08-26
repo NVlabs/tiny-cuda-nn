@@ -42,7 +42,9 @@ namespace tcnn {
 		Context() = default;
 		virtual ~Context() {}
 		Context(const Context&) = delete;
+		Context& operator=(const Context&) = delete;
 		Context(Context&&) = delete;
+		Context& operator=(Context&&) = delete;
 	};
 }
 

@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import gc
 import torch
 from torch.autograd.function import once_differentiable
 from tinycudann_bindings import _C
@@ -19,6 +20,9 @@ def _torch_precision(tcnn_precision):
 		raise ValueError(f"Unknown precision {tcnn_precision}")
 
 def free_temporary_memory():
+	# Ensure all Python objects (potentially pointing
+	# to temporary TCNN allocations) are cleaned up.
+	gc.collect()
 	_C.free_temporary_memory()
 
 class _module_function(torch.autograd.Function):
