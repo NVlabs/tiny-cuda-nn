@@ -35,6 +35,7 @@
 #define TCNN_NAMESPACE_BEGIN namespace tcnn {
 #define TCNN_NAMESPACE_END }
 
+
 #include <tiny-cuda-nn/cpp_api.h>
 
 #include <fmt/core.h>

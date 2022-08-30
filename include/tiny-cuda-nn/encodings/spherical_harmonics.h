@@ -56,7 +56,7 @@ __global__ void kernel_sh(
 
 	data_out.advance_cols(i);
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (uint32_t j = 0; j < num_to_pad; ++j) {
 		data_out(j) = (T)1.0f;
 	}

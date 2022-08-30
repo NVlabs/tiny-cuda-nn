@@ -80,7 +80,7 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 	__syncthreads();
 
 	// Load N_BLOCKS chunks of weights from global memory into registers.
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (uint32_t i = 0; i < N_BLOCKS; ++i) {
 		if (BACKWARD) {
 			// If we're performing the backward pass, additional index swizzling is needed to
@@ -91,11 +91,11 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 		}
 	}
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (int l = 0; l < N_ITERS; ++l) {
 		wmma::fill_fragment(result_frag[l], 0.0f);
 
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (uint32_t i = 0; i < N_BLOCKS; ++i) {
 			// Load a chunk of intermediate activations from shared memory and multiply with chunk of weights
 			wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * l) * (WIDTH + SKEW), WIDTH + SKEW);
@@ -114,7 +114,7 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 
 	__syncthreads();
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (int l = 0; l < N_ITERS; ++l) {
 		wmma::store_matrix_sync(act_shmem + weights_col + l * 16 * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 	}
@@ -122,7 +122,7 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 	if (out_intermediate_threadblock_this_layer != nullptr) {
 		__syncthreads();
 
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (int l = 0; l < N_ITERS; ++l) {
 			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * l) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * l) * (WIDTH + SKEW)];
 		}
@@ -142,7 +142,7 @@ __device__ void threadblock_load_input_static(__half* __restrict__ act_shmem, co
 	const uint32_t lane_offset = (8 * li) % WIDTH;
 	const uint32_t row = (8 * li + wi * 8 * 32) / WIDTH;
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (int i = 0; i < N_ITERS; ++i) {
 		*(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)] = *(int4*)&input_threadblock[lane_offset + (row + 16 * i) * WIDTH];
 	}
@@ -203,7 +203,7 @@ __global__ void kernel_mlp_fused_backward(
 
 		wmma::load_matrix_sync(weights_frag, weights + weights_stride * n_hidden_matmuls + weights_col, WIDTH);
 
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (int l = 0; l < N_ITERS; ++l) {
 			wmma::fill_fragment(result_frag[l], 0.0f);
 
@@ -228,14 +228,14 @@ __global__ void kernel_mlp_fused_backward(
 
 		__syncthreads();
 
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (int l = 0; l < N_ITERS; ++l) {
 			wmma::store_matrix_sync(act_shmem + weights_col + (16 * l) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 		}
 
 		__syncthreads();
 
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (int i = 0; i < N_ITERS; ++i) {
 			*(int4*)&out_intermediate[lane_offset + (row + elem_idx + i * 16) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 		}
@@ -351,7 +351,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 
 	const uint32_t n_elems_b = WIDTH * in_width;
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (uint32_t idx = thread_elem_idx; idx < n_elems_b; idx += n_elems_per_load) {
 		const uint32_t idx_skewed = idx + idx / in_width * INPUT_SKEW;
 		*(int4*)&weights_shmem[idx_skewed] = *(int4*)&weights_this_layer[idx];
@@ -363,7 +363,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 		__syncthreads();
 	}
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (int l = 0; l < N_ITERS; ++l) {
 		if (std::is_same<INPUT_LAYOUT, wmma::row_major>::value) {
 			// Load chunk of inputs into shmem.
@@ -371,7 +371,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 			// (Possibly due to latency hiding through staging.)
 			const uint32_t n_elems_a = 16 * in_width;
 
-			#pragma unroll
+			TCNN_PRAGMA_UNROLL
 			for (uint32_t idx = thread_elem_idx; idx < n_elems_a; idx += n_elems_per_load) {
 				const uint32_t idx_skewed = idx + idx / in_width * INPUT_SKEW;
 				*(int4*)&act_shmem[idx_skewed] = *(int4*)&input_threadblock[l * n_elems_a + idx];
@@ -381,7 +381,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 		}
 
 		wmma::fill_fragment(result_frag[l], 0.0f);
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (uint32_t i = 0; i < n_tensor_ops; ++i) {
 			// Load chunk of inputs and weights from shared memory and multiply them
 			if (std::is_same<INPUT_LAYOUT, wmma::row_major>::value) {
@@ -404,7 +404,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 		__syncthreads();
 	}
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (int l = 0; l < N_ITERS; ++l) {
 		wmma::store_matrix_sync(act_shmem + weights_col + (16 * l) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 	}
@@ -412,7 +412,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 	if (out_intermediate_threadblock_this_layer != nullptr) {
 		__syncthreads();
 
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (int i = 0; i < N_ITERS; ++i) {
 			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * i) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 		}
@@ -452,14 +452,14 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 
 	__syncthreads();
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (uint32_t i = 0; i < N_BLOCKS; ++i)
 		wmma::load_matrix_sync(weights_frag[i], weights_shmem + 16 * i, WIDTH + SKEW);
 
 	// Perform last layer by parallelizing over iters
 	for (uint32_t idx = wi; idx < N_ITERS; idx += N_BLOCKS) {
 		wmma::fill_fragment(result_frag, 0.0f);
-		#pragma unroll
+		TCNN_PRAGMA_UNROLL
 		for (uint32_t i = 0; i < N_BLOCKS; ++i) {
 			// Load a chunk of intermediate activations from shared memory and multiply with chunk of the weight matrix
 			wmma::load_matrix_sync(act_frag, act_shmem + 16 * i + (16 * idx) * (WIDTH + SKEW), WIDTH + SKEW);
@@ -491,7 +491,7 @@ __device__ void threadblock_write_output_static(const __half* __restrict__ act_s
 
 	__syncthreads();
 
-	#pragma unroll
+	TCNN_PRAGMA_UNROLL
 	for (int i = 0; i < N_ITERS; ++i) {
 		*(int4*)&output_threadblock[lane_offset + (row + 16 * i) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 	}

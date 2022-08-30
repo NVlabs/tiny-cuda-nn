@@ -38,6 +38,7 @@
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
 
+
 TCNN_NAMESPACE_BEGIN
 
 InterpolationType string_to_interpolation_type(const std::string& interpolation_type) {
