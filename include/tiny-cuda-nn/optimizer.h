@@ -50,7 +50,8 @@ public:
 	virtual uint32_t step() const = 0;
 	virtual uint32_t n_weights() const = 0;
 	virtual T* custom_weights() const = 0;
-	virtual std::shared_ptr<Optimizer<T>> nested() { return nullptr; }
+	virtual bool supports_nesting() const = 0;
+	virtual const std::shared_ptr<Optimizer<T>>& nested() const { throw std::runtime_error{"Optimizer does not support nesting."}; }
 
 	virtual json serialize() const { return {}; }
 	virtual void deserialize(const json& data) { }

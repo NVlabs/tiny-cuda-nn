@@ -114,6 +114,10 @@ public:
 		return nullptr;
 	}
 
+	bool supports_nesting() const override {
+		return false;
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("learning_rate")) {
 			m_learning_rate = params["learning_rate"];

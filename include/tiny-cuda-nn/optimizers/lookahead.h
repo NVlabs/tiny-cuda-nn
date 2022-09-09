@@ -115,7 +115,11 @@ public:
 		return m_weights_lookahead.data();
 	}
 
-	std::shared_ptr<Optimizer<T>> nested() override { 
+	bool supports_nesting() const override {
+		return true;
+	}
+
+	const std::shared_ptr<Optimizer<T>>& nested() const override { 
 		return m_nested; 
 	}
 

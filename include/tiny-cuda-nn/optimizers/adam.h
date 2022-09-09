@@ -201,6 +201,10 @@ public:
 		return nullptr;
 	}
 
+	bool supports_nesting() const override {
+		return false;
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];
