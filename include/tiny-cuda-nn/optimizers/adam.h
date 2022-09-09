@@ -121,26 +121,22 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		uint32_t size = (uint32_t)target->n_params();
-
-		m_n_weights = size;
+	void allocate(uint32_t n_weights, std::vector<std::pair<uint32_t, uint32_t>> layer_sizes) override {
+		m_n_weights = n_weights;
 		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
 
-		m_first_moments.resize(size);
+		m_first_moments.resize(n_weights);
 		m_first_moments.memset(0);
 
-		m_second_moments.resize(size);
+		m_second_moments.resize(n_weights);
 		m_second_moments.memset(0);
 
-		m_param_steps.resize(size);
+		m_param_steps.resize(n_weights);
 		m_param_steps.memset(0);
 
 		m_n_weights_covered_by_matrices = 0;
-		auto layer_sizes = target->layer_sizes();
-
 		for (size_t i = 0; i < layer_sizes.size(); ++i) {
 			m_n_weights_covered_by_matrices += layer_sizes[i].first * layer_sizes[i].second;
 		}

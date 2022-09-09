@@ -84,20 +84,19 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		m_nested->allocate(target);
 
-		uint32_t size = (uint32_t)target->n_params();
+	void allocate(uint32_t n_weights, std::vector<std::pair<uint32_t, uint32_t>> layer_sizes) override {
+		m_nested->allocate(n_weights, layer_sizes);
 
-		if (size <= m_weights_ema.size()) {
+		if (n_weights <= m_weights_ema.size()) {
 			return;
 		}
 
-		m_weights_ema.resize(size);
+		m_weights_ema.resize(n_weights);
 		m_weights_ema.memset(0);
 
 		if (m_full_precision) {
-			m_tmp.resize(size);
+			m_tmp.resize(n_weights);
 			m_tmp.memset(0);
 		}
 	}

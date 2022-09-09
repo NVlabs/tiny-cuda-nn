@@ -69,13 +69,11 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		m_nested->allocate(target);
+	void allocate(uint32_t n_weights, std::vector<std::pair<uint32_t, uint32_t>> layer_sizes) override {
+		m_nested->allocate(n_weights, layer_sizes);
 
-		uint32_t size = (uint32_t)target->n_params();
-
-		m_averaged_gradients.resize(size);
-		m_averaged_gradients_half.resize(size);
+		m_averaged_gradients.resize(n_weights);
+		m_averaged_gradients_half.resize(n_weights);
 	}
 
 	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
