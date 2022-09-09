@@ -85,7 +85,7 @@ public:
 	}
 
 
-	void allocate(uint32_t n_weights, std::vector<std::pair<uint32_t, uint32_t>> layer_sizes) override {
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
 		m_nested->allocate(n_weights, layer_sizes);
 
 		if (n_weights <= m_weights_ema.size()) {

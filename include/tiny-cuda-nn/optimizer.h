@@ -43,7 +43,7 @@ public:
 	virtual ~Optimizer() {}
 
 	void allocate(std::shared_ptr<ParametricObject<T>> target) { allocate(target->n_params(), target->layer_sizes()); };
-	virtual void allocate(uint32_t n_weights, std::vector<std::pair<uint32_t, uint32_t>> layer_sizes = {}) = 0;
+	virtual void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes = {}) = 0;
 	virtual void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) = 0;
 	virtual float learning_rate() const = 0;
 	virtual void set_learning_rate(float val) = 0;
