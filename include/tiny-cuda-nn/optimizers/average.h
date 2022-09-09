@@ -111,6 +111,10 @@ public:
 		return m_weights_average.data();
 	}
 
+	std::shared_ptr<Optimizer<T>> nested() override { 
+		return m_nested; 
+	}
+
 	uint32_t current_sample_idx() const {
 		return step() % m_n_samples;
 	}
@@ -157,7 +161,7 @@ public:
 private:
 	uint32_t m_n_samples = 128;
 	uint32_t m_n_weights = 0;
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	std::vector<std::pair<uint32_t, uint32_t>> m_layer_sizes;
 

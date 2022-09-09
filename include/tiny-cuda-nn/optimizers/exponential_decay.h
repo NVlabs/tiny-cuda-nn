@@ -92,6 +92,10 @@ public:
 		return m_nested->custom_weights();
 	}
 
+	std::shared_ptr<Optimizer<T>> nested() override { 
+		return m_nested; 
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("decay_base")) {
 			m_decay_base = params["decay_base"];
@@ -140,7 +144,7 @@ public:
 	}
 
 private:
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	float m_learning_rate_factor = 1.0f;
 	float m_base_learning_rate;

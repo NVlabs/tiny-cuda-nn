@@ -109,6 +109,10 @@ public:
 		return m_nested->custom_weights();
 	}
 
+	std::shared_ptr<Optimizer<T>> nested() override { 
+		return m_nested; 
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("batch_size_multiplier")) {
 			m_batch_size_multiplier = params["batch_size_multiplier"];
@@ -145,7 +149,7 @@ public:
 
 private:
 	uint32_t m_batch_size_multiplier = 16;
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	GPUMemory<float> m_averaged_gradients;
 	GPUMemory<T> m_averaged_gradients_half;

@@ -115,6 +115,10 @@ public:
 		return m_weights_lookahead.data();
 	}
 
+	std::shared_ptr<Optimizer<T>> nested() override { 
+		return m_nested; 
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("alpha")) {
 			m_alpha = params["alpha"];
@@ -153,7 +157,7 @@ public:
 private:
 	float m_alpha = 0.5f;
 	uint32_t m_n_steps = 16;
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	GPUMemory<T> m_weights_lookahead;
 };

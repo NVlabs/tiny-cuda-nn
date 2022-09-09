@@ -157,6 +157,10 @@ public:
 		return m_weights_ema.data();
 	}
 
+	std::shared_ptr<Optimizer<T>> nested() override { 
+		return m_nested; 
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("decay")) {
 			m_ema_decay = params["decay"];
@@ -201,7 +205,7 @@ public:
 private:
 	float m_ema_decay = 0.99f;
 	bool m_full_precision = false;
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	GPUMemory<T> m_weights_ema;
 	GPUMemory<float> m_tmp;
