@@ -54,8 +54,8 @@ public:
 		m_base_learning_rate = m_nested->learning_rate();
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		m_nested->allocate(target);
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+		m_nested->allocate(n_weights, layer_sizes);
 	}
 
 	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
@@ -90,6 +90,14 @@ public:
 
 	T* custom_weights() const override {
 		return m_nested->custom_weights();
+	}
+
+	bool supports_nesting() const override {
+		return true;
+	}
+
+	const std::shared_ptr<Optimizer<T>>& nested() const override { 
+		return m_nested; 
 	}
 
 	void update_hyperparams(const json& params) override {
@@ -140,7 +148,7 @@ public:
 	}
 
 private:
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	float m_learning_rate_factor = 1.0f;
 	float m_base_learning_rate;

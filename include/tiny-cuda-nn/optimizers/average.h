@@ -66,13 +66,11 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		m_target = target;
-		m_nested->allocate(target);
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+		m_n_weights = n_weights;
+		m_layer_sizes = layer_sizes;
 
-		uint32_t size = (uint32_t)target->n_params();
-
-		m_n_weights = size;
+		m_nested->allocate(n_weights, layer_sizes);
 
 		m_weights_samples.resize(m_n_weights * m_n_samples);
 		m_weights_samples.memset(0);
@@ -113,6 +111,14 @@ public:
 		return m_weights_average.data();
 	}
 
+	bool supports_nesting() const override {
+		return true;
+	}
+
+	const std::shared_ptr<Optimizer<T>>& nested() const override { 
+		return m_nested; 
+	}
+
 	uint32_t current_sample_idx() const {
 		return step() % m_n_samples;
 	}
@@ -124,8 +130,8 @@ public:
 	void update_hyperparams(const json& params) override {
 		if (params.contains("n_samples")) {
 			m_n_samples = params["n_samples"];
-			if (m_target) {
-				allocate(m_target);
+			if (m_n_weights > 0 || !m_layer_sizes.empty()) {
+				allocate(m_n_weights, m_layer_sizes);
 			}
 		}
 
@@ -159,9 +165,9 @@ public:
 private:
 	uint32_t m_n_samples = 128;
 	uint32_t m_n_weights = 0;
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
-	std::shared_ptr<ParametricObject<T>> m_target;
+	std::vector<std::pair<uint32_t, uint32_t>> m_layer_sizes;
 
 	GPUMemory<T> m_weights_samples;
 	GPUMemory<T> m_weights_average;

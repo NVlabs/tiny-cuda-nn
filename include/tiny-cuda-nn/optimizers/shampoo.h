@@ -341,9 +341,8 @@ public:
 		return {alpha, beta};
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		uint32_t size = (uint32_t)target->n_params();
-		m_n_weights = size;
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+		m_n_weights = n_weights;
 		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
@@ -368,16 +367,16 @@ public:
 		m_one_root = m_coefficients_root.data() + 0;
 		m_zero_root = m_coefficients_root.data() + 1;
 
-		m_first_moments.resize(size);
+		m_first_moments.resize(n_weights);
 		m_first_moments.memset(0);
 
-		m_second_moments.resize(size);
+		m_second_moments.resize(n_weights);
 		m_second_moments.memset(0);
 
-		m_momentum.resize(size);
+		m_momentum.resize(n_weights);
 		m_momentum.memset(0);
 
-		m_shampoo_momentum.resize(size);
+		m_shampoo_momentum.resize(n_weights);
 		m_shampoo_momentum.memset(0);
 
 		uint32_t total_M = 0;
@@ -389,8 +388,6 @@ public:
 		std::vector<GPUMatrixBase*> matrices;
 
 		m_matrix_batches.clear();
-
-		auto layer_sizes = target->layer_sizes();
 
 		std::pair<uint32_t, uint32_t> current_size = layer_sizes.front();
 		size_t current_idx = 0;
@@ -914,6 +911,10 @@ public:
 
 	T* custom_weights() const override {
 		return nullptr;
+	}
+
+	bool supports_nesting() const override {
+		return false;
 	}
 
 	void update_hyperparams(const json& params) override {
