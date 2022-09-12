@@ -81,7 +81,7 @@ public:
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);
 
-		set_param_pointers();
+		reset_param_pointers();
 
 		m_model->initialize_params(
 			m_rng,
@@ -216,8 +216,20 @@ public:
 		};
 	}
 
-	float* params() {
+	float* params_full_precision() const {
 		return m_params_full_precision;
+	}
+
+	PARAMS_T* params() const {
+		return m_params;
+	}
+
+	PARAMS_T* params_inference() const {
+		return m_params_inference;
+	}
+
+	PARAMS_T* param_gradients() const {
+		return m_param_gradients;
 	}
 
 	void set_params_full_precision(const float* params, size_t n_params, bool device_ptr = false) {
@@ -274,12 +286,16 @@ public:
 			m_optimizer->deserialize(data["optimizer"]);
 		}
 
-		set_param_pointers();
+		reset_param_pointers();
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
-private:
-	void set_param_pointers() {
+	void set_param_gradients_pointer(PARAMS_T* gradients) {
+		reset_param_pointers();
+		m_model->set_params(m_params, m_params_inference, m_params_backward, gradients);
+	}
+
+	void reset_param_pointers() {
 		size_t n_params = m_model->n_params();
 
 		m_params_full_precision = (float*)(m_params_buffer.data());
@@ -296,6 +312,11 @@ private:
 		m_model->set_params(m_params, m_params_inference, m_params_backward, m_param_gradients);
 	}
 
+	size_t n_params() const {
+		return m_model->n_params();
+	}
+
+private:
 	std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> m_model;
 	std::shared_ptr<Optimizer<PARAMS_T>> m_optimizer;
 	std::shared_ptr<Loss<COMPUTE_T>> m_loss;
