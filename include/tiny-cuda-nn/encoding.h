@@ -47,6 +47,16 @@ InterpolationType string_to_interpolation_type(const std::string& interpolation_
 
 std::string to_string(InterpolationType interpolation_type);
 
+enum class ReductionType {
+	Concatenation,
+	Sum,
+	Product,
+};
+
+ReductionType string_to_reduction_type(const std::string& reduction_type);
+
+std::string to_string(ReductionType reduction_type);
+
 template <typename T>
 class Encoding : public DifferentiableObject<float, T, T> {
 public:
