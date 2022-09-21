@@ -92,7 +92,7 @@ class IdentityEncoding : public Encoding<T> {
 public:
 	IdentityEncoding(uint32_t n_dims_to_encode, float scale = 1.0f, float offset = 0.0f)
 	: m_n_dims_to_encode{n_dims_to_encode}, m_scale{scale}, m_offset{offset} {
-		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode;
+		m_n_output_dims = m_n_dims_to_encode;
 	}
 
 	std::unique_ptr<Context> forward_impl(
@@ -102,7 +102,7 @@ public:
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	) override {
-		if (!output || m_n_padded_output_dims == 0) {
+		if (!output || padded_output_width() == 0) {
 			return std::make_unique<Context>();
 		}
 
@@ -130,7 +130,7 @@ public:
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
-		if (!dL_dinput || m_n_padded_output_dims == 0) {
+		if (!dL_dinput || padded_output_width() == 0) {
 			return;
 		}
 
@@ -149,24 +149,23 @@ public:
 	}
 
 	uint32_t padded_output_width() const override {
-		return m_n_padded_output_dims;
+		return m_n_output_dims + m_n_to_pad;
 	}
 
 	uint32_t output_width() const override {
-		return m_n_padded_output_dims;
+		return padded_output_width();
 	}
 
 	uint32_t required_input_alignment() const override {
 		return 1;
 	}
 
-	void set_alignment(uint32_t alignment) override {
-		alignment = lcm(alignment, min_alignment());
-		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
-		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	void set_padded_output_width(uint32_t padded_output_width) override {
+		CHECK_THROW(padded_output_width >= m_n_output_dims);
+		m_n_to_pad = padded_output_width - m_n_output_dims;
 	}
 
-	uint32_t min_alignment() const override {
+	uint32_t required_output_alignment() const override {
 		return 1;
 	}
 
@@ -190,7 +189,6 @@ private:
 
 	// derived sizes
 	uint32_t m_n_output_dims;
-	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
 };
 

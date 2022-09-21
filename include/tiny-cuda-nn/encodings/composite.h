@@ -191,17 +191,15 @@ public:
 		if (m_reduction_type == ReductionType::Concatenation) {
 			uint32_t dims_encoded_so_far = 0;
 			for (size_t i = 0; i < m_nested.size()-1; ++i) {
-				uint32_t desired_alignment = m_nested[i+1]->min_alignment();
-				uint32_t effective_alignment_needed = next_multiple(dims_encoded_so_far, desired_alignment) - dims_encoded_so_far;
+				uint32_t desired_alignment = m_nested[i+1]->required_output_alignment();
+				uint32_t padded_output_width_required = next_multiple(dims_encoded_so_far + m_nested[i]->output_width(), desired_alignment) - dims_encoded_so_far;
 
-				if (effective_alignment_needed > 0) {
-					m_nested[i]->set_alignment(effective_alignment_needed);
-				}
+				m_nested[i]->set_padded_output_width(padded_output_width_required);
 
 				dims_encoded_so_far += m_nested[i]->padded_output_width();
 			}
 		} else {
-			uint32_t alignment = min_alignment();
+			uint32_t alignment = required_output_alignment();
 			for (const auto& nested : m_nested) {
 				nested->set_alignment(alignment);
 			}
@@ -374,40 +372,29 @@ public:
 	}
 
 	uint32_t output_width() const override {
-		if (m_reduction_type != ReductionType::Concatenation) {
-			return m_nested.empty() ? 0 : m_nested.front()->output_width();
-		}
-
-		uint32_t total = 0;
-		for (const auto& nested : m_nested) {
-			total += nested->output_width();
-		}
-		return total;
+		return padded_output_width();
 	}
 
 	uint32_t required_input_alignment() const override {
 		return 1;
 	}
 
-	void set_alignment(uint32_t alignment) override {
+	void set_padded_output_width(uint32_t padded_output_width) override {
 		if (m_reduction_type == ReductionType::Concatenation) {
-			uint32_t n_dims = padded_output_width();
-			uint32_t last_n_dims = m_nested.back()->padded_output_width();
-
-			uint32_t desired_n_dims = next_multiple(n_dims, alignment);
-			m_nested.back()->set_alignment(desired_n_dims - (n_dims - last_n_dims));
+			uint32_t prev_n_dims = this->padded_output_width() - m_nested.back()->padded_output_width();
+			CHECK_THROW(padded_output_width >= prev_n_dims);
+			m_nested.back()->set_padded_output_width(padded_output_width - prev_n_dims);
 		} else {
-			alignment = lcm(alignment, min_alignment());
 			for (const auto& nested : m_nested) {
-				nested->set_alignment(alignment);
+				nested->set_padded_output_width(padded_output_width);
 			}
 		}
 	}
 
-	uint32_t min_alignment() const override {
+	uint32_t required_output_alignment() const override {
 		uint32_t alignment = 1;
 		for (const auto& nested : m_nested) {
-			alignment = lcm(alignment, nested->min_alignment());
+			alignment = lcm(alignment, nested->required_output_alignment());
 		}
 		return alignment;
 	}

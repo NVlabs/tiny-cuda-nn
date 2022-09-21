@@ -86,25 +86,14 @@ template <typename T>
 __global__ void kernel_one_blob(
 	const uint32_t num_elements,
 	const uint32_t num_bins_log2,
-	const uint32_t num_to_encode,
-	const uint32_t num_to_pad,
 	MatrixView<const float> data_in,
 	PitchedPtr<T> data_out
 ) {
-	const uint32_t fan_out_encoded = num_to_encode << num_bins_log2;
-	const uint32_t fan_out = fan_out_encoded + num_to_pad;
-
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
-	const uint32_t encoded_index = j + i * blockDim.x;
-	if (encoded_index >= num_elements * fan_out) return;
+	if (i >= num_elements) return;
 
-	if (j >= fan_out_encoded) {
-		// A value of 1 here allows the network to learn a bias-like thing.
-		data_out(i)[j] = 1;
-	} else {
-		data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in, i, j, num_bins_log2);
-	}
+	data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in, i, j, num_bins_log2);
 }
 
 template <typename T>
@@ -180,7 +169,7 @@ class OneBlobEncoding : public Encoding<T> {
 public:
 	OneBlobEncoding(uint32_t n_bins, uint32_t n_dims_to_encode)
 	: m_n_bins{n_bins}, m_n_dims_to_encode{n_dims_to_encode} {
-		m_n_padded_output_dims = m_n_output_dims = m_n_dims_to_encode * m_n_bins;
+		m_n_output_dims = m_n_dims_to_encode * m_n_bins;
 
 		// Make sure the number of bins is a power of 2---this is required for certain optimizations
 		// in our compute kernel.
@@ -196,7 +185,7 @@ public:
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	) override {
-		if (!output || m_n_padded_output_dims == 0) {
+		if (!output || padded_output_width() == 0) {
 			return std::make_unique<Context>();
 		}
 
@@ -204,18 +193,21 @@ public:
 
 		if (output->layout() == AoS) {
 			const uint32_t min_n_threads = n_threads_linear;
-			const dim3 threads = { padded_output_width(), div_round_up(min_n_threads, padded_output_width()), 1 };
+			const dim3 threads = { m_n_output_dims, div_round_up(min_n_threads, m_n_output_dims), 1 };
 			const uint32_t n_threads = threads.x * threads.y;
-			const dim3 blocks = { div_round_up(input.n() * padded_output_width(), n_threads), 1, 1 };
+			const dim3 blocks = { div_round_up(input.n() * m_n_output_dims, n_threads), 1, 1 };
 
 			kernel_one_blob<T><<<blocks, threads, 0, stream>>>(
 				input.n(),
 				num_bins_log2,
-				m_n_dims_to_encode,
-				m_n_to_pad,
 				input.view(),
 				output->pitched_ptr()
 			);
+
+			// Padding
+			parallel_for_gpu_aos(stream, input.n(), m_n_to_pad, [n_output_dims=m_n_output_dims, out=output->pitched_ptr()] __device__ (size_t elem, size_t dim) {
+				out(elem)[n_output_dims + dim] = 0;
+			});
 		} else {
 			const uint32_t min_n_threads = n_threads_linear;
 			const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
@@ -249,7 +241,7 @@ public:
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
-		if (!dL_dinput || m_n_padded_output_dims == 0) {
+		if (!dL_dinput || padded_output_width() == 0) {
 			return;
 		}
 
@@ -275,24 +267,23 @@ public:
 	}
 
 	uint32_t padded_output_width() const override {
-		return m_n_padded_output_dims;
+		return m_n_output_dims + m_n_to_pad;
 	}
 
 	uint32_t output_width() const override {
-		return m_n_padded_output_dims;
+		return padded_output_width();
 	}
 
 	uint32_t required_input_alignment() const override {
 		return 1;
 	}
 
-	void set_alignment(uint32_t alignment) override {
-		alignment = lcm(alignment, min_alignment());
-		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
-		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	void set_padded_output_width(uint32_t padded_output_width) override {
+		CHECK_THROW(padded_output_width >= m_n_output_dims);
+		m_n_to_pad = padded_output_width - m_n_output_dims;
 	}
 
-	uint32_t min_alignment() const override {
+	uint32_t required_output_alignment() const override {
 		return m_n_bins;
 	}
 
@@ -313,7 +304,6 @@ private:
 
 	// derived sizes
 	uint32_t m_n_output_dims;
-	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
 };
 
