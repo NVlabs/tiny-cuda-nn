@@ -15,8 +15,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 86
           - os: ubuntu-18.04
             cuda: "10.2"
@@ -53,7 +53,6 @@ jobs:
       - name: Build
         working-directory: ${{ env.build_dir }}
         run: cmake --build . --target all --verbose -j `nproc`
-
 
   build_windows:
     name: Build on Windows
