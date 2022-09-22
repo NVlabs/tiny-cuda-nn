@@ -206,7 +206,7 @@ public:
 
 			// Padding
 			parallel_for_gpu_aos(stream, input.n(), m_n_to_pad, [n_output_dims=m_n_output_dims, out=output->pitched_ptr()] __device__ (size_t elem, size_t dim) {
-				out(elem)[n_output_dims + dim] = 0;
+				out(elem)[n_output_dims + dim] = (T)1.0f;
 			});
 		} else {
 			const uint32_t min_n_threads = n_threads_linear;
