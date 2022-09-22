@@ -122,6 +122,9 @@ inline bool equals_case_insensitive(const std::string& str1, const std::string& 
 	return to_lower(str1) == to_lower(str2);
 }
 
+template <typename T>
+std::string type_to_string();
+
 inline bool is_pot(uint32_t num, uint32_t* log2 = nullptr) {
 	if (log2) *log2 = 0;
 	if (num > 0) {

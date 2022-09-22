@@ -113,8 +113,16 @@ public:
 		return m_output_width;
 	}
 
+	static uint32_t REQUIRED_ALIGNMENT() {
+		// Technically, CUTLASS only requires an alignment of 8, but
+		// this leads to incompatibility of checkpoints that were generated
+		// from different configurations of tiny-cuda-nn.
+		// return 8;
+		return 16;
+	}
+
 	uint32_t required_input_alignment() const override {
-		return tensorcore_width;
+		return REQUIRED_ALIGNMENT();
 	}
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override {
@@ -166,8 +174,6 @@ private:
 	Activation m_output_activation;
 
 	bool m_can_fuse_activation;
-
-	static const uint32_t tensorcore_width = 8;
 
 	// Graphs
 	CudaGraph m_inference_graph;

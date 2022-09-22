@@ -53,7 +53,7 @@ m_activation{activation},
 m_output_activation{output_activation},
 m_can_fuse_activation{activation != Activation::Sine}
 {
-	m_padded_output_width = next_multiple(m_output_width, tensorcore_width);
+	m_padded_output_width = next_multiple(m_output_width, REQUIRED_ALIGNMENT());
 
 	if (n_hidden_layers > 0) {
 		m_n_hidden_matmuls = n_hidden_layers-1;
