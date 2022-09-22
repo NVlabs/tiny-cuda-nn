@@ -284,7 +284,7 @@ public:
 	}
 
 	uint32_t required_output_alignment() const override {
-		return m_n_bins;
+		return 1;
 	}
 
 	MatrixLayout preferred_output_layout() const override {
