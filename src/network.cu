@@ -108,7 +108,9 @@ std::string select_network(const json& network) {
 
 uint32_t minimum_alignment(const json& network) {
 	std::string network_type = select_network(network);
+
 	if (equals_case_insensitive(network_type, "FullyFusedMLP")) {
+#if TCNN_MIN_GPU_ARCH > 70
 		uint32_t n_neurons = network.value("n_neurons", 128u);
 		switch (n_neurons) {
 			case  16: return FullyFusedMLP<network_precision_t,  16>::REQUIRED_ALIGNMENT();
@@ -117,6 +119,9 @@ uint32_t minimum_alignment(const json& network) {
 			case 128: return FullyFusedMLP<network_precision_t, 128>::REQUIRED_ALIGNMENT();
 			default: throw std::runtime_error{fmt::format("FullyFusedMLP only supports 16, 32, 64, and 128 neurons, but got {}. Use CutlassMLP instead if this is a requirement.", n_neurons)};
 		}
+#else
+		throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <70."};
+#endif
 	} else {
 		return CutlassMLP<network_precision_t>::REQUIRED_ALIGNMENT();
 	}
