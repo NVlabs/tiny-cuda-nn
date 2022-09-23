@@ -51,6 +51,7 @@ __global__ void adam_step(
 	const uint32_t n_matrix_weights,
 	const float relative_weight_decay,
 	const float absolute_weight_decay,
+	const float weight_clipping_magnitude,
 	const float loss_scale,
 	float learning_rate,
 	const float non_matrix_learning_rate_factor,
@@ -108,7 +109,11 @@ __global__ void adam_step(
 	const float effective_learning_rate = fminf(fmaxf(learning_rate / (sqrtf(second_moment) + epsilon), lower_lr_bound), upper_lr_bound);
 
 	const float decayed_weight = weight_decay(relative_weight_decay * learning_rate, absolute_weight_decay * learning_rate, weight_fp);
-	const float new_weight = decayed_weight - effective_learning_rate * first_moment;
+	float new_weight = decayed_weight - effective_learning_rate * first_moment;
+
+	if (weight_clipping_magnitude != 0.0f) {
+		new_weight = clamp(new_weight, -weight_clipping_magnitude, weight_clipping_magnitude);
+	}
 
 	weights_full_precision[i] = new_weight;
 	weights[i] = (T)new_weight;
@@ -127,16 +132,17 @@ public:
 			return;
 		}
 
-		m_first_moments.resize(n_weights);
+		m_first_moments.resize(m_n_weights);
 		m_first_moments.memset(0);
 
-		m_second_moments.resize(n_weights);
+		m_second_moments.resize(m_n_weights);
 		m_second_moments.memset(0);
 
-		m_param_steps.resize(n_weights);
+		m_param_steps.resize(m_n_weights);
 		m_param_steps.memset(0);
 
 		m_n_weights_covered_by_matrices = 0;
+
 		for (size_t i = 0; i < layer_sizes.size(); ++i) {
 			m_n_weights_covered_by_matrices += layer_sizes[i].first * layer_sizes[i].second;
 		}
@@ -161,6 +167,7 @@ public:
 			m_n_weights_covered_by_matrices,
 			m_relative_weight_decay,
 			m_absolute_weight_decay,
+			m_weight_clipping_magnitude,
 			loss_scale,
 			m_base_learning_rate,
 			m_non_matrix_learning_rate_factor,
@@ -238,6 +245,10 @@ public:
 			m_absolute_weight_decay = params["absolute_decay"];
 		}
 
+		if (params.contains("clipping_magnitude")) {
+			m_weight_clipping_magnitude = params["clipping_magnitude"];
+		}
+
 		if (params.contains("non_matrix_learning_rate_factor")) {
 			m_non_matrix_learning_rate_factor = params["non_matrix_learning_rate_factor"];
 		}
@@ -262,6 +273,7 @@ public:
 			{"adabound", m_adabound},
 			{"relative_decay", m_relative_weight_decay},
 			{"absolute_decay", m_absolute_weight_decay},
+			{"clipping_magnitude", m_weight_clipping_magnitude},
 			{"non_matrix_learning_rate_factor", m_non_matrix_learning_rate_factor},
 			{"optimize_matrix_params", m_optimize_matrix_params},
 			{"optimize_non_matrix_params", m_optimize_non_matrix_params},
@@ -311,6 +323,7 @@ private:
 
 	float m_relative_weight_decay = 0.0f;
 	float m_absolute_weight_decay = 0.0f;
+	float m_weight_clipping_magnitude = 0.0f;
 
 	bool m_adabound = false;
 
