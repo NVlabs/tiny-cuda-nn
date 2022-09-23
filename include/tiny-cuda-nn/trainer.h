@@ -170,7 +170,8 @@ public:
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		const GPUMatrix<float>* data_pdf = nullptr
+		const GPUMatrix<float>* data_pdf = nullptr,
+		bool run_optimizer = true
 	) {
 		CHECK_THROW(input.n() == target.n());
 		CHECK_THROW(target.m() == m_model->output_width());
@@ -183,16 +184,19 @@ public:
 			backward(stream, *result, input);
 		});
 
-		optimizer_step(stream, loss_scale);
+		if (run_optimizer) {
+			optimizer_step(stream, loss_scale);
+		}
 		return result;
 	}
 
 	std::unique_ptr<ForwardContext> training_step(
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		const GPUMatrix<float>* data_pdf = nullptr
+		const GPUMatrix<float>* data_pdf = nullptr,
+		bool run_optimizer = true
 	) {
-		return training_step(nullptr, input, target, data_pdf);
+		return training_step(nullptr, input, target, data_pdf, run_optimizer);
 	}
 
 	float loss(cudaStream_t stream, const ForwardContext& ctx) const {
