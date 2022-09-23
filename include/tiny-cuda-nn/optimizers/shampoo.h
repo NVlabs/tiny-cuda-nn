@@ -343,6 +343,7 @@ public:
 
 	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
 		m_n_weights = n_weights;
+
 		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
@@ -367,16 +368,16 @@ public:
 		m_one_root = m_coefficients_root.data() + 0;
 		m_zero_root = m_coefficients_root.data() + 1;
 
-		m_first_moments.resize(n_weights);
+		m_first_moments.resize(m_n_weights);
 		m_first_moments.memset(0);
 
-		m_second_moments.resize(n_weights);
+		m_second_moments.resize(m_n_weights);
 		m_second_moments.memset(0);
 
-		m_momentum.resize(n_weights);
+		m_momentum.resize(m_n_weights);
 		m_momentum.memset(0);
 
-		m_shampoo_momentum.resize(n_weights);
+		m_shampoo_momentum.resize(m_n_weights);
 		m_shampoo_momentum.memset(0);
 
 		uint32_t total_M = 0;

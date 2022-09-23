@@ -84,7 +84,6 @@ public:
 		update_hyperparams(params);
 	}
 
-
 	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
 		m_nested->allocate(n_weights, layer_sizes);
 
@@ -161,8 +160,8 @@ public:
 		return true;
 	}
 
-	const std::shared_ptr<Optimizer<T>>& nested() const override { 
-		return m_nested; 
+	const std::shared_ptr<Optimizer<T>>& nested() const override {
+		return m_nested;
 	}
 
 	void update_hyperparams(const json& params) override {

@@ -111,20 +111,20 @@ public:
 		return m_weights_average.data();
 	}
 
-	bool supports_nesting() const override {
-		return true;
-	}
-
-	const std::shared_ptr<Optimizer<T>>& nested() const override { 
-		return m_nested; 
-	}
-
 	uint32_t current_sample_idx() const {
 		return step() % m_n_samples;
 	}
 
 	T* current_sample() const {
 		return m_weights_samples.data() + current_sample_idx() * m_n_weights;
+	}
+
+	bool supports_nesting() const override {
+		return true;
+	}
+
+	const std::shared_ptr<Optimizer<T>>& nested() const override {
+		return m_nested;
 	}
 
 	void update_hyperparams(const json& params) override {
