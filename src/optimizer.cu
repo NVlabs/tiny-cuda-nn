@@ -34,6 +34,7 @@
 #include <tiny-cuda-nn/optimizers/average.h>
 #include <tiny-cuda-nn/optimizers/batched.h>
 #include <tiny-cuda-nn/optimizers/ema.h>
+#include <tiny-cuda-nn/optimizers/composite.h>
 #include <tiny-cuda-nn/optimizers/exponential_decay.h>
 #include <tiny-cuda-nn/optimizers/lookahead.h>
 #include <tiny-cuda-nn/optimizers/novograd.h>
@@ -72,6 +73,8 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 #else
 		throw std::runtime_error{"The Shampoo optimizer is only available when compiling with CUDA 11 or higher."};
 #endif
+	} else if (equals_case_insensitive(optimizer_type, "Composite")) {
+    	return new CompositeOptimizer<T>{optimizer};
 	} else {
 		throw std::runtime_error{fmt::format("Invalid optimizer type: {}", optimizer_type)};
 	}
