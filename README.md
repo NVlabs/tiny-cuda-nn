@@ -205,6 +205,8 @@ Following is a summary of the components of this framework. [The JSON documentat
 | Exponential Decay | `include/tiny-cuda-nn/optimizers/exponential_decay.h` | Wraps another optimizer and performs piecewise-constant exponential learning-rate decay.
 | Lookahead | `include/tiny-cuda-nn/optimizers/lookahead.h` | Wraps another optimizer, implementing the lookahead algorithm [[Zhang et al. 2019]](https://arxiv.org/abs/1907.08610).
 
+| Composite | `include/tiny-cuda-nn/optimizers/composite.h` | Allows using several optimizers on different parameters 
+
 
 ## License and Citation
 
