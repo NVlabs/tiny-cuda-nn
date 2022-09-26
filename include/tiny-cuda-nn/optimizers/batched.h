@@ -113,9 +113,11 @@ public:
 		return true;
 	}
 
-	const std::shared_ptr<Optimizer<T>>& nested() const override {
+	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {
+		CHECK_THROW(idx == 0);
 		return m_nested;
 	}
+
 
 	void update_hyperparams(const json& params) override {
 		if (params.contains("batch_size_multiplier")) {

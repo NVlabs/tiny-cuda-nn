@@ -55,8 +55,11 @@ public:
 	virtual T* custom_weights() const = 0;
 
 	virtual bool supports_nesting() const = 0;
-	virtual const std::shared_ptr<Optimizer<T>>& nested() const {
+	virtual const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx = 0) const {
 		throw std::runtime_error{"Optimizer does not support nesting."};
+	}
+	virtual uint32_t num_nesting() const {
+		return this->supports_nesting() ? 1 : 0;
 	}
 
 	virtual json serialize() const { return {}; }
