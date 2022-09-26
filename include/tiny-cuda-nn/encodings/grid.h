@@ -932,7 +932,7 @@ public:
 
 		m_n_params = m_offset_table.data[m_n_levels] * N_FEATURES_PER_LEVEL;
 
-		m_n_padded_output_dims = m_n_output_dims = m_n_features;
+		m_n_output_dims = m_n_features;
 
 		if (n_features % N_FEATURES_PER_LEVEL != 0) {
 			throw std::runtime_error{fmt::format("GridEncoding: n_features={} must be a multiple of N_FEATURES_PER_LEVEL={}", n_features, N_FEATURES_PER_LEVEL)};
@@ -949,7 +949,7 @@ public:
 		auto forward = std::make_unique<ForwardContext>();
 
 		const uint32_t num_elements = input.n();
-		if ((!output && !prepare_input_gradients) || m_n_padded_output_dims == 0 || num_elements == 0) {
+		if ((!output && !prepare_input_gradients) || padded_output_width() == 0 || num_elements == 0) {
 			return forward;
 		}
 
@@ -1028,7 +1028,7 @@ public:
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
 		const uint32_t num_elements = input.n();
-		if ((!dL_dinput && param_gradients_mode == EGradientMode::Ignore) || m_n_padded_output_dims == 0 || num_elements == 0) {
+		if ((!dL_dinput && param_gradients_mode == EGradientMode::Ignore) || padded_output_width() == 0 || num_elements == 0) {
 			return;
 		}
 
@@ -1122,7 +1122,7 @@ public:
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
 		const uint32_t num_elements = input.n();
-		if ((!dL_ddLdoutput && param_gradients_mode == EGradientMode::Ignore) || m_n_padded_output_dims == 0 || num_elements == 0) {
+		if ((!dL_ddLdoutput && param_gradients_mode == EGradientMode::Ignore) || padded_output_width() == 0 || num_elements == 0) {
 			return;
 		}
 
@@ -1242,24 +1242,23 @@ public:
 	}
 
 	uint32_t padded_output_width() const override {
-		return m_n_padded_output_dims;
+		return m_n_output_dims + m_n_to_pad;
 	}
 
 	uint32_t output_width() const override {
-		return m_n_padded_output_dims;
+		return padded_output_width();
 	}
 
 	uint32_t required_input_alignment() const override {
 		return 1;
 	}
 
-	void set_alignment(uint32_t alignment) override {
-		alignment = lcm(alignment, min_alignment());
-		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
-		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
+	void set_padded_output_width(uint32_t padded_output_width) override {
+		CHECK_THROW(padded_output_width >= m_n_output_dims);
+		m_n_to_pad = padded_output_width - m_n_output_dims;
 	}
 
-	uint32_t min_alignment() const override {
+	uint32_t required_output_alignment() const override {
 		return N_FEATURES_PER_LEVEL;
 	}
 
@@ -1345,7 +1344,6 @@ private:
 
 	// derived sizes
 	uint32_t m_n_output_dims;
-	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
 
 	float m_per_level_scale;

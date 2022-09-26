@@ -131,7 +131,7 @@ if __name__ == "__main__":
 	half_dx =  0.5 / resolution[0]
 	half_dy =  0.5 / resolution[1]
 	xs = torch.linspace(half_dx, 1-half_dx, resolution[0], device=device)
-	ys = torch.linspace(half_dx, 1-half_dx, resolution[1], device=device)
+	ys = torch.linspace(half_dy, 1-half_dy, resolution[1], device=device)
 	xv, yv = torch.meshgrid([xs, ys], indexing="ij")
 
 	xy = torch.stack((yv.flatten(), xv.flatten())).t()

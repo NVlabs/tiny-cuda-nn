@@ -72,6 +72,7 @@ public:
 		if (n_weights <= m_weights_lookahead.size()) {
 			return;
 		}
+
 		m_weights_lookahead.resize(n_weights);
 	}
 
@@ -119,8 +120,8 @@ public:
 		return true;
 	}
 
-	const std::shared_ptr<Optimizer<T>>& nested() const override { 
-		return m_nested; 
+	const std::shared_ptr<Optimizer<T>>& nested() const override {
+		return m_nested;
 	}
 
 	void update_hyperparams(const json& params) override {

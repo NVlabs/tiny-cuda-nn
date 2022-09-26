@@ -74,7 +74,7 @@ public:
 
 		forward->network_input = GPUMatrixDynamic<T>{m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		forward->encoding_ctx = m_encoding->forward(stream, input, &forward->network_input, use_inference_params, prepare_input_gradients);
-		forward->network_ctx = m_network->forward(stream, forward->network_input, output, use_inference_params, prepare_input_gradients);
+		forward->network_ctx = m_network->forward(stream, forward->network_input, output, use_inference_params, true);
 
 		return forward;
 	}

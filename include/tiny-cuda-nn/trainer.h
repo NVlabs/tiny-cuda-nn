@@ -170,7 +170,8 @@ public:
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		const GPUMatrix<float>* data_pdf = nullptr
+		const GPUMatrix<float>* data_pdf = nullptr,
+		bool run_optimizer = true
 	) {
 		CHECK_THROW(input.n() == target.n());
 		CHECK_THROW(target.m() == m_model->output_width());
@@ -183,16 +184,19 @@ public:
 			backward(stream, *result, input);
 		});
 
-		optimizer_step(stream, loss_scale);
+		if (run_optimizer) {
+			optimizer_step(stream, loss_scale);
+		}
 		return result;
 	}
 
 	std::unique_ptr<ForwardContext> training_step(
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		const GPUMatrix<float>* data_pdf = nullptr
+		const GPUMatrix<float>* data_pdf = nullptr,
+		bool run_optimizer = true
 	) {
-		return training_step(nullptr, input, target, data_pdf);
+		return training_step(nullptr, input, target, data_pdf, run_optimizer);
 	}
 
 	float loss(cudaStream_t stream, const ForwardContext& ctx) const {
@@ -269,6 +273,7 @@ public:
 
 		json data;
 		data["n_params"] = n_params;
+		data["params_type"] = type_to_string<PARAMS_T>();
 		data["params_binary"] = gpu_memory_to_json_binary(m_params_inference, sizeof(PARAMS_T)*n_params);
 
 		if (serialize_optimizer) {
@@ -279,8 +284,23 @@ public:
 	}
 
 	void deserialize(const json& data) {
-		GPUMemory<PARAMS_T> params = data["params_binary"];
-		set_params(params.data(), params.size(), true);
+		std::string type = data.value("params_type", type_to_string<PARAMS_T>());
+		if (type == "float") {
+			GPUMemory<float> params = data["params_binary"];
+			set_params_full_precision(params.data(), params.size(), true);
+		} else if (type == "__half") {
+			GPUMemory<__half> params_hp = data["params_binary"];
+			size_t n_params = params_hp.size();
+
+			GPUMemory<PARAMS_T> params(n_params);
+			parallel_for_gpu(n_params, [params=params.data(), params_hp=params_hp.data()] __device__ (size_t i) {
+				params[i] = (PARAMS_T)params_hp[i];
+			});
+
+			set_params(params.data(), params.size(), true);
+		} else {
+			throw std::runtime_error{"Trainer: snapshot parameters must be of type float of __half"};
+		}
 
 		if (data.contains("optimizer")) {
 			m_optimizer->deserialize(data["optimizer"]);

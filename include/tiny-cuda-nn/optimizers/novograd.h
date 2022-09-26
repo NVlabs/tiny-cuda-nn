@@ -98,18 +98,18 @@ public:
 		update_hyperparams(params);
 	}
 
-
 	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
-
 		m_n_weights = n_weights;
+
 		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
 
-		m_first_moments.resize(n_weights);
+		m_first_moments.resize(m_n_weights);
 		m_first_moments.memset(0);
 
 		size_t total_size = 0;
+
 		m_layers.clear();
 		for (const auto& pair : layer_sizes) {
 			m_layers.push_back(pair.first * pair.second);

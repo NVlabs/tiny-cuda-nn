@@ -656,7 +656,7 @@ m_output_activation{output_activation}
 
 	m_n_hidden_matmuls = n_hidden_layers-1;
 
-	m_padded_output_width = next_multiple(m_output_width, tensorcore_width);
+	m_padded_output_width = next_multiple(m_output_width, REQUIRED_ALIGNMENT());
 
 	// Create matrices related to weights
 	m_weight_matrices.emplace_back(nullptr, m_network_width, m_input_width);

@@ -101,4 +101,14 @@ std::string to_upper(std::string str) {
 	return str;
 }
 
+template <>
+std::string type_to_string<float>() {
+	return "float";
+}
+
+template <>
+std::string type_to_string<__half>() {
+	return "__half";
+}
+
 TCNN_NAMESPACE_END

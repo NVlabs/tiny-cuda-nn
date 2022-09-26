@@ -113,8 +113,8 @@ public:
 		return true;
 	}
 
-	const std::shared_ptr<Optimizer<T>>& nested() const override { 
-		return m_nested; 
+	const std::shared_ptr<Optimizer<T>>& nested() const override {
+		return m_nested;
 	}
 
 	void update_hyperparams(const json& params) override {
