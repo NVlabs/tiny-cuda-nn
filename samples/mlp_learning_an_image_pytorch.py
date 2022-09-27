@@ -155,7 +155,7 @@ if __name__ == "__main__":
 		targets = traced_image(batch)
 		output = model(batch)
 
-		relative_l2_error = (output - targets.to(output.dtype))**2 / (output.detach()**2 + 0.01)
+		relative_l2_error = (output - targets.to(output.dtype))**2 / (targets.to(output.dtype)**2 + 0.01)
 		loss = relative_l2_error.mean()
 
 		optimizer.zero_grad()
