@@ -17,20 +17,16 @@
 
 TCNN_NAMESPACE_BEGIN
 
-std::vector<std::pair<uint32_t, uint32_t>> slice_weights(
-    std::vector<std::pair<uint32_t, uint32_t>> object_layer_size,
-    uint32_t offset, uint32_t size) {
+std::vector<std::pair<uint32_t, uint32_t>> slice_weights(std::vector<std::pair<uint32_t, uint32_t>> object_layer_size,
+                                                         uint32_t offset, uint32_t size) {
   std::vector<std::pair<uint32_t, uint32_t>> layer_sizes;
   uint32_t current_offset = 0;
   uint32_t current_layer = 0;
   while (current_offset < offset && current_layer < object_layer_size.size()) {
     current_layer++;
-    current_offset += object_layer_size[current_layer].first *
-                      object_layer_size[current_layer].second;
+    current_offset += object_layer_size[current_layer].first * object_layer_size[current_layer].second;
   }
   if (current_layer < object_layer_size.size() && current_offset != offset) {
-    std::cout << current_offset << " " << offset << " " << current_layer << " "
-              << object_layer_size.size() << std::endl;
     throw std::runtime_error{"Invalid slice. Can't slice within a layer"};
   }
   for (; current_layer < object_layer_size.size(); current_layer++) {
@@ -44,38 +40,40 @@ class CompositeOptimizer : public Optimizer<T> {
  public:
   CompositeOptimizer(const json& params) {
     if (!params.contains("nested") || !params["nested"].is_array()) {
-      throw std::runtime_error{
-          "Must provide an array of nested encodings to CompositeOptimizer."};
+      throw std::runtime_error{"Must provide an array of nested encodings to CompositeOptimizer."};
     }
     const json::array_t& nested = params["nested"];
     m_n_weights = 0;
     for (size_t i = 0; i < nested.size(); ++i) {
       m_offsets.emplace_back(m_n_weights);
       m_n_weights += nested[i].value("n_params_to_optimize", 0);
-      m_nested.emplace_back(
-          std::shared_ptr<Optimizer<T>>(create_optimizer<T>(nested[i])));
+      m_nested.emplace_back(std::shared_ptr<Optimizer<T>>(create_optimizer<T>(nested[i])));
     }
     m_offsets.emplace_back(m_n_weights);
     update_hyperparams(params);
   }
 
-  void allocate(
-      uint32_t n_weights,
-      const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+  void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
     for (int i = 0; i < m_nested.size(); i++) {
       uint32_t size = m_offsets[i + 1] - m_offsets[i];
-      m_nested[i]->allocate(size,
-                            slice_weights(layer_sizes, m_offsets[i], size));
+      m_nested[i]->allocate(size, slice_weights(layer_sizes, m_offsets[i], size));
+      m_need_custom_weights |= m_nested[i]->custom_weights() != nullptr;
+    }
+    if (m_need_custom_weights) {
+      m_custom_weights.resize(m_n_weights);
     }
   }
 
-  void step(cudaStream_t stream, float loss_scale,
-            float* weights_full_precision, T* weights,
+  void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights,
             const T* gradients) override {
     for (int i = 0; i < m_nested.size(); i++) {
       uint32_t offset = m_offsets[i];
-      m_nested[i]->step(stream, loss_scale, weights_full_precision + offset,
-                        weights + offset, gradients + offset);
+      m_nested[i]->step(stream, loss_scale, weights_full_precision + offset, weights + offset, gradients + offset);
+      if (m_need_custom_weights) {
+        cudaMemcpyAsync(m_custom_weights.data() + offset,
+                        (m_nested[i]->custom_weights() == nullptr ? weights : m_nested[i]->custom_weights()) + offset,
+                        m_nested[i]->n_weights() * sizeof(T), cudaMemcpyDeviceToDevice, stream);
+      }
     }
   }
 
@@ -84,8 +82,7 @@ class CompositeOptimizer : public Optimizer<T> {
   void set_learning_rate(float val) override {
     learning_rate_scale = val;
     for (int i = 0; i < m_nested.size(); i++) {
-      m_nested[i]->set_learning_rate(m_nested[i]->learning_rate() *
-                                     learning_rate_scale);
+      m_nested[i]->set_learning_rate(m_nested[i]->learning_rate() * learning_rate_scale);
     }
   }
 
@@ -93,7 +90,7 @@ class CompositeOptimizer : public Optimizer<T> {
 
   uint32_t n_weights() const override { return m_n_weights; }
 
-  T* custom_weights() const override { return nullptr; }
+  T* custom_weights() const override { return m_custom_weights.data(); }
 
   void update_hyperparams(const json& params) override {
     if (params.contains("nested") && params["nested"].is_array()) {
@@ -119,9 +116,7 @@ class CompositeOptimizer : public Optimizer<T> {
     for (auto& n : m_nested) {
       nested.emplace_back(n->hyperparams());
     }
-    return {{"otype", "Composite"},
-            {"nested", nested},
-            {"learning_rate_scale", learning_rate_scale}};
+    return {{"otype", "Composite"}, {"nested", nested}, {"learning_rate_scale", learning_rate_scale}};
   }
 
   json serialize() const override {
@@ -145,6 +140,8 @@ class CompositeOptimizer : public Optimizer<T> {
   std::vector<uint32_t> m_offsets;
   uint32_t m_n_weights;
   float learning_rate_scale = 1.0f;
+  bool m_need_custom_weights = false;
+  GPUMemory<T> m_custom_weights;
 };
 
 TCNN_NAMESPACE_END
