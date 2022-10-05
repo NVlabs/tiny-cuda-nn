@@ -186,8 +186,8 @@ public:
 		return nullptr;
 	}
 
-	bool supports_nesting() const override {
-		return false;
+	uint32_t n_nesting() const override {
+		return 0;
 	}
 
 	void update_hyperparams(const json& params) override {

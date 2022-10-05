@@ -119,8 +119,8 @@ public:
 		return m_weights_samples.data() + current_sample_idx() * m_n_weights;
 	}
 
-	bool supports_nesting() const override {
-		return true;
+	uint32_t n_nesting() const override {
+		return 1;
 	}
 
 	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {
