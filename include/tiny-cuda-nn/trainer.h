@@ -238,7 +238,7 @@ public:
 
 	void set_params_full_precision(const float* params, size_t n_params, bool device_ptr = false) {
 		if (n_params != m_model->n_params()) {
-			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
+			throw std::runtime_error{"Can't set fp params because buffer has the wrong size."};
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_full_precision, params, sizeof(float)*n_params, device_ptr ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice));
 
@@ -252,7 +252,7 @@ public:
 
 	void set_params(const PARAMS_T* params, size_t n_params, bool device_ptr = false) {
 		if (n_params != m_model->n_params()) {
-			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
+			throw std::runtime_error{"Can't set params because buffer has the wrong size."};
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_inference, params, sizeof(PARAMS_T)*n_params, device_ptr ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice));
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));

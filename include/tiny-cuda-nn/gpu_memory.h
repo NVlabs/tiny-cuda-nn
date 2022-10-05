@@ -144,6 +144,7 @@ public:
 		total_n_bytes_allocated() -= get_bytes();
 
 		m_data = nullptr;
+		m_size = 0;
 	}
 
 	/// Frees memory again
