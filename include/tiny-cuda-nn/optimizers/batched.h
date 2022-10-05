@@ -109,8 +109,8 @@ public:
 		return m_nested->custom_weights();
 	}
 
-	bool supports_nesting() const override {
-		return true;
+	uint32_t n_nesting() const override {
+		return 1;
 	}
 
 	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {

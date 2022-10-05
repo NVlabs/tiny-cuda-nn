@@ -57,6 +57,8 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 		return new AverageOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Batched")) {
 		return new BatchedOptimizer<T>{optimizer};
+	} else if (equals_case_insensitive(optimizer_type, "Composite")) {
+		return new CompositeOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Ema")) {
 		return new EmaOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "ExponentialDecay")) {
@@ -73,8 +75,6 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 #else
 		throw std::runtime_error{"The Shampoo optimizer is only available when compiling with CUDA 11 or higher."};
 #endif
-	} else if (equals_case_insensitive(optimizer_type, "Composite")) {
-    	return new CompositeOptimizer<T>{optimizer};
 	} else {
 		throw std::runtime_error{fmt::format("Invalid optimizer type: {}", optimizer_type)};
 	}
