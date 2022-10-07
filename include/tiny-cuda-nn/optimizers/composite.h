@@ -74,7 +74,7 @@ class CompositeOptimizer : public Optimizer<T> {
 						if (m_need_custom_weights) {
 								CUDA_CHECK_THROW(cudaMemcpyAsync(
 								    m_custom_weights.data() + offset,
-								    (m_nested[i]->custom_weights() == nullptr ? weights : m_nested[i]->custom_weights()) + offset,
+								    (m_nested[i]->custom_weights() == nullptr ? weights + offset : m_nested[i]->custom_weights()),
 								    m_nested[i]->n_weights() * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 						}
 				}
