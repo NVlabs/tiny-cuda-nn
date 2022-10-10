@@ -212,11 +212,14 @@ This framework is licensed under the BSD 3-clause license. Please see `LICENSE.t
 
 If you use it in your research, we would appreciate a citation via
 ```bibtex
-@misc{tiny-cuda-nn,
-    Author = {Thomas M\"uller},
-    Year = {2021},
-    Note = {https://github.com/nvlabs/tiny-cuda-nn},
-    Title = {Tiny {CUDA} Neural Network Framework}
+@software{tiny-cuda-nn,
+	author = {M\"uller, Thomas},
+	license = {BSD-3-Clause},
+	month = {4},
+	title = {{tiny-cuda-nn}},
+	url = {https://github.com/NVlabs/tiny-cuda-nn},
+	version = {1.6},
+	year = {2021}
 }
 ```
 

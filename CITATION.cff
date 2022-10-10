@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: tiny-cuda-nn
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Thomas
+    email: thomas94@gmx.net
+    family-names: Müller
+    affiliation: NVIDIA
+repository-code: 'https://github.com/NVlabs/tiny-cuda-nn'
+abstract: >-
+  This is a small, self-contained framework for training and querying neural
+  networks. Most notably, it contains a lightning fast "fully fused" multi-
+  layer perceptron (technical paper), a versatile multiresolution hash encoding
+  (technical paper), as well as support for various other input encodings,
+  losses, and optimizers.
+keywords:
+  - 'neural network, tiny, tensor cores, cuda'
+license: BSD-3-Clause
+license-url: https://github.com/NVlabs/tiny-cuda-nn/blob/master/LICENSE.txt
+version: 1.6
+date-released: '2021-04-21'
