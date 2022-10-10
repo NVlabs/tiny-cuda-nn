@@ -154,7 +154,7 @@ Network<T>* create_network(const json& network) {
 			}
 #  undef TCNN_FULLY_FUSED_PARAMS
 #else //TCNN_MIN_GPU_ARCH > 70
-			throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <70."};
+			throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <=70."};
 #endif //TCNN_MIN_GPU_ARCH > 70
 		}
 	} else if (equals_case_insensitive(network_type, "CutlassMLP")) {
