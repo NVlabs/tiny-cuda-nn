@@ -109,7 +109,7 @@ else:
 	cflags.append("-DTCNN_NO_NETWORKS")
 
 ext = CUDAExtension(
-	name="tinycudann_bindings._C",
+	name=f"tinycudann_bindings_{min_compute_capability}._C",
 	sources=source_files,
 	include_dirs=[
 		"%s/include" % root_dir,

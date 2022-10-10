@@ -7,9 +7,31 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import gc
+import importlib
 import torch
-from torch.autograd.function import once_differentiable
-from tinycudann_bindings import _C
+
+ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86]
+
+if not torch.cuda.is_available():
+	raise EnvironmentError("Unknown compute capability. Ensure PyTorch with CUDA support is installed.")
+major, minor = torch.cuda.get_device_capability()
+system_compute_capability = major * 10 + minor
+
+# Try to import the highest compute capability version of tcnn that
+# we can find and is compatible with the system's compute capability.
+for cc in reversed(ALL_COMPUTE_CAPABILITIES):
+	if cc > system_compute_capability:
+		# incompatible
+		continue
+
+	try:
+		_C = importlib.import_module(f"tinycudann_bindings_{cc}._C")
+		break
+	except ImportError:
+		pass
+
+if _C is None:
+	raise EnvironmentError(f"Could not find compatible tinycudann extension for compute capability {system_compute_capability}.")
 
 def _torch_precision(tcnn_precision):
 	if tcnn_precision == _C.Precision.Fp16:
