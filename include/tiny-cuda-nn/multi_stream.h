@@ -143,26 +143,9 @@ private:
 	cudaEvent_t m_event;
 };
 
-inline std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& stream_multi_streams() {
-	static struct Wrapper {
-		~Wrapper() {
-			// Avoids free_multi_stream being called in the middle of multi_streams's destruction.
-			// Note, that we don't use `.clear()` intentionally, because it would also have issues
-			// with recursive calling of free_multi_stream by ~StreamAndEvent.
-			while (!multi_streams.empty()) {
-				free_multi_streams(multi_streams.begin()->first);
-			}
-		}
-
-		std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>> multi_streams;
-	} s_wrapper;
-	return s_wrapper.multi_streams;
-}
-
-inline std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>>& global_multi_streams() {
-	static std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
-	return s_multi_streams;
-}
+// Defined in common.cu to facilitate ordered destruction upon program exit.
+std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& stream_multi_streams();
+std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>>& global_multi_streams();
 
 inline std::stack<std::shared_ptr<MultiStream>>& get_multi_stream_stack(cudaStream_t parent_stream) {
 	return parent_stream ? stream_multi_streams()[parent_stream] : global_multi_streams()[cuda_device()];

@@ -697,15 +697,9 @@ private:
 	size_t m_max_size;
 };
 
-inline std::unordered_map<cudaStream_t, std::shared_ptr<GPUMemoryArena>>& stream_gpu_memory_arenas() {
-	static std::unordered_map<cudaStream_t, std::shared_ptr<GPUMemoryArena>> s_gpu_memory_arenas;
-	return s_gpu_memory_arenas;
-}
-
-inline std::unordered_map<int, std::shared_ptr<GPUMemoryArena>>& global_gpu_memory_arenas() {
-	static std::unordered_map<int, std::shared_ptr<GPUMemoryArena>> s_gpu_memory_arenas;
-	return s_gpu_memory_arenas;
-}
+// Defined in common.cu to facilitate ordered destruction upon program exit.
+std::unordered_map<cudaStream_t, std::shared_ptr<GPUMemoryArena>>& stream_gpu_memory_arenas();
+std::unordered_map<int, std::shared_ptr<GPUMemoryArena>>& global_gpu_memory_arenas();
 
 inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t n_bytes) {
 	if (n_bytes == 0) {
