@@ -742,9 +742,13 @@ std::tuple<Types*...> allocate_workspace_and_distribute(cudaStream_t stream, GPU
 
 inline void free_gpu_memory_arena(cudaStream_t stream) {
 	if (stream) {
-		stream_gpu_memory_arenas().erase(stream);
+		if (!stream_gpu_memory_arenas().empty()) {
+			stream_gpu_memory_arenas().erase(stream);
+		}
 	} else {
-		global_gpu_memory_arenas().erase(cuda_device());
+		if (!global_gpu_memory_arenas().empty()) {
+			global_gpu_memory_arenas().erase(cuda_device());
+		}
 	}
 }
 
