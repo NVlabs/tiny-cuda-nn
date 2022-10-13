@@ -43,15 +43,15 @@
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void triangle_wave_encoding(
 	const uint32_t num_elements,
 	const uint32_t n_frequencies,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
-	MatrixView<const float> data_in,
+	MatrixView<const INPUT_T> data_in,
 	MatrixView<T> data_out,
-	float* __restrict__ dy_dx)
+	INPUT_T* __restrict__ dy_dx)
 {
 	const uint32_t fan_out_encoded = num_to_encode * n_frequencies;
 	const uint32_t fan_out = fan_out_encoded + num_to_pad;
@@ -68,27 +68,28 @@ __global__ void triangle_wave_encoding(
 		const uint32_t encoded_input_feature_i = j / n_frequencies;
 		const int log2_frequency = j - encoded_input_feature_i * n_frequencies;
 
-		const float x = scalbnf(data_in(encoded_input_feature_i, i), log2_frequency-1);
+		const INPUT_T x = scalbnf(data_in(encoded_input_feature_i, i), log2_frequency-1);
 
 		// Small log2_frequency-based phase shift to help disambiguate locations
-		const float val = x + log2_frequency * 0.25f;
-		const float result = fabsf(val - floorf(val) - 0.5f) * 4 - 1;
+		const INPUT_T val = x + INPUT_T(log2_frequency) * INPUT_T(0.25);
+		INPUT_T result = val - (val > INPUT_T(0) ? val: -val) - INPUT_T(0.5);
+		result = (result > INPUT_T(0)  ? result: -result) * INPUT_T(4) - INPUT_T(1);
 
 		data_out(j, i) = (T)result;
 		if (dy_dx != nullptr) {
-			dy_dx[i * fan_out_encoded + j] = scalbnf((int)floorf(val*2.0f) % 2 == 0 ? -1.0f : 1.0f, log2_frequency+1);
+			dy_dx[i * fan_out_encoded + j] = scalbnf((int)floorf(val*INPUT_T(2)) % 2 == 0 ? INPUT_T(-1) : INPUT_T(1), log2_frequency+1);
 		}
 	}
 }
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void triangle_wave_encoding_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t n_frequencies,
 	MatrixView<const T> dL_dy,
-	const float* dy_dx,
-	MatrixView<float> dL_dx
+	const INPUT_T* dy_dx,
+	MatrixView<INPUT_T> dL_dx
 ) {
 	const uint32_t fan_out = n_dims_to_encode;
 
@@ -101,15 +102,15 @@ __global__ void triangle_wave_encoding_backward(
 	const uint32_t i = encoded_index / fan_out;
 	const uint32_t j = encoded_index - i * fan_out;
 
-	float result = 0;
+	INPUT_T result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(j * outputs_per_input + k, i) * dy_dx[i * fan_out_encoded + j * outputs_per_input + k];
+		result += (INPUT_T)dL_dy(j * outputs_per_input + k, i) * dy_dx[i * fan_out_encoded + j * outputs_per_input + k];
 	}
 	dL_dx(j, i) = result;
 }
 
-template <typename T>
-class TriangleWaveEncoding : public Encoding<T> {
+template <typename T, typename INPUT_T = float>
+class TriangleWaveEncoding : public Encoding<T, INPUT_T> {
 public:
 	TriangleWaveEncoding(uint32_t n_frequencies, uint32_t n_dims_to_encode)
 	: m_n_frequencies{n_frequencies}, m_n_dims_to_encode{n_dims_to_encode} {
@@ -118,7 +119,7 @@ public:
 
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
@@ -130,10 +131,10 @@ public:
 		}
 
 		if (prepare_input_gradients) {
-			forward->dy_dx = GPUMatrix<float>{m_n_dims_to_encode * m_n_frequencies, input.n(), stream};
+			forward->dy_dx = GPUMatrix<INPUT_T>{m_n_dims_to_encode * m_n_frequencies, input.n(), stream};
 		}
 
-		linear_kernel(triangle_wave_encoding<T>, 0, stream,
+		linear_kernel(triangle_wave_encoding<T, INPUT_T>, 0, stream,
 			input.n() * padded_output_width(),
 			m_n_frequencies,
 			m_n_dims_to_encode,
@@ -149,10 +150,10 @@ public:
 	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		GPUMatrixDynamic<INPUT_T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
@@ -162,7 +163,7 @@ public:
 
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		linear_kernel(triangle_wave_encoding_backward<T>, 0, stream,
+		linear_kernel(triangle_wave_encoding_backward<T, INPUT_T>, 0, stream,
 			input.n() * m_n_dims_to_encode,
 			m_n_dims_to_encode,
 			m_n_frequencies,
@@ -210,7 +211,7 @@ public:
 
 private:
 	struct ForwardContext : public Context {
-		GPUMatrix<float> dy_dx;
+		GPUMatrix<INPUT_T> dy_dx;
 	};
 
 	uint32_t m_n_frequencies;

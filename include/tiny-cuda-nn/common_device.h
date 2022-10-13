@@ -430,56 +430,67 @@ __device__ inline void pos_fract(const float input, float* pos, uint32_t* pos_gr
 	*pos = interpolation_fun(*pos);
 }
 
-__device__ inline float weight_decay(float relative_weight_decay, float absolute_weight_decay, float weight) {
+template <typename T>
+__device__ inline T weight_decay(T relative_weight_decay, T absolute_weight_decay, T weight) {
 	// Relative weight decay is closely related to l2 regularization, whereas absolute weight decay corresponds to l1 regularization
 	return (1 - relative_weight_decay) * weight - copysignf(absolute_weight_decay, weight);
 }
 
-__device__ inline float gaussian_cdf(const float x, const float inv_radius) {
+template <typename T>
+__device__ inline T gaussian_cdf(const T x, const T inv_radius) {
 	return normcdff(x * inv_radius);
 }
 
-__device__ inline float gaussian_cdf_approx(const float x, const float inv_radius) {
-	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / SQRT2;
+template <typename T>
+__device__ inline T gaussian_cdf_approx(const T x, const T inv_radius) {
+	static constexpr T MAGIC_SIGMOID_FACTOR = 1.12f / SQRT2;
 	return logistic(MAGIC_SIGMOID_FACTOR * x * inv_radius);
 }
 
-__device__ inline float gaussian_cdf_approx_derivative(const float result, const float inv_radius) {
-	static constexpr float MAGIC_SIGMOID_FACTOR = 1.12f / SQRT2;
+template <typename T>
+__device__ inline T gaussian_cdf_approx_derivative(const T result, const T inv_radius) {
+	static constexpr T MAGIC_SIGMOID_FACTOR = 1.12f / SQRT2;
 	return result * (1 - result) * MAGIC_SIGMOID_FACTOR * inv_radius;
 }
 
-__device__ inline float gaussian_pdf(const float x, const float inv_radius) {
+template <typename T>
+__device__ inline T gaussian_pdf(const T x, const T inv_radius) {
 	return inv_radius * rsqrtf(2.0f * PI) * expf(-0.5f * (x * x * inv_radius * inv_radius));
 }
 
-__device__ inline float gaussian_pdf_max_1(const float x, const float inv_radius) {
+template <typename T>
+__device__ inline T gaussian_pdf_max_1(const T x, const T inv_radius) {
 	return expf(-0.5f * (x * x * inv_radius * inv_radius));
 }
 
-__device__ inline float tent(const float x, const float inv_radius) {
+template <typename T>
+__device__ inline T tent(const T x, const T inv_radius) {
 	return fmaxf(1.0f - fabsf(x * inv_radius), 0.0f);
 }
 
-__device__ inline float tent_cdf(const float x, const float inv_radius) {
+template <typename T>
+__device__ inline T tent_cdf(const T x, const T inv_radius) {
 	return fmaxf(0.0f, fminf(1.0f, x * inv_radius + 0.5f));
 }
 
-__device__ inline float quartic(const float x, const float inv_radius) {
-	const float u = x * inv_radius;
-	const float tmp = fmaxf(1 - u*u, 0.0f);
-	return ((float)15 / 16) * tmp * tmp;
+template <typename T>
+__device__ inline T quartic(const T x, const T inv_radius) {
+	const T u = x * inv_radius;
+	const T tmp = fmaxf((T)1 - u*u, 0.0f);
+	return ((T)15 / (T)16) * tmp * tmp;
 }
 
-__device__ inline float quartic_cdf_deriv(const float x, const float inv_radius) {
+template <typename T>
+__device__ inline T quartic_cdf_deriv(const T x, const T inv_radius) {
 	return quartic(x, inv_radius) * inv_radius;
 }
 
-__device__ inline float quartic_cdf(const float x, const float inv_radius) {
-	const float u = x * inv_radius;
-	const float u2 = u * u;
-	const float u4 = u2 * u2;
-	return fmaxf(0.0f, fminf(1.0f, ((float)15 / 16) * u * (1 - ((float)2 / 3) * u2 + ((float)1 / 5) * u4) + 0.5f));
+template <typename T>
+__device__ inline T quartic_cdf(const T x, const T inv_radius) {
+	const T u = x * inv_radius;
+	const T u2 = u * u;
+	const T u4 = u2 * u2;
+	return std::max((T)0.0, std::min((T)1.0, ((T)15 / (T)16) * u * ((T)1 - ((T)2 / (T)3) * u2 + ((T)1 / (T)5) * u4) + (T)0.5));
 }
 
 __device__ inline uint32_t permute(uint32_t num, uint32_t size) {

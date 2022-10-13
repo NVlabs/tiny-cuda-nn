@@ -44,14 +44,14 @@
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename F>
-__device__ inline float one_blob_subwarp_aligned(F kernel, MatrixView<const float> data_in, const uint32_t elem_index, const uint32_t encoded_index, const uint32_t num_bins_log2) {
+template <typename F, typename INPUT_T>
+__device__ inline INPUT_T one_blob_subwarp_aligned(F kernel, MatrixView<const INPUT_T> data_in, const uint32_t elem_index, const uint32_t encoded_index, const uint32_t num_bins_log2) {
 	const uint32_t n_bins = 1 << num_bins_log2;
 	const uint32_t bin_index = encoded_index & (n_bins - 1);
-	const float x = data_in(encoded_index >> num_bins_log2, elem_index);
+	const INPUT_T x = data_in(encoded_index >> num_bins_log2, elem_index);
 
-	const float left_boundary = scalbnf(bin_index, -num_bins_log2);
-	float left_cdf = kernel(left_boundary - x, n_bins) + kernel(left_boundary - x - 1.0f, n_bins) + kernel(left_boundary - x + 1.0f, n_bins);
+	const INPUT_T left_boundary = scalbnf(bin_index, -num_bins_log2);
+	INPUT_T left_cdf = kernel(left_boundary - x, INPUT_T(n_bins)) + kernel(left_boundary - x - INPUT_T(1.0), INPUT_T(n_bins)) + kernel(left_boundary - x + INPUT_T(1.0), INPUT_T(n_bins));
 
 	// OneBlob needs an evaluation for both the left and the right boundary.
 	// Compute cost can be saved by computing just one boundary and shuffling the result of the next from the neighboring lane.
@@ -59,7 +59,7 @@ __device__ inline float one_blob_subwarp_aligned(F kernel, MatrixView<const floa
 	// Note that this procedure necessitates making the OneBlob encoding wrap around (hence also the 3 kernel calls above),
 	// which may not always be desired.
 	// If not desired, use the slower implementation without wraparound below.
-	float right_cdf = __shfl_sync(0xffffffff, left_cdf, bin_index + 1, n_bins);
+	INPUT_T right_cdf = __shfl_sync(0xffffffff, left_cdf, bin_index + 1, n_bins);
 	if (bin_index == n_bins - 1) {
 		right_cdf += 1; // The right CDF must gain a 1 due to wrapping from right to left (it lost one (hopefully) saturated CDF)
 	}
@@ -67,41 +67,41 @@ __device__ inline float one_blob_subwarp_aligned(F kernel, MatrixView<const floa
 	return right_cdf - left_cdf;
 }
 
-template <typename F>
-__device__ inline float one_blob(F kernel, const float* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
+template <typename F, typename INPUT_T>
+__device__ inline INPUT_T one_blob(F kernel, const INPUT_T* __restrict__ data_in, const uint32_t encoded_index, const uint32_t num_bins_log2) {
 	const uint32_t n_bins = 1 << num_bins_log2;
 	const uint32_t bin_index = encoded_index & (n_bins - 1);
-	const float x = data_in[encoded_index >> num_bins_log2];
+	const INPUT_T x = data_in[encoded_index >> num_bins_log2];
 
-	const float left_boundary = scalbnf(bin_index, -num_bins_log2);
-	const float left_cdf = kernel(left_boundary - x, n_bins);
+	const INPUT_T left_boundary = scalbnf(bin_index, -num_bins_log2);
+	const INPUT_T left_cdf = kernel(left_boundary - x, n_bins);
 
-	const float right_boundary = scalbnf(bin_index + 1, -num_bins_log2);
-	const float right_cdf = kernel(right_boundary - x, n_bins);
+	const INPUT_T right_boundary = scalbnf(bin_index + 1, -num_bins_log2);
+	const INPUT_T right_cdf = kernel(right_boundary - x, n_bins);
 
 	return right_cdf - left_cdf;
 }
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void kernel_one_blob(
 	const uint32_t num_elements,
 	const uint32_t num_bins_log2,
-	MatrixView<const float> data_in,
+	MatrixView<const INPUT_T> data_in,
 	PitchedPtr<T> data_out
 ) {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
 	if (i >= num_elements) return;
 
-	data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf, data_in, i, j, num_bins_log2);
+	data_out(i)[j] = (T)one_blob_subwarp_aligned(quartic_cdf<INPUT_T>, data_in, i, j, num_bins_log2);
 }
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void kernel_one_blob_soa(
 	const uint32_t num_elements,
 	const uint32_t num_bins_log2,
 	const uint32_t num_to_encode,
-	MatrixView<const float> data_in,
+	MatrixView<const INPUT_T> data_in,
 	T* __restrict__ data_out
 ) {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -109,16 +109,16 @@ __global__ void kernel_one_blob_soa(
 	const uint32_t to_encode_index = j + i * blockDim.x;
 	if (to_encode_index >= num_elements * num_to_encode) return;
 
-	const float x = data_in(j, i);
+	const INPUT_T x = data_in(j, i);
 
 	const uint32_t n_bins = 1 << num_bins_log2;
 	T* out = (data_out + i + j * n_bins * num_elements);
 
-	float left_cdf = quartic_cdf(-x, n_bins) + quartic_cdf(-x - 1.0f, n_bins) + quartic_cdf(-x + 1.0f, n_bins);
+	INPUT_T left_cdf = quartic_cdf(-x, INPUT_T(n_bins)) + quartic_cdf(-x - INPUT_T(1.0), INPUT_T(n_bins)) + quartic_cdf(-x + INPUT_T(1.0), INPUT_T(n_bins));
 
 	for (uint32_t k = 0; k < n_bins; ++k) {
-		const float right_boundary = scalbnf(k+1, -num_bins_log2);
-		const float right_cdf = quartic_cdf(right_boundary - x, n_bins) + quartic_cdf(right_boundary - x - 1.0f, n_bins) + quartic_cdf(right_boundary - x + 1.0f, n_bins);
+		const INPUT_T right_boundary = scalbnf(k+1, -num_bins_log2);
+		const INPUT_T right_cdf = quartic_cdf(right_boundary - x, INPUT_T(n_bins)) + quartic_cdf(right_boundary - x - INPUT_T(1.0), INPUT_T(n_bins)) + quartic_cdf(right_boundary - x + INPUT_T(1.0), INPUT_T(n_bins));
 
 		*out = (T)(right_cdf - left_cdf);
 
@@ -127,45 +127,45 @@ __global__ void kernel_one_blob_soa(
 	}
 }
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void kernel_one_blob_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t num_bins_log2,
 	MatrixView<const T> dL_dy,
-	MatrixView<const float> data_in,
-	MatrixView<float> dL_dx)
+	MatrixView<const INPUT_T> data_in,
+	MatrixView<INPUT_T> dL_dx)
 {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
 	const uint32_t to_encode_index = j + i * blockDim.x;
 	if (to_encode_index >= num_elements * n_dims_to_encode) return;
 
-	const float x = data_in(j, i);
+	const INPUT_T x = data_in(j, i);
 
 	const uint32_t n_bins = 1 << num_bins_log2;
 
-	float result = 0;
+	INPUT_T result = 0;
 
-	float left_cdf = quartic_cdf_deriv(-x, n_bins) + quartic_cdf_deriv(-x - 1.0f, n_bins) + quartic_cdf_deriv(-x + 1.0f, n_bins);
+	INPUT_T left_cdf = quartic_cdf_deriv(-x, INPUT_T(n_bins)) + quartic_cdf_deriv(-x - INPUT_T(1.0), INPUT_T(n_bins)) + quartic_cdf_deriv(-x + INPUT_T(1.0), INPUT_T(n_bins));
 
 	for (uint32_t k = 0; k < n_bins; ++k) {
-		const float right_boundary = scalbnf(k+1, -num_bins_log2);
-		const float right_cdf = quartic_cdf_deriv(right_boundary - x, n_bins) + quartic_cdf_deriv(right_boundary - x - 1.0f, n_bins) + quartic_cdf_deriv(right_boundary - x + 1.0f, n_bins);
+		const INPUT_T right_boundary = scalbnf(k+1, -num_bins_log2);
+		const INPUT_T right_cdf = quartic_cdf_deriv(right_boundary - x, INPUT_T(n_bins)) + quartic_cdf_deriv(right_boundary - x - INPUT_T(1.0), INPUT_T(n_bins)) + quartic_cdf_deriv(right_boundary - x + INPUT_T(1.0), INPUT_T(n_bins));
 
-		float deriv = left_cdf - right_cdf;
+		INPUT_T deriv = left_cdf - right_cdf;
 
 		left_cdf = right_cdf;
 
 		uint32_t encoded_dim = j * n_bins + k;
-		result += (float)dL_dy(encoded_dim, i) * deriv;
+		result += (INPUT_T)dL_dy(encoded_dim, i) * deriv;
 	}
 
 	dL_dx(j, i) = result;
 }
 
-template <typename T>
-class OneBlobEncoding : public Encoding<T> {
+template <typename T, typename INPUT_T = float>
+class OneBlobEncoding : public Encoding<T, INPUT_T> {
 public:
 	OneBlobEncoding(uint32_t n_bins, uint32_t n_dims_to_encode)
 	: m_n_bins{n_bins}, m_n_dims_to_encode{n_dims_to_encode} {
@@ -180,7 +180,7 @@ public:
 
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
@@ -197,7 +197,7 @@ public:
 			const uint32_t n_threads = threads.x * threads.y;
 			const dim3 blocks = { div_round_up(input.n() * m_n_output_dims, n_threads), 1, 1 };
 
-			kernel_one_blob<T><<<blocks, threads, 0, stream>>>(
+			kernel_one_blob<T, INPUT_T><<<blocks, threads, 0, stream>>>(
 				input.n(),
 				num_bins_log2,
 				input.view(),
@@ -214,7 +214,7 @@ public:
 			const uint32_t n_threads = threads.x * threads.y;
 			const dim3 blocks = { div_round_up(input.n() * m_n_dims_to_encode, n_threads), 1, 1 };
 
-			kernel_one_blob_soa<T><<<blocks, threads, 0, stream>>>(
+			kernel_one_blob_soa<T, INPUT_T><<<blocks, threads, 0, stream>>>(
 				input.n(),
 				num_bins_log2,
 				m_n_dims_to_encode,
@@ -234,10 +234,10 @@ public:
 	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		GPUMatrixDynamic<INPUT_T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
@@ -252,7 +252,7 @@ public:
 		const uint32_t n_threads = threads.x * threads.y;
 		const dim3 blocks = { div_round_up(input.n() * m_n_dims_to_encode, n_threads), 1, 1 };
 
-		kernel_one_blob_backward<T><<<blocks, threads, 0, stream>>>(
+		kernel_one_blob_backward<T, INPUT_T><<<blocks, threads, 0, stream>>>(
 			input.n(),
 			m_n_dims_to_encode,
 			num_bins_log2,

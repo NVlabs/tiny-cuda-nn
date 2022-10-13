@@ -38,6 +38,8 @@
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
 
+#include <type_traits>
+
 
 TCNN_NAMESPACE_BEGIN
 
@@ -83,40 +85,40 @@ std::string to_string(ReductionType reduction_type) {
 	}
 }
 
-template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment) {
+template <typename T, typename INPUT_T>
+Encoding<T, INPUT_T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment) {
 	std::string encoding_type = encoding.value("otype", "OneBlob");
 
-	Encoding<T>* result;
+	Encoding<T, INPUT_T>* result;
 
 	if (equals_case_insensitive(encoding_type, "Composite")) {
-		result = new CompositeEncoding<T>{
+		result = new CompositeEncoding<T, INPUT_T>{
 			encoding,
 			n_dims_to_encode,
 		};
 	} else if (equals_case_insensitive(encoding_type, "Identity")) {
-		result = new IdentityEncoding<T>{
+		result = new IdentityEncoding<T, INPUT_T>{
 			n_dims_to_encode,
 			encoding.value("scale", 1.0f),
 			encoding.value("offset", 0.0f),
 		};
 	} else if (equals_case_insensitive(encoding_type, "Frequency")) {
-		result = new FrequencyEncoding<T>{
+		result = new FrequencyEncoding<T, INPUT_T>{
 			encoding.value("n_frequencies", 12u),
 			n_dims_to_encode,
 		};
 	} else if (equals_case_insensitive(encoding_type, "TriangleWave")) {
-		result = new TriangleWaveEncoding<T>{
+		result = new TriangleWaveEncoding<T, INPUT_T>{
 			encoding.value("n_frequencies", 12u),
 			n_dims_to_encode,
 		};
 	} else if (equals_case_insensitive(encoding_type, "SphericalHarmonics")) {
-		result = new SphericalHarmonicsEncoding<T>{
+		result = new SphericalHarmonicsEncoding<T, INPUT_T>{
 			encoding.value("degree", 4u),
 			n_dims_to_encode,
 		};
 	} else if (equals_case_insensitive(encoding_type, "OneBlob")) {
-		result = new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
+		result = new OneBlobEncoding<T, INPUT_T>{encoding.value("n_bins", 16u), n_dims_to_encode};
 	} else if (equals_case_insensitive(encoding_type, "OneBlobFrequency") || equals_case_insensitive(encoding_type, "NRC")) {
 		json nrc_composite = {
 			{"otype", "Composite"},
@@ -135,7 +137,7 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 			}},
 		};
 
-		result = new CompositeEncoding<T>{
+		result = new CompositeEncoding<T, INPUT_T>{
 			nrc_composite,
 			n_dims_to_encode,
 		};
@@ -145,7 +147,12 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 		equals_case_insensitive(encoding_type, "TiledGrid") ||
 		equals_case_insensitive(encoding_type, "DenseGrid")
 	) {
-		result = create_grid_encoding<T>(n_dims_to_encode, encoding);
+		if (std::is_same<INPUT_T, float>::value) {
+			result = dynamic_cast<Encoding<T, INPUT_T>*>(create_grid_encoding<T>(n_dims_to_encode, encoding));
+		}
+		else {
+			throw std::runtime_error{"Grid encoding is only avaliable in mixed precision"};
+		}
 	} else {
 		throw std::runtime_error{fmt::format("Invalid encoding type: {}", encoding_type)};
 	}
@@ -157,8 +164,9 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 }
 
 #if TCNN_HALF_PRECISION
-template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
+template Encoding<__half, float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
+template Encoding<__half, __half>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
 #endif
-template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
+template Encoding<float, float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
 
 TCNN_NAMESPACE_END

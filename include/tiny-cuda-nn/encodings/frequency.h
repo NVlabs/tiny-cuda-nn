@@ -43,15 +43,15 @@
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void frequency_encoding(
 	const uint32_t num_elements,
 	const uint32_t n_frequencies,
 	const uint32_t num_to_encode,
 	const uint32_t num_to_pad,
-	MatrixView<const float> data_in,
+	MatrixView<const INPUT_T> data_in,
 	MatrixView<T> data_out,
-	float* __restrict__ dy_dx)
+	INPUT_T* __restrict__ dy_dx)
 {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_elements) return;
@@ -82,10 +82,10 @@ __global__ void frequency_encoding(
 		const uint32_t encoded_input_feature_i = j / (n_frequencies * 2);
 		const uint32_t log2_frequency = (j / 2) % n_frequencies;
 
-		const float phase_shift = (j % 2) * (PI/2);
+		const INPUT_T phase_shift = (j % 2) * (PI/2);
 
-		const float x = scalbnf(data_in(encoded_input_feature_i, i), log2_frequency);
-		const float input = x * PI + phase_shift;
+		const INPUT_T x = scalbnf(data_in(encoded_input_feature_i, i), log2_frequency);
+		const INPUT_T input = x * INPUT_T(PI) + phase_shift;
 		data_out(j, i) = (T)__sinf(input);
 		if (dy_dx != nullptr) {
 			dy_dx[i * fan_out_encoded + j] = scalbnf(1.0f, log2_frequency) * PI * __cosf(input);
@@ -93,14 +93,14 @@ __global__ void frequency_encoding(
 	}
 }
 
-template <typename T>
+template <typename T, typename INPUT_T>
 __global__ void frequency_encoding_backward(
 	const uint32_t num_elements,
 	const uint32_t n_dims_to_encode,
 	const uint32_t n_frequencies,
 	MatrixView<const T> dL_dy,
-	const float* dy_dx,
-	MatrixView<float> dL_dx
+	const INPUT_T* dy_dx,
+	MatrixView<INPUT_T> dL_dx
 ) {
 	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (encoded_index >= num_elements) return;
@@ -110,15 +110,15 @@ __global__ void frequency_encoding_backward(
 
 	const uint32_t outputs_per_input = n_frequencies * 2;
 
-	float result = 0;
+	INPUT_T result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(j * outputs_per_input + k, i) * dy_dx[i * n_dims_to_encode * outputs_per_input + j * outputs_per_input + k];
+		result += (INPUT_T)dL_dy(j * outputs_per_input + k, i) * dy_dx[i * n_dims_to_encode * outputs_per_input + j * outputs_per_input + k];
 	}
 	dL_dx(j, i) = result;
 }
 
-template <typename T>
-class FrequencyEncoding : public Encoding<T> {
+template <typename T, typename INPUT_T = float>
+class FrequencyEncoding : public Encoding<T, INPUT_T> {
 public:
 	FrequencyEncoding(uint32_t n_frequencies, uint32_t n_dims_to_encode)
 	: m_n_frequencies{n_frequencies}, m_n_dims_to_encode{n_dims_to_encode} {
@@ -127,7 +127,7 @@ public:
 
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
@@ -139,10 +139,10 @@ public:
 		}
 
 		if (prepare_input_gradients) {
-			forward->dy_dx = GPUMatrix<float>{m_n_dims_to_encode * m_n_frequencies * 2, input.n(), stream};
+			forward->dy_dx = GPUMatrix<INPUT_T>{m_n_dims_to_encode * m_n_frequencies * 2, input.n(), stream};
 		}
 
-		linear_kernel(frequency_encoding<T>, 0, stream,
+		linear_kernel(frequency_encoding<T, INPUT_T>, 0, stream,
 			input.n() * padded_output_width(),
 			m_n_frequencies,
 			m_n_dims_to_encode,
@@ -158,10 +158,10 @@ public:
 	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		GPUMatrixDynamic<INPUT_T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
@@ -171,7 +171,7 @@ public:
 
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-		linear_kernel(frequency_encoding_backward<T>, 0, stream,
+		linear_kernel(frequency_encoding_backward<T, INPUT_T>, 0, stream,
 			input.n() * m_n_dims_to_encode,
 			m_n_dims_to_encode,
 			m_n_frequencies,
@@ -219,7 +219,7 @@ public:
 
 private:
 	struct ForwardContext : public Context {
-		GPUMatrix<float> dy_dx;
+		GPUMatrix<INPUT_T> dy_dx;
 	};
 
 	uint32_t m_n_frequencies;

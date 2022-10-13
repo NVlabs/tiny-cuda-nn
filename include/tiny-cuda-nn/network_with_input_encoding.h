@@ -39,10 +39,10 @@
 
 TCNN_NAMESPACE_BEGIN
 
-template <typename T>
-class NetworkWithInputEncoding : public Network<float, T> {
+template <typename T, typename INPUT_T = float>
+class NetworkWithInputEncoding : public Network<INPUT_T, T> {
 public:
-	NetworkWithInputEncoding(std::shared_ptr<Encoding<T>> encoding, uint32_t n_output_dims, const json& network) : m_encoding{encoding} {
+	NetworkWithInputEncoding(std::shared_ptr<Encoding<T, INPUT_T>> encoding, uint32_t n_output_dims, const json& network) : m_encoding{encoding} {
 		encoding->set_alignment(minimum_alignment(network));
 
 		json local_network_config = network;
@@ -52,11 +52,11 @@ public:
 	}
 
 	NetworkWithInputEncoding(uint32_t n_dims_to_encode, uint32_t n_output_dims, const json& encoding, const json& network)
-	: NetworkWithInputEncoding{std::shared_ptr<Encoding<T>>{create_encoding<T>(n_dims_to_encode, encoding)}, n_output_dims, network} { }
+	: NetworkWithInputEncoding{std::shared_ptr<Encoding<T, INPUT_T>>{create_encoding<T, INPUT_T>(n_dims_to_encode, encoding)}, n_output_dims, network} { }
 
 	virtual ~NetworkWithInputEncoding() { }
 
-	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override {
+	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<INPUT_T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override {
 		GPUMatrixDynamic<T> network_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		m_encoding->inference_mixed_precision(stream, input, network_input, use_inference_params);
 		m_network->inference_mixed_precision(stream, network_input, output, use_inference_params);
@@ -66,7 +66,7 @@ public:
 		return m_encoding->padded_output_width();
 	}
 
-	std::unique_ptr<Context> forward_impl(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override {
+	std::unique_ptr<Context> forward_impl(cudaStream_t stream, const GPUMatrixDynamic<INPUT_T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 
@@ -82,10 +82,10 @@ public:
 	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		GPUMatrixDynamic<INPUT_T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
@@ -206,7 +206,7 @@ public:
 
 private:
 	std::unique_ptr<Network<T>> m_network;
-	std::shared_ptr<Encoding<T>> m_encoding;
+	std::shared_ptr<Encoding<T, INPUT_T>> m_encoding;
 
 	struct ForwardContext : public Context {
 		GPUMatrixDynamic<T> network_input;

@@ -57,14 +57,14 @@ ReductionType string_to_reduction_type(const std::string& reduction_type);
 
 std::string to_string(ReductionType reduction_type);
 
-template <typename T>
-class Encoding : public DifferentiableObject<float, T, T> {
+template <typename T, typename INPUT_T = float>
+class Encoding : public DifferentiableObject<INPUT_T, T, T> {
 public:
 	virtual ~Encoding() { }
 
 	void inference_mixed_precision_impl(
 		cudaStream_t stream,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		GPUMatrixDynamic<T>& output,
 		bool use_inference_params = true
 	) override {
@@ -88,7 +88,7 @@ public:
 	}
 };
 
-template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& params, uint32_t alignment = 8);
+template <typename T, typename INPUT_T = float>
+Encoding<T, INPUT_T>* create_encoding(uint32_t n_dims_to_encode, const json& params, uint32_t alignment = 8);
 
 TCNN_NAMESPACE_END

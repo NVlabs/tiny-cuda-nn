@@ -133,8 +133,8 @@ __global__ void reduce_product_backward(
 	}
 }
 
-template <typename T>
-class CompositeEncoding : public Encoding<T> {
+template <typename T, typename INPUT_T = float>
+class CompositeEncoding : public Encoding<T, INPUT_T> {
 public:
 	CompositeEncoding(const json& params, uint32_t n_dims_to_encode)
 	: m_n_dims_to_encode{n_dims_to_encode} {
@@ -179,7 +179,7 @@ public:
 			}
 
 			if (nested_dims_to_encode > 0) {
-				m_nested.emplace_back(create_encoding<T>(nested_dims_to_encode, nested[i], 1));
+				m_nested.emplace_back(create_encoding<T, INPUT_T>(nested_dims_to_encode, nested[i], 1));
 				m_dims_to_encode_begin.emplace_back(offset);
 			}
 
@@ -214,7 +214,7 @@ public:
 
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		GPUMatrixDynamic<T>* output = nullptr,
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
@@ -283,10 +283,10 @@ public:
 	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
-		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<INPUT_T>& input,
 		const GPUMatrixDynamic<T>& output,
 		const GPUMatrixDynamic<T>& dL_doutput,
-		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		GPUMatrixDynamic<INPUT_T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
@@ -334,7 +334,7 @@ public:
 			uint32_t input_width = nested->input_width();
 			uint32_t output_width = nested->output_width();
 
-			GPUMatrixDynamic<float> sliced_dL_dinput;
+			GPUMatrixDynamic<INPUT_T> sliced_dL_dinput;
 			if (dL_dinput) {
 				sliced_dL_dinput = dL_dinput->slice_rows(input_offset, input_width);
 			}
@@ -458,7 +458,7 @@ private:
 		GPUMatrixDynamic<T> to_reduce;
 	};
 
-	std::vector<std::unique_ptr<Encoding<T>>> m_nested;
+	std::vector<std::unique_ptr<Encoding<T, INPUT_T>>> m_nested;
 	std::vector<uint32_t> m_dims_to_encode_begin;
 	uint32_t m_n_dims_to_encode;
 	ReductionType m_reduction_type = ReductionType::Concatenation;
