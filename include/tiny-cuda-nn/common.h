@@ -61,7 +61,7 @@ static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 //
 //  GPU Arch | FullyFusedMLP supported | CUTLASS SmArch supported |                 Precision
 // ----------|-------------------------|--------------------------|--------------------------
-//    80, 86 |                     yes |                       80 |                    __half
+//     80-90 |                     yes |                       80 |                    __half
 //        75 |                     yes |                       75 |                    __half
 //        70 |                      no |                       70 |                    __half
 // 53-60, 62 |                      no |                       70 |  __half (no tensor cores)

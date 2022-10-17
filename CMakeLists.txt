@@ -97,13 +97,31 @@ endif()
 list(FILTER CMAKE_CUDA_ARCHITECTURES EXCLUDE REGEX "PTX")
 list(REMOVE_DUPLICATES CMAKE_CUDA_ARCHITECTURES)
 
-# If the CUDA version does not permit targeting Ampere, don't do so.
-if ((80 IN_LIST CMAKE_CUDA_ARCHITECTURES OR 86 IN_LIST CMAKE_CUDA_ARCHITECTURES) AND CUDA_VERSION VERSION_LESS 11.0)
-	message(WARNING "CUDA version ${CUDA_VERSION} is too low for targeting Ampere GPUs. Reverting to compute capability 75.")
-	list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES 80 86)
-	if (NOT CMAKE_CUDA_ARCHITECTURES)
-		list(APPEND CMAKE_CUDA_ARCHITECTURES 75)
+# If the CUDA version does not support the chosen architecture, target
+# the latest supported one instead.
+set(LATEST_SUPPORTED_CUDA_ARCHITECTURE 90)
+
+if (CUDA_VERSION VERSION_LESS 11.8)
+	set(LATEST_SUPPORTED_CUDA_ARCHITECTURE 86)
+endif()
+
+if (CUDA_VERSION VERSION_LESS 11.1)
+	set(LATEST_SUPPORTED_CUDA_ARCHITECTURE 80)
+endif()
+
+if (CUDA_VERSION VERSION_LESS 11.0)
+	set(LATEST_SUPPORTED_CUDA_ARCHITECTURE 75)
+endif()
+
+foreach (CUDA_CC IN LISTS CMAKE_CUDA_ARCHITECTURES)
+	if (CUDA_CC GREATER ${LATEST_SUPPORTED_CUDA_ARCHITECTURE})
+		message(WARNING "CUDA version ${CUDA_VERSION} is too low for architecture ${CUDA_CC}. Targeting architecture ${LATEST_SUPPORTED_CUDA_ARCHITECTURE} instead.")
+		list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES ${CUDA_CC})
 	endif()
+endforeach(CUDA_CC)
+
+if (NOT CMAKE_CUDA_ARCHITECTURES)
+	list(APPEND CMAKE_CUDA_ARCHITECTURES ${LATEST_SUPPORTED_CUDA_ARCHITECTURE})
 endif()
 
 # Sort the list to obtain lowest architecture that must be compiled for.

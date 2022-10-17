@@ -10,7 +10,7 @@ import gc
 import importlib
 import torch
 
-ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86]
+ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86, 89, 90]
 
 if not torch.cuda.is_available():
 	raise EnvironmentError("Unknown compute capability. Ensure PyTorch with CUDA support is installed.")
