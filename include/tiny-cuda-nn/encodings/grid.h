@@ -77,14 +77,45 @@ inline std::string to_string(GridType grid_type) {
 	}
 }
 
-template <uint32_t N_DIMS>
-__device__ uint32_t fast_hash(const uint32_t pos_grid[N_DIMS]) {
-	static_assert(N_DIMS <= 7, "fast_hash can only hash up to 7 dimensions.");
+enum class HashType {
+	Prime,
+	CoherentPrime,
+	ReversedPrime,
+	Rng,
+};
+
+inline HashType string_to_hash_type(const std::string& hash_type) {
+	if (equals_case_insensitive(hash_type, "Prime")) {
+		return HashType::Prime;
+	} else if (equals_case_insensitive(hash_type, "CoherentPrime")) {
+		return HashType::CoherentPrime;
+	} else if (equals_case_insensitive(hash_type, "ReversedPrime")) {
+		return HashType::ReversedPrime;
+	} else if (equals_case_insensitive(hash_type, "Rng")) {
+		return HashType::Rng;
+	}
+
+	throw std::runtime_error{fmt::format("Invalid hash type: {}", hash_type)};
+}
+
+inline std::string to_string(HashType hash_type) {
+	switch (hash_type) {
+		case HashType::Prime: return "Prime";
+		case HashType::CoherentPrime: return "CoherentPrime";
+		case HashType::ReversedPrime: return "ReversedPrime";
+		case HashType::Rng: return "Rng";
+		default: throw std::runtime_error{"Invalid hash type."};
+	}
+}
+
+template <uint32_t N_DIMS, bool COHERENT>
+__device__ uint32_t prime_hash(const uint32_t pos_grid[N_DIMS]) {
+	static_assert(N_DIMS <= 7, "prime_hash can only hash up to 7 dimensions.");
 
 	// While 1 is technically not a good prime for hashing (or a prime at all), it helps memory coherence
 	// and is sufficient for our use case of obtaining a uniformly colliding index from high-dimensional
 	// coordinates.
-	constexpr uint32_t primes[7] = { 1u, 2654435761u, 805459861u, 3674653429u, 2097192037u, 1434869437u, 2165219737u };
+	constexpr uint32_t primes[7] = { COHERENT ? 1u : 1958374283u, 2654435761u, 805459861u, 3674653429u, 2097192037u, 1434869437u, 2165219737u };
 
 	uint32_t result = 0;
 
@@ -96,8 +127,42 @@ __device__ uint32_t fast_hash(const uint32_t pos_grid[N_DIMS]) {
 	return result;
 }
 
+template <uint32_t N_DIMS>
+__device__ uint32_t reversed_prime_hash(const uint32_t pos_grid[N_DIMS]) {
+	static_assert(N_DIMS <= 7, "reversed_prime_hash can only hash up to 7 dimensions.");
+
+	// While 1 is technically not a good prime for hashing (or a prime at all), it helps memory coherence
+	// and is sufficient for our use case of obtaining a uniformly colliding index from high-dimensional
+	// coordinates.
+	constexpr uint32_t reversed_primes[7] = { 2165219737u, 1434869437u, 2097192037u, 3674653429u, 805459861u, 2654435761u, 1958374283u };
+
+	uint32_t result = 0;
+
+	TCNN_PRAGMA_UNROLL
+	for (uint32_t i = 0; i < N_DIMS; ++i) {
+		result ^= pos_grid[i] * reversed_primes[i];
+	}
+
+	return result;
+}
+
+template <uint32_t N_DIMS>
+__device__ uint32_t rng_hash(const uint32_t seed, const uint32_t pos_grid[N_DIMS]) {
+	constexpr uint32_t N_BITS_PER_DIM = 64 / N_DIMS;
+	uint64_t step = 0;
+
+	TCNN_PRAGMA_UNROLL
+	for (uint32_t i = 0; i < N_DIMS; ++i) {
+		step ^= (uint64_t)pos_grid[i] << (i * N_BITS_PER_DIM);
+	}
+
+	pcg32 rng{seed};
+	rng.advance((int64_t)step);
+	return rng.next_uint();
+}
+
 template <uint32_t N_DIMS, uint32_t N_FEATURES_PER_LEVEL>
-__device__ uint32_t grid_index(const GridType grid_type, const uint32_t feature, const uint32_t hashmap_size, const uint32_t grid_resolution, const uint32_t pos_grid[N_DIMS]) {
+__device__ uint32_t grid_index(const GridType grid_type, const HashType hash_type, const uint32_t feature, const uint32_t hashmap_size, const uint32_t grid_resolution, const uint32_t pos_grid[N_DIMS]) {
 	uint32_t stride = 1;
 	uint32_t index = 0;
 
@@ -109,7 +174,12 @@ __device__ uint32_t grid_index(const GridType grid_type, const uint32_t feature,
 	}
 
 	if (grid_type == GridType::Hash && hashmap_size < stride) {
-		index = fast_hash<N_DIMS>(pos_grid);
+		switch (hash_type) {
+			case HashType::Prime: index = prime_hash<N_DIMS, false>(pos_grid); break;
+			case HashType::CoherentPrime: index = prime_hash<N_DIMS, true>(pos_grid); break;
+			case HashType::ReversedPrime: index = reversed_prime_hash<N_DIMS>(pos_grid); break;
+			case HashType::Rng: index = rng_hash<N_DIMS>(1337u, pos_grid); break;
+		}
 	}
 
 	return (index % hashmap_size) * N_FEATURES_PER_LEVEL + feature;
@@ -147,6 +217,7 @@ __global__ void kernel_grid(
 	const float* __restrict__ max_level_gpu,
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const HashType hash_type,
 	const T* __restrict__ grid,
 	MatrixView<const float> positions_in,
 	T* __restrict__ encoded_positions,
@@ -205,7 +276,7 @@ __global__ void kernel_grid(
 	}
 
 	auto grid_val = [&](const uint32_t local_pos[N_POS_DIMS]) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, 0, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, 0, hashmap_size, grid_resolution, local_pos);
 		return *(vector_t<T, N_FEATURES_PER_LEVEL>*)&grid[index];
 	};
 
@@ -321,6 +392,7 @@ __global__ void kernel_grid_backward(
 	const bool stochastic_interpolation,
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const HashType hash_type,
 	GRAD_T* __restrict__ grid_gradient,
 	MatrixView<const float> positions_in,
 	const T* __restrict__ dL_dy
@@ -348,7 +420,7 @@ __global__ void kernel_grid_backward(
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, grid_resolution, local_pos);
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
@@ -505,6 +577,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	// const bool stochastic_interpolation, // TODO: is this needed?
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const HashType hash_type,
 	// inputs
 	MatrixView<const float> dL_ddLdx,
 	MatrixView<const float> positions_in,
@@ -535,7 +608,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, grid_resolution, local_pos);
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
@@ -628,6 +701,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 	const float* __restrict__ max_level_gpu,
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const HashType hash_type,
 	// inputs
 	MatrixView<const float> dL_ddLdx,
 	MatrixView<const float> positions_in,
@@ -690,7 +764,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 	// for N-linear interpolation
 
 	auto calc_dLdx = [&](const uint32_t local_pos[N_POS_DIMS], const float weight) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, grid_resolution, local_pos);
 		float dL_dx_dim = 0;
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t f=0; f < N_FEATURES_PER_THREAD; ++f) {
@@ -878,7 +952,8 @@ public:
 		float per_level_scale,
 		bool stochastic_interpolation,
 		InterpolationType interpolation_type,
-		GridType grid_type
+		GridType grid_type,
+		HashType hash_type
 	) :
 	m_n_features{n_features},
 	m_log2_hashmap_size{log2_hashmap_size},
@@ -886,7 +961,8 @@ public:
 	m_per_level_scale{per_level_scale},
 	m_stochastic_interpolation{stochastic_interpolation},
 	m_interpolation_type{interpolation_type},
-	m_grid_type{grid_type}
+	m_grid_type{grid_type},
+	m_hash_type{hash_type}
 	{
 		m_n_levels = div_round_up(m_n_features, N_FEATURES_PER_LEVEL);
 		uint32_t offset = 0;
@@ -996,6 +1072,7 @@ public:
 			this->m_max_level_gpu,
 			m_interpolation_type,
 			m_grid_type,
+			m_hash_type,
 			use_inference_params ? m_grid_inference : m_grid,
 			forward->positions.data() ? forward->positions.view() : input.view(),
 			encoded_positions_soa,
@@ -1084,6 +1161,7 @@ public:
 				m_stochastic_interpolation,
 				m_interpolation_type,
 				m_grid_type,
+				m_hash_type,
 				grid_gradient,
 				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
 				dL_dy_rm // gradients SoA
@@ -1178,6 +1256,7 @@ public:
 				this->m_max_level_gpu,
 				m_interpolation_type,
 				m_grid_type,
+				m_hash_type,
 				// inputs
 				dL_ddLdinput.view(),
 				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
@@ -1225,6 +1304,7 @@ public:
 				this->m_max_level_gpu,
 				m_interpolation_type,
 				m_grid_type,
+				m_hash_type,
 				// inputs
 				dL_ddLdinput.view(),
 				forward.positions.data() ? forward.positions.view() : input.view(),
@@ -1317,6 +1397,7 @@ public:
 			{"base_resolution", m_base_resolution},
 			{"per_level_scale", m_per_level_scale},
 			{"interpolation", to_string(m_interpolation_type)},
+			{"hash", to_string(m_hash_type)},
 		};
 
 		if (m_grid_type == GridType::Hash) {
@@ -1350,6 +1431,7 @@ private:
 	bool m_stochastic_interpolation;
 	InterpolationType m_interpolation_type;
 	GridType m_grid_type;
+	HashType m_hash_type;
 
 	// Storage of params
 	T* m_grid;
@@ -1381,6 +1463,7 @@ GridEncoding<T>* create_grid_encoding_templated(uint32_t n_dims_to_encode, const
 	encoding.value("stochastic_interpolation", false), \
 	string_to_interpolation_type(encoding.value("interpolation", "Linear")), \
 	string_to_grid_type(encoding.value("type", default_type)), \
+	string_to_hash_type(encoding.value("hash", "CoherentPrime")), \
 
 	// If higher-dimensional hash encodings are desired, corresponding switch cases can be added
 	switch (n_dims_to_encode) {
