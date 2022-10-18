@@ -34,6 +34,7 @@
 #include <tiny-cuda-nn/optimizers/average.h>
 #include <tiny-cuda-nn/optimizers/batched.h>
 #include <tiny-cuda-nn/optimizers/ema.h>
+#include <tiny-cuda-nn/optimizers/composite.h>
 #include <tiny-cuda-nn/optimizers/exponential_decay.h>
 #include <tiny-cuda-nn/optimizers/lookahead.h>
 #include <tiny-cuda-nn/optimizers/novograd.h>
@@ -56,6 +57,8 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 		return new AverageOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Batched")) {
 		return new BatchedOptimizer<T>{optimizer};
+	} else if (equals_case_insensitive(optimizer_type, "Composite")) {
+		return new CompositeOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Ema")) {
 		return new EmaOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "ExponentialDecay")) {

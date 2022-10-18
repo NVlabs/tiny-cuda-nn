@@ -145,7 +145,6 @@ public:
 		m_reduction_type = string_to_reduction_type(params.value("reduction", "Concatenation"));
 
 		const json::array_t& nested = params["nested"];
-
 		uint32_t total_nested_dims_to_encode = 0;
 		for (size_t i = 0; i < nested.size(); ++i) {
 			total_nested_dims_to_encode += nested[i].value("n_dims_to_encode", 0);
