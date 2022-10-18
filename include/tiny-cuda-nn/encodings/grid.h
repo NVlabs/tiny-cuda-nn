@@ -191,6 +191,17 @@ __device__ inline float random_val(uint32_t seed, uint32_t idx) {
 	return rng.next_float();
 }
 
+__host__ __device__ inline float grid_scale(uint32_t level, float log2_per_level_scale, uint32_t base_resolution) {
+	// The -1 means that `base_resolution` refers to the number of grid _vertices_ rather
+	// than the number of cells. This is slightly different from the notation in the paper,
+	// but results in nice, power-of-2-scaled parameter grids that fit better into cache lines.
+	return exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
+}
+
+__host__ __device__ inline uint32_t grid_resolution(float scale) {
+	return (uint32_t)ceilf(scale) + 1;
+}
+
 template <typename T>
 __global__ void extract_position(
 	const uint32_t num_elements,
@@ -256,8 +267,8 @@ __global__ void kernel_grid(
 	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
 	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
-	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
+	const float scale = grid_scale(level, log2_per_level_scale, base_resolution);
+	const uint32_t resolution = grid_resolution(scale);
 
 	float pos[N_POS_DIMS];
 	float pos_derivative[N_POS_DIMS];
@@ -276,7 +287,7 @@ __global__ void kernel_grid(
 	}
 
 	auto grid_val = [&](const uint32_t local_pos[N_POS_DIMS]) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, 0, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, 0, hashmap_size, resolution, local_pos);
 		return *(vector_t<T, N_FEATURES_PER_LEVEL>*)&grid[index];
 	};
 
@@ -416,11 +427,11 @@ __global__ void kernel_grid_backward(
 	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
 	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
-	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
+	const float scale = grid_scale(level, log2_per_level_scale, base_resolution);
+	const uint32_t resolution = grid_resolution(scale);
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, resolution, local_pos);
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
@@ -604,11 +615,11 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
 	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
-	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
+	const float scale = grid_scale(level, log2_per_level_scale, base_resolution);
+	const uint32_t resolution = grid_resolution(scale);
 
 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, resolution, local_pos);
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
@@ -729,8 +740,8 @@ __global__ void kernel_grid_backward_input_backward_input(
 	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
 	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
-	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
+	const float scale = grid_scale(level, log2_per_level_scale, base_resolution);
+	const uint32_t resolution = grid_resolution(scale);
 
 	float pos[N_POS_DIMS];
 	float pos_derivative[N_POS_DIMS];
@@ -764,7 +775,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 	// for N-linear interpolation
 
 	auto calc_dLdx = [&](const uint32_t local_pos[N_POS_DIMS], const float weight) {
-		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, grid_resolution, local_pos);
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, hash_type, feature, hashmap_size, resolution, local_pos);
 		float dL_dx_dim = 0;
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t f=0; f < N_FEATURES_PER_THREAD; ++f) {
@@ -972,9 +983,8 @@ public:
 		}
 
 		for (uint32_t i = 0; i < m_n_levels; ++i) {
-			// Compute dense params required for the given level
-			const float scale = exp2f(i * std::log2(per_level_scale)) * base_resolution - 1.0f;
-			const uint32_t resolution = (uint32_t)(ceilf(scale)) + 1;
+			// Compute number of dense params required for the given level
+			const uint32_t resolution = grid_resolution(grid_scale(i, std::log2(per_level_scale), base_resolution));
 
 			uint32_t max_params = std::numeric_limits<uint32_t>::max()/2;
 			uint32_t params_in_level = std::pow((float)resolution, N_POS_DIMS) > (float)max_params ? max_params : powi(resolution, N_POS_DIMS);
