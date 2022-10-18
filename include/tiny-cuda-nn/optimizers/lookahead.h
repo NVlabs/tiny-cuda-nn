@@ -116,7 +116,7 @@ public:
 		return m_weights_lookahead.data();
 	}
 
-	uint32_t n_nesting() const override {
+	uint32_t n_nested() const override {
 		return 1;
 	}
 

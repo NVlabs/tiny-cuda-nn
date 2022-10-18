@@ -92,7 +92,7 @@ public:
 		return m_nested->custom_weights();
 	}
 
-	uint32_t n_nesting() const override {
+	uint32_t n_nested() const override {
 		return 1;
 	}
 

@@ -186,7 +186,7 @@ public:
 		return nullptr;
 	}
 
-	uint32_t n_nesting() const override {
+	uint32_t n_nested() const override {
 		return 0;
 	}
 

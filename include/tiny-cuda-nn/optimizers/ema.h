@@ -156,9 +156,9 @@ public:
 		return m_weights_ema.data();
 	}
 
-	uint32_t n_nesting() const override {
-    return 1;
-  }
+	uint32_t n_nested() const override {
+		return 1;
+	}
 
 	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {
 		CHECK_THROW(idx == 0);
