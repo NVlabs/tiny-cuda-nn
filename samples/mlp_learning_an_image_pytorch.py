@@ -98,7 +98,7 @@ if __name__ == "__main__":
 	print("================================================================")
 	print("This script replicates the behavior of the native CUDA example  ")
 	print("mlp_learning_an_image.cu using tiny-cuda-nn's PyTorch extension.")
-	print("This extension >> runs ~2x slower than native << as of now.     ")
+	print("This extension >> runs ~3x slower than native << as of now.     ")
 	print("================================================================")
 
 	device = torch.device("cuda")
