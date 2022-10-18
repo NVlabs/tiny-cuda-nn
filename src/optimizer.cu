@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   optimizer.cu
@@ -33,8 +32,8 @@
 #include <tiny-cuda-nn/optimizers/adam.h>
 #include <tiny-cuda-nn/optimizers/average.h>
 #include <tiny-cuda-nn/optimizers/batched.h>
-#include <tiny-cuda-nn/optimizers/ema.h>
 #include <tiny-cuda-nn/optimizers/composite.h>
+#include <tiny-cuda-nn/optimizers/ema.h>
 #include <tiny-cuda-nn/optimizers/exponential_decay.h>
 #include <tiny-cuda-nn/optimizers/lookahead.h>
 #include <tiny-cuda-nn/optimizers/novograd.h>

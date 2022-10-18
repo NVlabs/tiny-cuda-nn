@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   batched.h
@@ -117,7 +116,6 @@ public:
 		CHECK_THROW(idx == 0);
 		return m_nested;
 	}
-
 
 	void update_hyperparams(const json& params) override {
 		if (params.contains("batch_size_multiplier")) {
