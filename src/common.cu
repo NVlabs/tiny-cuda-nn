@@ -113,44 +113,4 @@ std::string type_to_string<__half>() {
 	return "__half";
 }
 
-struct StreamOwnedObjects {
-	std::unordered_map<cudaStream_t, std::shared_ptr<GPUMemoryArena>> stream_gpu_memory_arenas;
-	std::unordered_map<int, std::shared_ptr<GPUMemoryArena>> global_gpu_memory_arenas;
-
-	struct MultiStreamWrapper {
-		~MultiStreamWrapper() {
-			// Avoids free_multi_stream being called in the middle of multi_streams's destruction.
-			// Note, that we don't use `.clear()` intentionally, because it would also have issues
-			// with recursive calling of free_multi_stream by ~StreamAndEvent.
-			while (!multi_streams.empty()) {
-				free_multi_streams(multi_streams.begin()->first);
-			}
-		}
-
-		std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>> multi_streams;
-	} stream_multi_streams;
-	std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>> global_multi_streams;
-};
-
-StreamOwnedObjects& stream_owned_objects() {
-	static StreamOwnedObjects s_stream_owned_objects;
-	return s_stream_owned_objects;
-}
-
-std::unordered_map<cudaStream_t, std::shared_ptr<GPUMemoryArena>>& stream_gpu_memory_arenas() {
-	return stream_owned_objects().stream_gpu_memory_arenas;
-}
-
-std::unordered_map<int, std::shared_ptr<GPUMemoryArena>>& global_gpu_memory_arenas() {
-	return stream_owned_objects().global_gpu_memory_arenas;
-}
-
-std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& stream_multi_streams() {
-	return stream_owned_objects().stream_multi_streams.multi_streams;
-}
-
-std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>>& global_multi_streams() {
-	return stream_owned_objects().global_multi_streams;
-}
-
 TCNN_NAMESPACE_END
