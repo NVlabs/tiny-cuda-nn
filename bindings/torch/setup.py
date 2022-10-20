@@ -53,7 +53,7 @@ if os.name == "nt":
 		os.environ["PATH"] += ";" + cl_path
 
 nvcc_flags = [
-	"-std=c++14",
+	#"-std=c++14",
 	"--extended-lambda",
 	"--expt-relaxed-constexpr",
 	# The following definitions must be undefined
