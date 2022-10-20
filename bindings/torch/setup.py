@@ -72,7 +72,7 @@ if os.name == "posix":
 		"-Xcompiler=-fno-strict-aliasing",
 	]
 elif os.name == "nt":
-	cflags = ["/std:c++14"]
+	cflags = []# ["/std:c++14"]
 
 definitions = [
 	f"-DTCNN_MIN_GPU_ARCH={min_compute_capability}"
