@@ -40,10 +40,11 @@ if "--no-networks" in sys.argv:
 if os.name == "nt":
 	def find_cl_path():
 		import glob
-		for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
-			paths = sorted(glob.glob(r"C:\\Program Files (x86)\\Microsoft Visual Studio\\*\\%s\\VC\\Tools\\MSVC\\*\\bin\\Hostx64\\x64" % edition), reverse=True)
-			if paths:
-				return paths[0]
+		for executable in ["Program Files (x86)", "Program Files"]:
+			for edition in ["Enterprise", "Professional", "BuildTools", "Community"]:
+				paths = sorted(glob.glob(f"C:\\{executable}\\Microsoft Visual Studio\\*\\{edition}\\VC\\Tools\\MSVC\\*\\bin\\Hostx64\\x64"), reverse=True)
+				if paths:
+					return paths[0]
 
 	# If cl.exe is not on path, try to find it.
 	if os.system("where cl.exe >nul 2>nul") != 0:
