@@ -15,24 +15,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-22.04
-            cuda: "11.7"
+          - os: ubuntu-20.04
+            cuda: "11.3"
             arch: 86
-          - os: ubuntu-18.04
-            cuda: "10.2"
-            arch: 75
-          - os: ubuntu-18.04
-            cuda: "10.2"
-            arch: 70
-          - os: ubuntu-18.04
-            cuda: "10.2"
-            arch: 61
-          - os: ubuntu-18.04
-            cuda: "10.2"
-            arch: 53
-          - os: ubuntu-18.04
-            cuda: "10.2"
-            arch: 37
     env:
       build_dir: "build"
       config: "Release"
@@ -53,53 +38,3 @@ jobs:
       - name: Build
         working-directory: ${{ env.build_dir }}
         run: cmake --build . --target all --verbose -j `nproc`
-
-  build_windows:
-    name: Build on Windows
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 86
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 75
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 70
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 61
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 53
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 37
-    env:
-      build_dir: "build"
-      config: "Release"
-      TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: recursive
-      - name: Install CUDA
-        env:
-          cuda: ${{ matrix.cuda }}
-          visual_studio: ${{ matrix.visual_studio }}
-        shell: powershell
-        run: .\dependencies\cuda-cmake-github-actions\scripts\actions\install_cuda_windows.ps1
-      - name: CMake
-        run: cmake . -B ${{ env.build_dir }} -G "${{ matrix.visual_studio }}" -A x64
-      - name: Build
-        working-directory: ${{ env.build_dir }}
-        run: cmake --build . --config ${{ env.config }} --target ALL_BUILD --verbose
