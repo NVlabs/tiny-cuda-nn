@@ -228,7 +228,7 @@ private:
 // Kernel helpers //
 ////////////////////
 
-#ifdef __NVCC__
+#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
 #define TCNN_HOST_DEVICE __host__ __device__
 #define TCNN_DEVICE __device__
 #define TCNN_HOST __host__
@@ -286,7 +286,7 @@ constexpr uint32_t n_blocks_linear(T n_elements) {
 	return (uint32_t)div_round_up(n_elements, (T)n_threads_linear);
 }
 
-#ifdef __NVCC__
+#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
 template <typename K, typename T, typename ... Types>
 inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T n_elements, Types ... args) {
 	if (n_elements <= 0) {
