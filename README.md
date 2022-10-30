@@ -227,9 +227,9 @@ If you use it in your research, we would appreciate a citation via
 For business inquiries, please visit our website and submit the form: [NVIDIA Research Licensing](https://www.nvidia.com/en-us/research/inquiries/)
 
 
-## Publications
+## Publications & Software
 
-This framework powers the following publications:
+Among others, this framework powers the following publications:
 
 > __Instant Neural Graphics Primitives with a Multiresolution Hash Encoding__  
 > [Thomas Müller](https://tom94.net), [Alex Evans](https://research.nvidia.com/person/alex-evans), [Christoph Schied](https://research.nvidia.com/person/christoph-schied), [Alexander Keller](https://research.nvidia.com/person/alex-keller)  
@@ -246,6 +246,18 @@ This framework powers the following publications:
 > _ACM Transactions on Graphics (__SIGGRAPH__), August 2021_  
 > __[Paper](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf)&nbsp;/ [GTC talk](https://gtc21.event.nvidia.com/media/Fully%20Fused%20Neural%20Network%20for%20Radiance%20Caching%20in%20Real%20Time%20Rendering%20%5BE31307%5D/1_liqy6k1c)&nbsp;/ [Video](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.mp4)&nbsp;/ [Interactive results viewer](https://tom94.net/data/publications/mueller21realtime/interactive-viewer/)&nbsp;/ [BibTeX](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.bib)__
 
+
+As well as the following software:
+
+> __NerfAcc: A General NeRF Accleration Toolbox__  
+> [Ruilong Li](https://www.liruilong.cn/), [Matthew Tancik](https://www.matthewtancik.com/about-me), [Angjoo Kanazawa](https://people.eecs.berkeley.edu/~kanazawa/)  
+> __https://github.com/KAIR-BAIR/nerfacc__
+
+> __Nerfstudio: A Framework for Neural Radiance Field Development__  
+> [Matthew Tancik*](https://www.matthewtancik.com/about-me), [Ethan Weber*](https://ethanweber.me/), [Evonne Ng*](http://people.eecs.berkeley.edu/~evonne_ng/), [Ruilong Li](https://www.liruilong.cn/), Brent Yi, Terrance Wang, Alexander Kristoffersen, Jake Austin, Kamyar Salahi, Abhik Ahuja, David McAllister, [Angjoo Kanazawa](https://people.eecs.berkeley.edu/~kanazawa/)  
+> __https://github.com/nerfstudio-project/nerfstudio__
+
+Please feel free to make a pull request if your publication or software is not listed.
 
 ## Acknowledgments
 
