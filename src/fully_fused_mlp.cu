@@ -685,17 +685,6 @@ m_output_activation{output_activation}
 	}
 }
 
-template <typename CutlassLayer, MatrixLayout input_layout, typename T>
-void compute_inference_layer(
-	cudaStream_t stream,
-	Activation activation,
-	const GPUMatrix<T, RM>& weights,
-	const GPUMatrix<T, input_layout>& input,
-	GPUMatrixDynamic<T>& output
-) {
-	fc_multiply<CutlassLayer>(stream, weights, input, output, activation);
-}
-
 template <typename T, int WIDTH>
 void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
 	// Make sure our temporary buffers have the correct size for the given batch size
@@ -719,7 +708,7 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
 	if (m_output_width > 16) {
-		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), inference_tmp, output);
+		fc_multiply<LastLayer>(stream, output_weight_matrix(weight_usage), inference_tmp, output, m_output_activation);
 	}
 }
 
@@ -745,7 +734,7 @@ std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward_impl(cudaStream_t stre
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
 	if (output && m_output_width > 16) {
-		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(weight_usage), forward->hidden.back(), *output);
+		fc_multiply<LastLayer>(stream, output_weight_matrix(weight_usage), forward->hidden.back(), *output, m_output_activation);
 	}
 
 	return forward;

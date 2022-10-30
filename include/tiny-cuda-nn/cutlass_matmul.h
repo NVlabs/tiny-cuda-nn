@@ -51,25 +51,12 @@
 
 TCNN_NAMESPACE_BEGIN
 
-#define CUTLASS_CHECK(status)                                                                      \
-{                                                                                                  \
-	cutlass::Status error = status;                                                                \
-	if (error != cutlass::Status::kSuccess) {                                                      \
-		std::cerr << "Got cutlass error: " << cutlassGetStatusString(error) << " at: " << __LINE__ \
-		          << std::endl;                                                                    \
-		exit(EXIT_FAILURE);                                                                        \
-	}                                                                                              \
-}
-
-#define CUDA_CHECK(status)                                                \
-{                                                                         \
-	cudaError_t error = status;                                           \
-	if (error != cudaSuccess) {                                           \
-		std::cerr << "Got bad cuda status: " << cudaGetErrorString(error) \
-		          << " at line: " << __LINE__ << std::endl;               \
-		exit(EXIT_FAILURE);                                               \
-	}                                                                     \
-}
+#define CUTLASS_CHECK_THROW(x)                                                                                        \
+	do {                                                                                                                   \
+		cutlass::Status error = x;                                                                                    \
+		if (error != cutlass::Status::kSuccess)                                                                            \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cutlassGetStatusString(error)); \
+	} while(0)
 
 using SmArch = std::conditional_t<MIN_GPU_ARCH >= 80,
 	std::conditional_t<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>,
@@ -338,11 +325,11 @@ void fc_multiply_impl(cudaStream_t stream, const typename Gemm::Arguments& args)
 	// Initialize CUTLASS kernel with arguments and workspace pointer
 	auto workspace = allocate_workspace(stream, workspace_size);
 	cutlass::Status status = gemm_op.initialize(args, workspace.data(), stream);
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 
 	// Launch initialized CUTLASS kernel
 	status = gemm_op(stream);
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 }
 
 template <class Gemm>
@@ -356,11 +343,11 @@ void fc_multiply_split_k_impl(cudaStream_t stream, const typename Gemm::Argument
 	// Initialize CUTLASS kernel with arguments and workspace pointer
 	auto workspace = allocate_workspace(stream, workspace_size);
 	cutlass::Status status = gemm_op.initialize(args, workspace.data());
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 
 	// Launch initialized CUTLASS kernel
 	status = gemm_op(stream);
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
