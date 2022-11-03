@@ -96,6 +96,7 @@ public:
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) {
 		CHECK_THROW(input.m() == input_width());
 		CHECK_THROW(output.m() == padded_output_width());
+		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
 
 		inference_mixed_precision_impl(stream, input, output, use_inference_params);
@@ -107,6 +108,7 @@ public:
 	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
 		CHECK_THROW(input.m() == input_width());
 		CHECK_THROW(output.m() == output_width());
+		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
 
 		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
@@ -146,6 +148,7 @@ public:
 	) {
 		CHECK_THROW(input.m() == input_width());
 		CHECK_THROW(!output || output->m() == padded_output_width());
+		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(!output || input.n() == output->n());
 
 		return forward_impl(stream, input, output, use_inference_params, prepare_input_gradients);
@@ -185,7 +188,8 @@ public:
 		CHECK_THROW(dL_doutput.m() == padded_output_width());
 		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
 
-		// Equal batch size
+		// Batch size
+		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
@@ -233,7 +237,8 @@ public:
 		CHECK_THROW(!dL_ddLdoutput || dL_ddLdoutput->m() == padded_output_width());
 		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
 
-		// Equal batch size
+		// Batch size
+		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == dL_ddLdinput.n());
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_ddLdoutput || input.n() == dL_ddLdoutput->n());
