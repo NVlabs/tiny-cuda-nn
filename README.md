@@ -45,7 +45,7 @@ using namespace tcnn;
 
 auto model = create_from_config(n_input_dims, n_output_dims, config);
 
-// Train the model
+// Train the model (batch_size must be a multiple of tcnn::batch_size_granularity)
 GPUMatrix<float> training_batch_inputs(n_input_dims, batch_size);
 GPUMatrix<float> training_batch_targets(n_output_dims, batch_size);
 
