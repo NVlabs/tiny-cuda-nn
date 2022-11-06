@@ -4,6 +4,7 @@ add_executable(GridTest grid.cu)
 target_include_directories(GridTest PUBLIC
 	"../include"
 	"../dependencies"
+	"../dependencies/catch-2/include"
 	"../dependencies/cutlass/include"
 	"../dependencies/cutlass/tools/util/include"
 	"../dependencies/fmt/include"
