@@ -56,9 +56,6 @@ jobs:
       - name: Build
         working-directory: ${{ env.build_dir }}
         run: cmake --build . --target all --verbose -j `nproc`
-      - name: Test
-        working-directory: ${{ env.build_dir }}
-        run: ctest
 
   build_windows:
     name: Build on Windows
@@ -109,6 +106,3 @@ jobs:
       - name: Build
         working-directory: ${{ env.build_dir }}
         run: cmake --build . --config ${{ env.config }} --target ALL_BUILD --verbose
-      - name: Test
-        working-directory: ${{ env.build_dir }}
-        run: ctest
