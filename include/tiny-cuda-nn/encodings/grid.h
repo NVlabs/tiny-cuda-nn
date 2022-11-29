@@ -1079,7 +1079,7 @@ public:
 			this->m_max_level_gpu,
 			m_interpolation_type,
 			m_grid_type,
-			use_inference_params ? inference_params() : params(),
+			use_inference_params ? this->inference_params() : this->params(),
 			forward->positions.data() ? forward->positions.view() : input.view(),
 			encoded_positions_soa,
 			forward->dy_dx.data()
@@ -1144,7 +1144,7 @@ public:
 				grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
 				grid_gradient = (grad_t*)grid_gradient_tmp.data();
 			} else {
-				grid_gradient = (grad_t*)gradients();
+				grid_gradient = (grad_t*)this->gradients();
 			}
 
 			if (param_gradients_mode == EGradientMode::Overwrite) {
@@ -1173,7 +1173,7 @@ public:
 			);
 
 			if (!std::is_same<grad_t, T>::value) {
-				parallel_for_gpu(stream, n_params(), [grad=gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
+				parallel_for_gpu(stream, n_params(), [grad=this->gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
 					grad[i] = (T)grad_tmp[i];
 				});
 			}
@@ -1238,7 +1238,7 @@ public:
 				grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
 				grid_gradient = (grad_t*)grid_gradient_tmp.data();
 			} else {
-				grid_gradient = (grad_t*)gradients();
+				grid_gradient = (grad_t*)this->gradients();
 			}
 
 			if (param_gradients_mode == EGradientMode::Overwrite) {
@@ -1270,7 +1270,7 @@ public:
 			);
 
 			if (!std::is_same<grad_t, T>::value) {
-				parallel_for_gpu(stream, n_params(), [grad=gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
+				parallel_for_gpu(stream, n_params(), [grad=this->gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
 					grad[i] = (T)grad_tmp[i];
 				});
 			}
@@ -1312,7 +1312,7 @@ public:
 				dL_ddLdinput.view(),
 				forward.positions.data() ? forward.positions.view() : input.view(),
 				dL_dy_rm,
-				use_inference_params ? inference_params() : params(),
+				use_inference_params ? this->inference_params() : this->params(),
 				// outputs
 				dL_dinput->view()
 			);

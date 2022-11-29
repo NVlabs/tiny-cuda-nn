@@ -130,11 +130,11 @@ public:
 		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
 
-		if (n_params() > 0) {
+		if (this->n_params() > 0) {
 			if (use_inference_params) {
-				CHECK_THROW(inference_params() != nullptr);
+				CHECK_THROW(this->inference_params() != nullptr);
 			} else {
-				CHECK_THROW(params() != nullptr);
+				CHECK_THROW(this->params() != nullptr);
 			}
 		}
 
@@ -149,7 +149,7 @@ public:
 		CHECK_THROW(output.m() == output_width());
 		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
-		CHECK_THROW(n_params() == 0 || inference_params() != nullptr);
+		CHECK_THROW(this->n_params() == 0 || this->inference_params() != nullptr);
 
 		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
 		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
@@ -191,11 +191,11 @@ public:
 		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(!output || input.n() == output->n());
 
-		if (n_params() > 0) {
+		if (this->n_params() > 0) {
 			if (use_inference_params) {
-				CHECK_THROW(inference_params() != nullptr);
+				CHECK_THROW(this->inference_params() != nullptr);
 			} else {
-				CHECK_THROW(params() != nullptr);
+				CHECK_THROW(this->params() != nullptr);
 			}
 		}
 
@@ -243,15 +243,15 @@ public:
 		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
 
 		// Param & gradient memory must have been set via `set_params(...)`
-		if (n_params() > 0) {
+		if (this->n_params() > 0) {
 			if (use_inference_params) {
-				CHECK_THROW(inference_params() != nullptr);
+				CHECK_THROW(this->inference_params() != nullptr);
 			} else {
-				CHECK_THROW(params() != nullptr);
+				CHECK_THROW(this->params() != nullptr);
 			}
 
 			if (param_gradients_mode != EGradientMode::Ignore) {
-				CHECK_THROW(gradients() != nullptr);
+				CHECK_THROW(this->gradients() != nullptr);
 			}
 		}
 
@@ -306,15 +306,15 @@ public:
 		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
 
 		// Param & gradient memory must have been set via `set_params(...)`
-		if (n_params() > 0) {
+		if (this->n_params() > 0) {
 			if (use_inference_params) {
-				CHECK_THROW(inference_params() != nullptr);
+				CHECK_THROW(this->inference_params() != nullptr);
 			} else {
-				CHECK_THROW(params() != nullptr);
+				CHECK_THROW(this->params() != nullptr);
 			}
 
 			if (param_gradients_mode != EGradientMode::Ignore) {
-				CHECK_THROW(gradients() != nullptr);
+				CHECK_THROW(this->gradients() != nullptr);
 			}
 		}
 
