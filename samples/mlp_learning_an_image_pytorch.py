@@ -148,7 +148,14 @@ if __name__ == "__main__":
 
 	print(f"Beginning optimization with {args.n_steps} training steps.")
 
-	traced_image = torch.jit.trace(image, torch.rand([batch_size, 2], device=device, dtype=torch.float32))
+	try:
+		batch = torch.rand([batch_size, 2], device=device, dtype=torch.float32)
+		traced_image = torch.jit.trace(image, batch)
+		traced_image(batch)
+	except:
+		# If tracing causes an error, fall back to regular execution
+		print(f"WARNING: PyTorch JIT trace failed. Performance will be slightly worse than regular.")
+		traced_image = image
 
 	for i in range(args.n_steps):
 		batch = torch.rand([batch_size, 2], device=device, dtype=torch.float32)
