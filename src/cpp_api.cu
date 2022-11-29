@@ -71,7 +71,7 @@ public:
 	{}
 
 	void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) override {
-		m_model->set_params((T*)params, (T*)params, nullptr, nullptr);
+		m_model->set_params((T*)params, (T*)params, nullptr);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
 		GPUMatrix<T, MatrixLayout::ColumnMajor> output_matrix((T*)output, m_model->padded_output_width(), n_elements);
@@ -83,7 +83,7 @@ public:
 	}
 
 	Context forward(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params, bool prepare_input_gradients) override {
-		m_model->set_params((T*)params, (T*)params, nullptr, nullptr);
+		m_model->set_params((T*)params, (T*)params, nullptr);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
 		GPUMatrix<T, MatrixLayout::ColumnMajor> output_matrix((T*)output, m_model->padded_output_width(), n_elements);
@@ -95,7 +95,7 @@ public:
 	}
 
 	void backward(cudaStream_t stream, const Context& ctx, uint32_t n_elements, float* dL_dinput, const void* dL_doutput, void* dL_dparams, const float* input, const void* output, const void* params) override {
-		m_model->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
+		m_model->set_params((T*)params, (T*)params, (T*)dL_dparams);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
 		GPUMatrix<float, MatrixLayout::ColumnMajor> dL_dinput_matrix(dL_dinput, m_model->input_width(), n_elements);
@@ -112,7 +112,7 @@ public:
 	void backward_backward_input(cudaStream_t stream, const Context& ctx, uint32_t n_elements, const float* dL_ddLdinput, const float* input, const void* dL_doutput, void* dL_dparams, void* dL_ddLdoutput, float* dL_dinput, const void* params) override {
 		// from: dL_ddLdinput
 		// to:   dL_ddLdoutput, dL_dparams
-		m_model->set_params((T*)params, (T*)params, (T*)params, (T*)dL_dparams);
+		m_model->set_params((T*)params, (T*)params, (T*)dL_dparams);
 
 		GPUMatrix<float, MatrixLayout::ColumnMajor> input_matrix((float*)input, m_model->input_width(), n_elements);
 		GPUMatrix<float, MatrixLayout::ColumnMajor> dL_ddLdinput_matrix((float*)dL_ddLdinput, m_model->input_width(), n_elements);
@@ -135,9 +135,9 @@ public:
 		return m_model->n_params();
 	}
 
-	void initialize_params(size_t seed, float* params_full_precision) override {
+	void initialize_params(size_t seed, float* params_full_precision, float scale) override {
 		pcg32 rng{seed};
-		m_model->initialize_params(rng, params_full_precision, nullptr, nullptr, nullptr, nullptr);
+		m_model->initialize_params(rng, params_full_precision, scale);
 	}
 
 	uint32_t n_output_dims() const override {

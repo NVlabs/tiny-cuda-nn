@@ -65,11 +65,42 @@ class ParametricObject : public Object {
 public:
 	virtual ~ParametricObject() { }
 
-	virtual void set_params(PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* backward_params, PARAMS_T* gradients) = 0;
-	virtual void initialize_params(pcg32& rnd, float* params_full_precision, PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* backward_params, PARAMS_T* gradients, float scale = 1) = 0;
+	virtual void set_params_impl(PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* gradients) = 0;
+
+	// Must be called prior to inference or training use of the parametric object. Each parameter
+	// must point to GPU memory that holds `n_params()` elements.
+	// `params` and `inference_params` may point to the same memory.
+	void set_params(PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* gradients) {
+		m_params = params;
+		m_inference_params = inference_params;
+		m_gradients = gradients;
+
+		set_params_impl(params, inference_params, gradients);
+	}
+
+	// Initializes the GPU memory addressed by `params_full_precision`. Must hold `n_params()` elements.
+	virtual void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) = 0;
+
 	virtual size_t n_params() const = 0;
 
+	PARAMS_T* params() const {
+		return m_params;
+	}
+
+	PARAMS_T* inference_params() const {
+		return m_inference_params;
+	}
+
+	PARAMS_T* gradients() const {
+		return m_gradients;
+	}
+
 	virtual std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const = 0;
+
+private:
+	PARAMS_T* m_params = nullptr;
+	PARAMS_T* m_inference_params = nullptr;
+	PARAMS_T* m_gradients = nullptr;
 };
 
 template <typename T>
@@ -99,6 +130,14 @@ public:
 		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
 
+		if (this->n_params() > 0) {
+			if (use_inference_params) {
+				CHECK_THROW(this->inference_params() != nullptr);
+			} else {
+				CHECK_THROW(this->params() != nullptr);
+			}
+		}
+
 		inference_mixed_precision_impl(stream, input, output, use_inference_params);
 	}
 	void inference_mixed_precision(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) {
@@ -110,6 +149,7 @@ public:
 		CHECK_THROW(output.m() == output_width());
 		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(input.n() == output.n());
+		CHECK_THROW(this->n_params() == 0 || this->inference_params() != nullptr);
 
 		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
 		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
@@ -150,6 +190,14 @@ public:
 		CHECK_THROW(!output || output->m() == padded_output_width());
 		CHECK_THROW(input.n() % batch_size_granularity == 0);
 		CHECK_THROW(!output || input.n() == output->n());
+
+		if (this->n_params() > 0) {
+			if (use_inference_params) {
+				CHECK_THROW(this->inference_params() != nullptr);
+			} else {
+				CHECK_THROW(this->params() != nullptr);
+			}
+		}
 
 		return forward_impl(stream, input, output, use_inference_params, prepare_input_gradients);
 	}
@@ -193,6 +241,19 @@ public:
 		CHECK_THROW(input.n() == output.n());
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
+
+		// Param & gradient memory must have been set via `set_params(...)`
+		if (this->n_params() > 0) {
+			if (use_inference_params) {
+				CHECK_THROW(this->inference_params() != nullptr);
+			} else {
+				CHECK_THROW(this->params() != nullptr);
+			}
+
+			if (param_gradients_mode != EGradientMode::Ignore) {
+				CHECK_THROW(this->gradients() != nullptr);
+			}
+		}
 
 		backward_impl(stream, ctx, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
@@ -243,6 +304,19 @@ public:
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_ddLdoutput || input.n() == dL_ddLdoutput->n());
 		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
+
+		// Param & gradient memory must have been set via `set_params(...)`
+		if (this->n_params() > 0) {
+			if (use_inference_params) {
+				CHECK_THROW(this->inference_params() != nullptr);
+			} else {
+				CHECK_THROW(this->params() != nullptr);
+			}
+
+			if (param_gradients_mode != EGradientMode::Ignore) {
+				CHECK_THROW(this->gradients() != nullptr);
+			}
+		}
 
 		backward_backward_input_impl(stream, ctx, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}

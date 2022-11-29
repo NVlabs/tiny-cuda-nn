@@ -110,48 +110,21 @@ public:
 		}
 	}
 
-	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
+	void set_params_impl(T* params, T* inference_params, T* gradients) override {
 		size_t offset = 0;
-		m_network->set_params(
-			params + offset,
-			inference_params + offset,
-			backward_params + offset,
-			gradients + offset
-		);
+		m_network->set_params(params + offset, inference_params + offset, gradients + offset);
 		offset += m_network->n_params();
 
-		m_encoding->set_params(
-			params + offset,
-			inference_params + offset,
-			backward_params + offset,
-			gradients + offset
-		);
+		m_encoding->set_params(params + offset, inference_params + offset, gradients + offset);
 		offset += m_encoding->n_params();
 	}
 
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
-		size_t offset = 0;
-		m_network->initialize_params(
-			rnd,
-			params_full_precision + offset,
-			params + offset,
-			inference_params + offset,
-			backward_params + offset,
-			gradients + offset,
-			scale
-		);
-		offset += m_network->n_params();
+	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override {
+		m_network->initialize_params(rnd, params_full_precision, scale);
+		params_full_precision += m_network->n_params();
 
-		m_encoding->initialize_params(
-			rnd,
-			params_full_precision + offset,
-			params + offset,
-			inference_params + offset,
-			backward_params + offset,
-			gradients + offset,
-			scale
-		);
-		offset += m_encoding->n_params();
+		m_encoding->initialize_params(rnd, params_full_precision, scale);
+		params_full_precision += m_encoding->n_params();
 	}
 
 	size_t n_params() const override {

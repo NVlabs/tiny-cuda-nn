@@ -86,7 +86,7 @@ public:
 		return m_param_precision;
 	}
 
-	virtual void initialize_params(size_t seed, float* params_full_precision) = 0;
+	virtual void initialize_params(size_t seed, float* params_full_precision, float scale = 1.0f) = 0;
 
 	virtual uint32_t n_output_dims() const = 0;
 	EPrecision output_precision() const {
