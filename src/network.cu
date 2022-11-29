@@ -139,7 +139,6 @@ Network<T>* create_network(const json& network) {
 	network["n_input_dims"], \
 	network["n_output_dims"], \
 	network.value("n_hidden_layers", 5u), \
-	network.value("feedback_alignment", false), \
 	string_to_activation(network.value("activation", "ReLU")), \
 	string_to_activation(network.value("output_activation", "None")),
 

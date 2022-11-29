@@ -54,34 +54,30 @@ m_can_fuse_activation{activation != Activation::Sine}
 {
 	m_padded_output_width = next_multiple(m_output_width, REQUIRED_ALIGNMENT());
 
-	if (n_hidden_layers > 0) {
-		m_n_hidden_matmuls = n_hidden_layers-1;
+	if (m_n_hidden_layers > 0) {
+		m_n_hidden_matmuls = m_n_hidden_layers-1;
 	} else {
 		m_n_hidden_matmuls = 0;
 	}
 
 	// Create matrices related to weights
-	if (n_hidden_layers == 0) {
+	if (m_n_hidden_layers == 0) {
 		m_weight_matrices.emplace_back(nullptr, m_padded_output_width, m_input_width);
 		m_weight_matrices_inference.emplace_back(nullptr, m_padded_output_width, m_input_width);
-		m_weight_matrices_full_precision.emplace_back(nullptr, m_padded_output_width, m_input_width);
 		m_gradient_matrices.emplace_back(nullptr, m_padded_output_width, m_input_width);
 	} else {
 		m_weight_matrices.emplace_back(nullptr, m_network_width, m_input_width);
 		m_weight_matrices_inference.emplace_back(nullptr, m_network_width, m_input_width);
-		m_weight_matrices_full_precision.emplace_back(nullptr, m_network_width, m_input_width);
 		m_gradient_matrices.emplace_back(nullptr, m_network_width, m_input_width);
 
 		for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
 			m_weight_matrices.emplace_back(nullptr, m_network_width, m_network_width);
 			m_weight_matrices_inference.emplace_back(nullptr, m_network_width, m_network_width);
-			m_weight_matrices_full_precision.emplace_back(nullptr, m_network_width, m_network_width);
 			m_gradient_matrices.emplace_back(nullptr, m_network_width, m_network_width);
 		}
 
 		m_weight_matrices.emplace_back(nullptr, m_padded_output_width, m_network_width);
 		m_weight_matrices_inference.emplace_back(nullptr, m_padded_output_width, m_network_width);
-		m_weight_matrices_full_precision.emplace_back(nullptr, m_padded_output_width, m_network_width);
 		m_gradient_matrices.emplace_back(nullptr, m_padded_output_width, m_network_width);
 	}
 
@@ -333,7 +329,7 @@ std::unique_ptr<typename CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_
 }
 
 template <typename T>
-void CutlassMLP<T>::set_params(T* params, T* inference_params, T* backward_params, T* gradients) {
+void CutlassMLP<T>::set_params_impl(T* params, T* inference_params, T* gradients) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
 		m_weight_matrices[i].set_data_unsafe(params + current_pos);
@@ -344,22 +340,34 @@ void CutlassMLP<T>::set_params(T* params, T* inference_params, T* backward_param
 }
 
 template <typename T>
-void CutlassMLP<T>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
-	set_params(params, inference_params, backward_params, gradients);
+void CutlassMLP<T>::initialize_params(pcg32& rnd, float* params_full_precision, float scale) {
+	// Construct weight matrices
+	std::vector<GPUMatrix<float, RM>> weight_matrices_full_precision;
 
-	size_t current_pos = 0;
-	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
-		m_weight_matrices_full_precision[i].set_data_unsafe(params_full_precision + current_pos);
-		current_pos += m_weight_matrices_full_precision[i].n_elements();
+	if (m_n_hidden_layers == 0) {
+		weight_matrices_full_precision.emplace_back(params_full_precision, m_padded_output_width, m_input_width);
+	} else {
+		weight_matrices_full_precision.emplace_back(params_full_precision, m_network_width, m_input_width);
+		params_full_precision += weight_matrices_full_precision.back().n_elements();
 
+		for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
+			weight_matrices_full_precision.emplace_back(params_full_precision, m_network_width, m_network_width);
+			params_full_precision += weight_matrices_full_precision.back().n_elements();
+		}
+
+		weight_matrices_full_precision.emplace_back(params_full_precision, m_padded_output_width, m_network_width);
+	}
+
+	// Initialize matrices
+	for (size_t i = 0; i < weight_matrices_full_precision.size(); ++i) {
 		if (m_activation == Activation::Sine) {
 			if (i == 0) {
-				m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
+				weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
 			} else {
-				m_weight_matrices_full_precision[i].initialize_siren_uniform(rnd, scale);
+				weight_matrices_full_precision[i].initialize_siren_uniform(rnd, scale);
 			}
 		} else {
-			m_weight_matrices_full_precision[i].initialize_xavier_uniform(rnd, scale);
+			weight_matrices_full_precision[i].initialize_xavier_uniform(rnd, scale);
 		}
 	}
 }

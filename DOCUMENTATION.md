@@ -37,8 +37,6 @@ Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricte
 	"n_neurons": 128,            // Neurons in each hidden layer.
 	                             // May only be 16, 32, 64, or 128.
 	"n_hidden_layers": 5,        // Number of hidden layers.
-	"feedback_alignment": false  // Use feedback alignment
-	                             // [Lillicrap et al. 2016].
 }
 ```
 

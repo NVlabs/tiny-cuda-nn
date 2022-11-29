@@ -34,12 +34,6 @@
 
 TCNN_NAMESPACE_BEGIN
 
-enum class WeightUsage {
-	Inference,
-	Forward,
-	Backward,
-};
-
 Activation string_to_activation(const std::string& activation_name);
 std::string to_string(Activation activation);
 
