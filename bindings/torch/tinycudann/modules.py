@@ -47,6 +47,14 @@ def free_temporary_memory():
 	gc.collect()
 	_C.free_temporary_memory()
 
+def null_tensor_like(tensor):
+	return torch.empty([], dtype=tensor.dtype, device=tensor.device)
+
+def null_tensor_to_none(tensor):
+	if len(tensor.shape) == 0:
+		return None
+	return tensor
+
 class _module_function(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, native_tcnn_module, input, params, loss_scale):
@@ -74,7 +82,7 @@ class _module_function(torch.autograd.Function):
 		input, params, output = ctx.saved_tensors
 		input_grad, weight_grad = _module_function_backward.apply(ctx, doutput, input, params, output)
 
-		return None, input_grad, weight_grad, None
+		return None, null_tensor_to_none(input_grad), null_tensor_to_none(params_grad), None
 
 class _module_function_backward(torch.autograd.Function):
 	@staticmethod
@@ -84,8 +92,8 @@ class _module_function_backward(torch.autograd.Function):
 		with torch.no_grad():
 			scaled_grad = doutput * ctx_fwd.loss_scale
 			input_grad, weight_grad = ctx_fwd.native_tcnn_module.bwd(ctx_fwd.native_ctx, input, params, output, scaled_grad)
-			input_grad = None if input_grad is None else (input_grad / ctx_fwd.loss_scale)
-			weight_grad = None if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
+			input_grad = null_tensor_like(input) if input_grad is None else (input_grad / ctx_fwd.loss_scale)
+			weight_grad = null_tensor_like(params) if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
 		return input_grad, weight_grad
 
 	@staticmethod
