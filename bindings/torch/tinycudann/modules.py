@@ -47,13 +47,13 @@ def free_temporary_memory():
 	gc.collect()
 	_C.free_temporary_memory()
 
-def null_as(tensor):
+def null_tensor_like(tensor):
 	return torch.empty([], dtype=tensor.dtype, device=tensor.device)
 
-def maybe_null_tensor_to_none(tensor_to_convert, should_be_converted):
-	if should_be_converted:
+def null_tensor_to_none(tensor):
+	if len(tensor.shape) == 0:
 		return None
-	return tensor_to_convert
+	return tensor
 
 class _module_function(torch.autograd.Function):
 	@staticmethod
@@ -82,10 +82,7 @@ class _module_function(torch.autograd.Function):
 		input, params, output = ctx.saved_tensors
 		input_grad, weight_grad = _module_function_backward.apply(ctx, doutput, input, params, output)
 
-		input_grad = maybe_null_tensor_to_none(input_grad, input.requires_grad)
-		weight_grad = maybe_null_tensor_to_none(weight_grad, params.requires_grad)
-
-		return None, input_grad, weight_grad, None
+		return None, null_tensor_to_none(input_grad), null_tensor_to_none(params_grad), None
 
 class _module_function_backward(torch.autograd.Function):
 	@staticmethod
@@ -95,8 +92,8 @@ class _module_function_backward(torch.autograd.Function):
 		with torch.no_grad():
 			scaled_grad = doutput * ctx_fwd.loss_scale
 			input_grad, weight_grad = ctx_fwd.native_tcnn_module.bwd(ctx_fwd.native_ctx, input, params, output, scaled_grad)
-			input_grad = null_as(input_grad) if input_grad is None else (input_grad / ctx_fwd.loss_scale)
-			weight_grad = null_as(input_grad) if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
+			input_grad = null_tensor_like(input) if input_grad is None else (input_grad / ctx_fwd.loss_scale)
+			weight_grad = null_tensor_like(params) if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
 		return input_grad, weight_grad
 
 	@staticmethod
@@ -123,8 +120,8 @@ class _module_function_backward(torch.autograd.Function):
 			#       doutput_grad uses dinput_grad
 			#       weight_grad  uses dinput_grad * doutput
 			#       input_grad   uses dinput_grad * doutput
-			weight_grad = null_as(weight_grad) if weight_grad is None else (weight_grad / ctx.ctx_fwd.loss_scale)
-			input_grad = null_as(input_grad) if input_grad is None else (input_grad / ctx.ctx_fwd.loss_scale)
+			weight_grad = None if weight_grad is None else (weight_grad / ctx.ctx_fwd.loss_scale)
+			input_grad = None if input_grad is None else (input_grad / ctx.ctx_fwd.loss_scale)
 
 		# ctx_fwd,   doutput,      input,      params,      output
 		return None, doutput_grad, input_grad, weight_grad, None
