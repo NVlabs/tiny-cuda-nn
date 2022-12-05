@@ -26,7 +26,7 @@ for cc in reversed(ALL_COMPUTE_CAPABILITIES):
 		continue
 
 	try:
-		_C = importlib.import_module(f"tinycudann_bindings_{cc}._C")
+		_C = importlib.import_module(f"tinycudann_bindings._{cc}_C")
 		break
 	except ModuleNotFoundError:
 		pass
