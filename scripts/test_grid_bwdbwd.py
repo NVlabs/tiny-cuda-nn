@@ -221,7 +221,6 @@ if __name__ == '__main__':
 			"output_activation": 'None',   # Activation of the output layer.
 			"n_neurons": 64,           # Neurons in each hidden layer. # May only be 16, 32, 64, or 128.
 			"n_hidden_layers": 5,   # Number of hidden layers.
-			"feedback_alignment": False  # Use feedback alignment # [Lillicrap et al. 2016].
 		}, seed=42)
 
 

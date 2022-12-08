@@ -77,19 +77,12 @@ public:
 		// Allocate auxiliary optimizer buffers
 		m_optimizer->allocate(m_model);
 
-		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
+		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 2 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);
 
 		reset_param_pointers();
 
-		m_model->initialize_params(
-			m_rng,
-			m_params_full_precision,
-			m_params,
-			m_params_inference,
-			m_params_backward,
-			m_param_gradients
-		);
+		m_model->initialize_params(m_rng, m_params_full_precision);
 
 		// initialize_params is only expected to initialize m_params_full_precision. Cast and copy these over!
 		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params=m_params] __device__ (size_t i) {
@@ -253,6 +246,7 @@ public:
 		if (n_params != m_model->n_params()) {
 			throw std::runtime_error{"Can't set params because buffer has the wrong size."};
 		}
+
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_inference, params, sizeof(PARAMS_T)*n_params, device_ptr ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice));
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
 
@@ -311,7 +305,7 @@ public:
 
 	void set_param_gradients_pointer(PARAMS_T* gradients) {
 		reset_param_pointers();
-		m_model->set_params(m_params, m_params_inference, m_params_backward, gradients);
+		m_model->set_params(m_params, m_params_inference, gradients);
 	}
 
 	void reset_param_pointers() {
@@ -319,8 +313,7 @@ public:
 
 		m_params_full_precision = (float*)(m_params_buffer.data());
 		m_params                = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params);
-		m_params_backward       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params);
-		m_param_gradients       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params * 2);
+		m_param_gradients       = (PARAMS_T*)(m_params_buffer.data() + sizeof(float) * n_params + sizeof(PARAMS_T) * n_params);
 
 		// Use the optimizer's custom params for inference, if they exist.
 		m_params_inference = m_optimizer ? m_optimizer->custom_weights() : nullptr;
@@ -328,7 +321,7 @@ public:
 			m_params_inference = m_params;
 		}
 
-		m_model->set_params(m_params, m_params_inference, m_params_backward, m_param_gradients);
+		m_model->set_params(m_params, m_params_inference, m_param_gradients);
 	}
 
 	size_t n_params() const {
@@ -347,7 +340,6 @@ private:
 	float* m_params_full_precision = nullptr;
 	PARAMS_T* m_params_inference = nullptr;
 	PARAMS_T* m_params = nullptr;
-	PARAMS_T* m_params_backward = nullptr; // Used for wonky things like feedback alignment
 	PARAMS_T* m_param_gradients = nullptr;
 
 	float m_perturbation_sigma;

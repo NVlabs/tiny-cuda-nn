@@ -403,32 +403,18 @@ public:
 		return m_nested.empty() ? AoS : m_nested.front()->preferred_output_layout();
 	}
 
-	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
+	void set_params_impl(T* params, T* inference_params, T* gradients) override {
 		size_t offset = 0;
 		for (auto& nested : m_nested) {
-			nested->set_params(
-				params + offset,
-				inference_params + offset,
-				backward_params + offset,
-				gradients + offset
-			);
+			nested->set_params(params + offset, inference_params + offset, gradients + offset);
 			offset += nested->n_params();
 		}
 	}
 
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
-		size_t offset = 0;
+	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override {
 		for (auto& nested : m_nested) {
-			nested->initialize_params(
-				rnd,
-				params_full_precision + offset,
-				params + offset,
-				inference_params + offset,
-				backward_params + offset,
-				gradients + offset,
-				scale
-			);
-			offset += nested->n_params();
+			nested->initialize_params(rnd, params_full_precision, scale);
+			params_full_precision += nested->n_params();
 		}
 	}
 

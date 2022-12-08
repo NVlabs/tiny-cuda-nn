@@ -76,8 +76,8 @@ public:
 	virtual MatrixLayout preferred_output_layout() const = 0;
 
 	// By default, an encoding has no parameters
-	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override { }
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
+	void set_params_impl(T* params, T* inference_params, T* gradients) override { }
+	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override { }
 	size_t n_params() const override { return 0; }
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override { return {}; }

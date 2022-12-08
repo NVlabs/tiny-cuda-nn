@@ -160,6 +160,7 @@ if (TCNN_HAS_PARENT)
 endif()
 
 if (MSVC)
+	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-bigobj")
 else()
 	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-mf16c")
 	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-Wno-float-conversion")

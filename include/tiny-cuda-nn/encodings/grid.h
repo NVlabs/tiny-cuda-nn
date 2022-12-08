@@ -1079,7 +1079,7 @@ public:
 			this->m_max_level_gpu,
 			m_interpolation_type,
 			m_grid_type,
-			use_inference_params ? m_grid_inference : m_grid,
+			use_inference_params ? this->inference_params() : this->params(),
 			forward->positions.data() ? forward->positions.view() : input.view(),
 			encoded_positions_soa,
 			forward->dy_dx.data()
@@ -1144,7 +1144,7 @@ public:
 				grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
 				grid_gradient = (grad_t*)grid_gradient_tmp.data();
 			} else {
-				grid_gradient = (grad_t*)m_grid_gradient;
+				grid_gradient = (grad_t*)this->gradients();
 			}
 
 			if (param_gradients_mode == EGradientMode::Overwrite) {
@@ -1173,7 +1173,7 @@ public:
 			);
 
 			if (!std::is_same<grad_t, T>::value) {
-				parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
+				parallel_for_gpu(stream, n_params(), [grad=this->gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
 					grad[i] = (T)grad_tmp[i];
 				});
 			}
@@ -1238,7 +1238,7 @@ public:
 				grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
 				grid_gradient = (grad_t*)grid_gradient_tmp.data();
 			} else {
-				grid_gradient = (grad_t*)m_grid_gradient;
+				grid_gradient = (grad_t*)this->gradients();
 			}
 
 			if (param_gradients_mode == EGradientMode::Overwrite) {
@@ -1270,7 +1270,7 @@ public:
 			);
 
 			if (!std::is_same<grad_t, T>::value) {
-				parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
+				parallel_for_gpu(stream, n_params(), [grad=this->gradients(), grad_tmp=grid_gradient] __device__ (size_t i) {
 					grad[i] = (T)grad_tmp[i];
 				});
 			}
@@ -1312,7 +1312,7 @@ public:
 				dL_ddLdinput.view(),
 				forward.positions.data() ? forward.positions.view() : input.view(),
 				dL_dy_rm,
-				use_inference_params ? m_grid_inference : m_grid,
+				use_inference_params ? this->inference_params() : this->params(),
 				// outputs
 				dL_dinput->view()
 			);
@@ -1348,17 +1348,11 @@ public:
 		return SoA;
 	}
 
-	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
-		m_grid = params;
-		m_grid_inference = inference_params;
-		m_grid_gradient = gradients;
-	}
+	void set_params_impl(T* params, T* inference_params, T* gradients) override { }
 
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {
-		set_params(params, inference_params, backward_params, gradients);
-
+	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override {
 		// Initialize the hashgrid from the GPU, because the number of parameters can be quite large.
-		generate_random_uniform<float>(rnd, n_params(), params_full_precision, -1e-4f, 1e-4f);
+		generate_random_uniform<float>(rnd, n_params(), params_full_precision, -1e-4f * scale, 1e-4f * scale);
 	}
 
 	size_t n_params() const override {
@@ -1434,11 +1428,6 @@ private:
 	bool m_stochastic_interpolation;
 	InterpolationType m_interpolation_type;
 	GridType m_grid_type;
-
-	// Storage of params
-	T* m_grid;
-	T* m_grid_inference;
-	T* m_grid_gradient;
 };
 
 template <typename T, uint32_t N_FEATURES_PER_LEVEL, HashType HASH_TYPE>

@@ -132,7 +132,7 @@ if __name__ == "__main__":
 	half_dy =  0.5 / resolution[1]
 	xs = torch.linspace(half_dx, 1-half_dx, resolution[0], device=device)
 	ys = torch.linspace(half_dy, 1-half_dy, resolution[1], device=device)
-	xv, yv = torch.meshgrid([xs, ys], indexing="ij")
+	xv, yv = torch.meshgrid([xs, ys])
 
 	xy = torch.stack((yv.flatten(), xv.flatten())).t()
 
@@ -148,7 +148,14 @@ if __name__ == "__main__":
 
 	print(f"Beginning optimization with {args.n_steps} training steps.")
 
-	traced_image = torch.jit.trace(image, torch.rand([batch_size, 2], device=device, dtype=torch.float32))
+	try:
+		batch = torch.rand([batch_size, 2], device=device, dtype=torch.float32)
+		traced_image = torch.jit.trace(image, batch)
+		traced_image(batch)
+	except:
+		# If tracing causes an error, fall back to regular execution
+		print(f"WARNING: PyTorch JIT trace failed. Performance will be slightly worse than regular.")
+		traced_image = image
 
 	for i in range(args.n_steps):
 		batch = torch.rand([batch_size, 2], device=device, dtype=torch.float32)

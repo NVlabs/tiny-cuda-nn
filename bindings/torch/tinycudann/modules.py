@@ -47,6 +47,14 @@ def free_temporary_memory():
 	gc.collect()
 	_C.free_temporary_memory()
 
+def null_tensor_like(tensor):
+	return torch.empty([], dtype=tensor.dtype, device=tensor.device)
+
+def null_tensor_to_none(tensor):
+	if len(tensor.shape) == 0:
+		return None
+	return tensor
+
 class _module_function(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, native_tcnn_module, input, params, loss_scale):
@@ -72,9 +80,9 @@ class _module_function(torch.autograd.Function):
 			doutput = doutput.cuda()
 
 		input, params, output = ctx.saved_tensors
-		input_grad, weight_grad = _module_function_backward.apply(ctx, doutput, input, params, output)
+		input_grad, params_grad = _module_function_backward.apply(ctx, doutput, input, params, output)
 
-		return None, input_grad, weight_grad, None
+		return None, null_tensor_to_none(input_grad), null_tensor_to_none(params_grad), None
 
 class _module_function_backward(torch.autograd.Function):
 	@staticmethod
@@ -83,25 +91,25 @@ class _module_function_backward(torch.autograd.Function):
 		ctx.save_for_backward(input, params, doutput)
 		with torch.no_grad():
 			scaled_grad = doutput * ctx_fwd.loss_scale
-			input_grad, weight_grad = ctx_fwd.native_tcnn_module.bwd(ctx_fwd.native_ctx, input, params, output, scaled_grad)
-			input_grad = None if input_grad is None else (input_grad / ctx_fwd.loss_scale)
-			weight_grad = None if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
-		return input_grad, weight_grad
+			input_grad, params_grad = ctx_fwd.native_tcnn_module.bwd(ctx_fwd.native_ctx, input, params, output, scaled_grad)
+			input_grad = null_tensor_like(input) if input_grad is None else (input_grad / ctx_fwd.loss_scale)
+			params_grad = null_tensor_like(params) if params_grad is None else (params_grad / ctx_fwd.loss_scale)
+		return input_grad, params_grad
 
 	@staticmethod
-	def backward(ctx, dinput_grad, dweight_grad):
+	def backward(ctx, dinput_grad, dparams_grad):
 		# NOTE: currently support:
 		#       ✓   d(dL_dinput)_d(dL_doutput)  doutput_grad
-		#       ✓   d(dL_dinput)_d(params)      weight_grad
+		#       ✓   d(dL_dinput)_d(params)      params_grad
 		#       ✓   d(dL_dinput)_d(input)       input_grad
 		#       x   d(dL_dparam)_d(...)
 		input, params, doutput = ctx.saved_tensors
-		# assert dweight_grad is None, "currently do not support 2nd-order gradients from gradient of grid"
+		# assert dparams_grad is None, "currently do not support 2nd-order gradients from gradient of grid"
 		with torch.enable_grad():
 			# NOTE: preserves requires_grad info (this function is in no_grad() context by default when invoking loss.backward())
 			doutput = doutput * ctx.ctx_fwd.loss_scale
 		with torch.no_grad():
-			doutput_grad, weight_grad, input_grad = ctx.ctx_fwd.native_tcnn_module.bwd_bwd_input(
+			doutput_grad, params_grad, input_grad = ctx.ctx_fwd.native_tcnn_module.bwd_bwd_input(
 				ctx.ctx_fwd.native_ctx,
 				input,
 				params,
@@ -110,13 +118,13 @@ class _module_function_backward(torch.autograd.Function):
 			)
 			# NOTE: be cautious when multiplying and dividing loss_scale
 			#       doutput_grad uses dinput_grad
-			#       weight_grad  uses dinput_grad * doutput
+			#       params_grad  uses dinput_grad * doutput
 			#       input_grad   uses dinput_grad * doutput
-			weight_grad = None if weight_grad is None else (weight_grad / ctx.ctx_fwd.loss_scale)
+			params_grad = None if params_grad is None else (params_grad / ctx.ctx_fwd.loss_scale)
 			input_grad = None if input_grad is None else (input_grad / ctx.ctx_fwd.loss_scale)
 
 		# ctx_fwd,   doutput,      input,      params,      output
-		return None, doutput_grad, input_grad, weight_grad, None
+		return None, doutput_grad, input_grad, params_grad, None
 
 class Module(torch.nn.Module):
 	def __init__(self, seed=1337):

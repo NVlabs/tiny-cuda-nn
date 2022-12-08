@@ -42,7 +42,7 @@ TCNN_NAMESPACE_BEGIN
 template <typename T, int WIDTH>
 class FullyFusedMLP : public Network<T> {
 public:
-	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, bool use_feedback_alignment, Activation activation, Activation output_activation);
+	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, Activation activation, Activation output_activation);
 
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
@@ -59,37 +59,22 @@ public:
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override;
 
-	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override;
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
+	void set_params_impl(T* params, T* inference_params, T* gradients) override;
+	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override;
 
-	GPUMatrix<T, RM>& input_weight_matrix(WeightUsage usage) {
-		switch (usage) {
-			case WeightUsage::Inference: return m_weight_matrices_inference.front();
-			case WeightUsage::Forward: return m_weight_matrices.front();
-			case WeightUsage::Backward: return m_weight_matrices_backward.front();
-		}
-
-		throw std::runtime_error{"Invalid weight usage."};
+	GPUMatrix<T, RM>& input_weight_matrix(bool inference) {
+		auto& weight_matrices = inference ? m_weight_matrices_inference : m_weight_matrices;
+		return weight_matrices.front();
 	}
 
-	GPUMatrix<T, RM>& weight_matrix_at(WeightUsage usage, uint32_t idx) {
-		switch (usage) {
-			case WeightUsage::Inference: return m_weight_matrices_inference.at(1 + idx);
-			case WeightUsage::Forward: return m_weight_matrices.at(1 + idx);
-			case WeightUsage::Backward: return m_weight_matrices_backward.at(1 + idx);
-		}
-
-		throw std::runtime_error{"Invalid weight usage."};
+	GPUMatrix<T, RM>& weight_matrix_at(bool inference, uint32_t idx) {
+		auto& weight_matrices = inference ? m_weight_matrices_inference : m_weight_matrices;
+		return weight_matrices.at(1 + idx);
 	}
 
-	GPUMatrix<T, RM>& output_weight_matrix(WeightUsage usage) {
-		switch (usage) {
-			case WeightUsage::Inference: return m_weight_matrices_inference.back();
-			case WeightUsage::Forward: return m_weight_matrices.back();
-			case WeightUsage::Backward: return m_weight_matrices_backward.back();
-		}
-
-		throw std::runtime_error{"Invalid weight usage."};
+	GPUMatrix<T, RM>& output_weight_matrix(bool inference) {
+		auto& weight_matrices = inference ? m_weight_matrices_inference : m_weight_matrices;
+		return weight_matrices.back();
 	}
 
 	GPUMatrix<T, RM>& input_gradient_matrix() {
@@ -156,7 +141,6 @@ public:
 			{"output_activation", to_string(m_output_activation)},
 			{"n_neurons", m_network_width},
 			{"n_hidden_layers", m_n_hidden_layers},
-			{"feedback_alignment", m_use_feedback_alignment},
 		};
 	}
 
@@ -178,15 +162,10 @@ private:
 	Activation m_activation;
 	Activation m_output_activation;
 
-	bool m_use_feedback_alignment = false;
-
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices_inference;
-	std::vector<GPUMatrix<T, RM>> m_weight_matrices_backward;
 	size_t m_total_n_params;
-
-	std::vector<GPUMatrix<float, RM>> m_weight_matrices_full_precision;
 
 	std::vector<GPUMatrix<T, RM>> m_gradient_matrices;
 };

@@ -24,7 +24,6 @@ class TcnnFCBlock(tcnn.Network):
 			"output_activation": last_activation,   # Activation of the output layer.
 			"n_neurons": hidden_features,           # Neurons in each hidden layer. # May only be 16, 32, 64, or 128.
 			"n_hidden_layers": num_hidden_layers,   # Number of hidden layers.
-			"feedback_alignment": False  # Use feedback alignment # [Lillicrap et al. 2016].
 		}, seed=seed)
 
 	def forward(self, x: torch.Tensor):
