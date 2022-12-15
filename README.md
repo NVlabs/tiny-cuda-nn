@@ -219,7 +219,7 @@ If you use it in your research, we would appreciate a citation via
 	month = {4},
 	title = {{tiny-cuda-nn}},
 	url = {https://github.com/NVlabs/tiny-cuda-nn},
-	version = {1.6},
+	version = {1.7},
 	year = {2021}
 }
 ```
