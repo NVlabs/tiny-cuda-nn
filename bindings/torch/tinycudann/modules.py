@@ -19,6 +19,7 @@ system_compute_capability = major * 10 + minor
 
 # Try to import the highest compute capability version of tcnn that
 # we can find and is compatible with the system's compute capability.
+_C = None
 for cc in reversed(ALL_COMPUTE_CAPABILITIES):
 	if cc > system_compute_capability:
 		# incompatible
