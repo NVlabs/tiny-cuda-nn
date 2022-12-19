@@ -66,6 +66,12 @@ bool cuda_supports_virtual_memory(int device) {
 	return supports_vmm != 0;
 }
 
+std::string cuda_device_name(int device) {
+	cudaDeviceProp props;
+	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
+	return props.name;
+}
+
 uint32_t cuda_compute_capability(int device) {
 	cudaDeviceProp props;
 	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
