@@ -171,10 +171,13 @@ public:
 		static const float loss_scale = 128;
 
 		std::unique_ptr<ForwardContext> result;
-		m_graph.capture_and_execute(stream, false, [&]() {
+
+		// Execute forward and backward in a CUDA graph for maximum performance.
+		{
+			auto capture_guard = m_graph.capture_guard(stream);
 			result = forward(stream, loss_scale, input, target, data_pdf);
 			backward(stream, *result, input);
-		});
+		}
 
 		if (run_optimizer) {
 			optimizer_step(stream, loss_scale);
