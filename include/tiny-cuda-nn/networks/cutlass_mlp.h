@@ -174,9 +174,6 @@ private:
 
 	bool m_can_fuse_activation;
 
-	// Graphs
-	CudaGraph m_inference_graph;
-
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices_inference;

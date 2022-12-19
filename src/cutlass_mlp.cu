@@ -140,24 +140,22 @@ void CutlassMLP<T>::inference_mixed_precision_impl(cudaStream_t stream, const GP
 		GPUMatrix<T>{m_network_width, batch_size, stream},
 	};
 
-	m_inference_graph.capture_and_execute(stream, false, [&]() {
-		// Run the actual network
-		{
-			uint32_t tmp_idx = 0;
+	// Run the actual network
+	{
+		uint32_t tmp_idx = 0;
 
-			// Input layer
-			compute_inference_layer<FullLayer>(stream, m_activation, input_weight_matrix(use_inference_params), input, inference_tmp[tmp_idx++ % 2]);
+		// Input layer
+		compute_inference_layer<FullLayer>(stream, m_activation, input_weight_matrix(use_inference_params), input, inference_tmp[tmp_idx++ % 2]);
 
-			// Hidden layers
-			for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-				compute_inference_layer<FullLayer>(stream, m_activation, weight_matrix_at(use_inference_params, i), inference_tmp[(tmp_idx + 1) % 2], inference_tmp[tmp_idx % 2]);
-				++tmp_idx;
-			}
-
-			// Output
-			compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(use_inference_params), inference_tmp[(tmp_idx + 1) % 2], output);
+		// Hidden layers
+		for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
+			compute_inference_layer<FullLayer>(stream, m_activation, weight_matrix_at(use_inference_params, i), inference_tmp[(tmp_idx + 1) % 2], inference_tmp[tmp_idx % 2]);
+			++tmp_idx;
 		}
-	});
+
+		// Output
+		compute_inference_layer<LastLayer>(stream, m_output_activation, output_weight_matrix(use_inference_params), inference_tmp[(tmp_idx + 1) % 2], output);
+	}
 }
 
 template <typename T>
