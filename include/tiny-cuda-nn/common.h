@@ -153,6 +153,7 @@ public:
 	ScopeGuard() = default;
 	ScopeGuard(const std::function<void()>& callback) : mCallback{callback} {}
 	ScopeGuard(std::function<void()>&& callback) : mCallback{std::move(callback)} {}
+	ScopeGuard& operator=(const ScopeGuard& other) = delete;
 	ScopeGuard(const ScopeGuard& other) = delete;
 	ScopeGuard& operator=(ScopeGuard&& other) { std::swap(mCallback, other.mCallback); return *this; }
 	ScopeGuard(ScopeGuard&& other) { *this = std::move(other); }
