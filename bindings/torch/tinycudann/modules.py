@@ -203,6 +203,9 @@ class NetworkWithInputEncoding(Module):
 		Seed for pseudorandom parameter initialization
 	"""
 	def __init__(self, n_input_dims, n_output_dims, encoding_config, network_config, seed=1337):
+		if not _C.has_networks():
+			raise RuntimeError(f"Cannot create `NetworkWithInputEncoding` because tiny-cuda-nn was not compiled with neural network support.")
+
 		self.n_input_dims = n_input_dims
 		self.n_output_dims = n_output_dims
 		self.encoding_config = encoding_config
@@ -236,6 +239,9 @@ class Network(Module):
 		Seed for pseudorandom parameter initialization
 	"""
 	def __init__(self, n_input_dims, n_output_dims, network_config, seed=1337):
+		if not _C.has_networks():
+			raise RuntimeError(f"Cannot create `Network` because tiny-cuda-nn was not compiled with neural network support.")
+
 		self.n_input_dims = n_input_dims
 		self.n_output_dims = n_output_dims
 		self.network_config = network_config

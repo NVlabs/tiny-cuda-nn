@@ -38,15 +38,6 @@
 
 namespace tcnn { namespace cpp {
 
-template <typename T>
-constexpr EPrecision precision() {
-	return std::is_same<T, float>::value ? EPrecision::Fp32 : EPrecision::Fp16;
-}
-
-EPrecision preferred_precision() {
-	return precision<network_precision_t>();
-}
-
 uint32_t batch_size_granularity() {
 	return tcnn::batch_size_granularity;
 }
@@ -61,6 +52,23 @@ int cuda_device() {
 
 void set_cuda_device(int device) {
 	tcnn::set_cuda_device(device);
+}
+
+bool has_networks() {
+#if defined(TCNN_NO_NETWORKS)
+	return false;
+#else
+	return true;
+#endif
+}
+
+template <typename T>
+constexpr EPrecision precision() {
+	return std::is_same<T, float>::value ? EPrecision::Fp32 : EPrecision::Fp16;
+}
+
+EPrecision preferred_precision() {
+	return precision<network_precision_t>();
 }
 
 template <typename T>
