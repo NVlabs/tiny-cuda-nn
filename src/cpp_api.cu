@@ -42,16 +42,16 @@ uint32_t batch_size_granularity() {
 	return tcnn::batch_size_granularity;
 }
 
-void free_temporary_memory() {
-	tcnn::free_all_gpu_memory_arenas();
-}
-
 int cuda_device() {
 	return tcnn::cuda_device();
 }
 
 void set_cuda_device(int device) {
 	tcnn::set_cuda_device(device);
+}
+
+void free_temporary_memory() {
+	tcnn::free_all_gpu_memory_arenas();
 }
 
 bool has_networks() {

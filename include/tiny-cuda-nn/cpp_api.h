@@ -51,19 +51,21 @@ namespace tcnn { namespace cpp {
 
 using json = nlohmann::json;
 
+uint32_t batch_size_granularity();
+
+int cuda_device();
+void set_cuda_device(int device);
+
+void free_temporary_memory();
+
+bool has_networks();
+
 enum EPrecision {
 	Fp32,
 	Fp16,
 };
 
 EPrecision preferred_precision();
-
-uint32_t batch_size_granularity();
-
-void free_temporary_memory();
-
-int cuda_device();
-void set_cuda_device(int device);
 
 struct Context {
 	std::unique_ptr<tcnn::Context> ctx;
