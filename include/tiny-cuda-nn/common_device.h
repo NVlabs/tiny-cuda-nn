@@ -213,7 +213,7 @@ __host__ __device__ void warp_activation_backward(Activation activation, const f
 		case Activation::Sigmoid:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)(forward_frag.x[t] * ((T)1.0f - forward_frag.x[t]));
+				result.x[t] = frag.x[t] * (T)(forward_frag.x[t] * (T)(1.0f - (float)forward_frag.x[t]));
 			}
 			return;
 		case Activation::Squareplus:
@@ -232,7 +232,7 @@ __host__ __device__ void warp_activation_backward(Activation activation, const f
 		case Activation::Tanh:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)(1.0f - (float)(forward_frag.x[t] * forward_frag.x[t]));
+				result.x[t] = frag.x[t] * (T)(1.0f - ((float)forward_frag.x[t] * (float)forward_frag.x[t]));
 			}
 			return;
 		case Activation::None: result = frag; return;
