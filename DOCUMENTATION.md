@@ -23,7 +23,7 @@ The following activation functions are supported:
 - `"Sigmoid"` (the logistic function)
 - `"Squareplus"` (defined as `0.5 * (x + sqrt(x*x + 4))`)
 - `"Softplus"` (defined as `log(exp(x) + 1)`)
-- `"Tanh"` (defined as `(exp(x) - exp(-x))/(exp(x) + exp(-x))`)
+- `"Tanh"` (defined as `(exp(x) - exp(-x)) / (exp(x) + exp(-x))`)
 
 
 ### Fully Fused MLP

@@ -84,10 +84,13 @@ producing an image every 1000 training steps. Each 1000 steps should take roughl
 
 - An __NVIDIA GPU__; tensor cores increase performance when available. All shown results come from an RTX 3090.
 - A __C++14__ capable compiler. The following choices are recommended and have been tested:
-  - __Windows:__ Visual Studio 2019
-  - __Linux:__ GCC/G++ 7.5 or higher
-- __[CUDA](https://developer.nvidia.com/cuda-toolkit) v10.2 or higher__ and __[CMake](https://cmake.org/) v3.21 or higher__.
-- The fully fused MLP component of this framework requires a __very large__ amount of shared memory in its default configuration. It will likely only work on an RTX 3090, an RTX 2080 Ti, or high-end enterprise GPUs. Lower end cards must reduce the `n_neurons` parameter or use the `CutlassMLP` (better compatibility but slower) instead.
+  - __Windows:__ Visual Studio 2019 or 2022
+  - __Linux:__ GCC/G++ 8 or higher
+- A recent version of __[CUDA](https://developer.nvidia.com/cuda-toolkit)__. The following choices are recommended and have been tested:
+  - __Windows:__ CUDA 11.5 or higher
+  - __Linux:__ CUDA 10.2 or higher
+- __[CMake](https://cmake.org/) v3.21 or higher__.
+- The fully fused MLP component of this framework requires a __very large__ amount of shared memory in its default configuration. It will likely only work on an RTX 3090, an RTX 2080 Ti, or higher-end GPUs. Lower end cards must reduce the `n_neurons` parameter or use the `CutlassMLP` (better compatibility but slower) instead.
 
 If you are using Linux, install the following packages
 ```sh
@@ -115,6 +118,8 @@ Then, use CMake to build the project: (on Windows, this must be in a [developer 
 tiny-cuda-nn$ cmake . -B build
 tiny-cuda-nn$ cmake --build build --config RelWithDebInfo -j
 ```
+
+If compilation fails inexplicably or takes longer than an hour, you might be running out of memory. Try running the above command without `-j` in that case.
 
 
 ## PyTorch extension
