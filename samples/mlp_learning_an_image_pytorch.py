@@ -141,7 +141,7 @@ if __name__ == "__main__":
 	write_image(path, image(xy).reshape(img_shape).detach().cpu().numpy())
 	print("done.")
 
-	prev_time = time.time()
+	prev_time = time.perf_counter()
 
 	batch_size = 2**16
 	interval = 10
@@ -172,7 +172,7 @@ if __name__ == "__main__":
 		if i % interval == 0:
 			loss_val = loss.item()
 			torch.cuda.synchronize()
-			elapsed_time = time.time() - prev_time
+			elapsed_time = time.perf_counter() - prev_time
 			print(f"Step#{i}: loss={loss_val} time={int(elapsed_time*1000000)}[µs]")
 
 			path = f"{i}.jpg"
@@ -182,7 +182,7 @@ if __name__ == "__main__":
 			print("done.")
 
 			# Ignore the time spent saving the image
-			prev_time = time.time()
+			prev_time = time.perf_counter()
 
 			if i > 0 and interval < 1000:
 				interval *= 10
