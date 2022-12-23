@@ -79,7 +79,7 @@ endif()
 # Adapted from the CMake source code at https://github.com/Kitware/CMake/blob/master/Modules/FindCUDA/select_compute_arch.cmake
 # Simplified to return a semicolon-separated list of the compute capabilities of installed devices
 function(TCNN_AUTODETECT_CUDA_ARCHITECTURES OUT_VARIABLE)
-	if (NOT CUDA_GPU_DETECT_OUTPUT)
+	if (NOT TCNN_AUTODETECT_CUDA_ARCHITECTURES_OUTPUT)
 		if (CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
 			set(file "${PROJECT_BINARY_DIR}/detect_tcnn_cuda_architectures.cu")
 		else()
@@ -117,15 +117,15 @@ function(TCNN_AUTODETECT_CUDA_ARCHITECTURES OUT_VARIABLE)
 		if (run_result EQUAL 0)
 			# If the user has multiple GPUs with the same compute capability installed, list that capability only once.
 			list(REMOVE_DUPLICATES compute_capabilities)
-			set(CUDA_GPU_DETECT_OUTPUT ${compute_capabilities} CACHE INTERNAL "Returned GPU architectures from detect_gpus tool" FORCE)
+			set(TCNN_AUTODETECT_CUDA_ARCHITECTURES_OUTPUT ${compute_capabilities} CACHE INTERNAL "Returned GPU architectures from detect_gpus tool" FORCE)
 		endif()
 	endif()
 
-	if (NOT CUDA_GPU_DETECT_OUTPUT)
+	if (NOT TCNN_AUTODETECT_CUDA_ARCHITECTURES_OUTPUT)
 		message(STATUS "Automatic GPU detection failed. Building for Turing and Ampere as a best guess.")
 		set(${OUT_VARIABLE} "75;86" PARENT_SCOPE)
 	else()
-		set(${OUT_VARIABLE} ${CUDA_GPU_DETECT_OUTPUT} PARENT_SCOPE)
+		set(${OUT_VARIABLE} ${TCNN_AUTODETECT_CUDA_ARCHITECTURES_OUTPUT} PARENT_SCOPE)
 	endif()
 endfunction()
 
