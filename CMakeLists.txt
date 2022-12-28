@@ -101,13 +101,14 @@ function(TCNN_AUTODETECT_CUDA_ARCHITECTURES OUT_VARIABLE)
 			"		}\n"
 			"	}\n"
 			"	return 0;\n"
-			"}\n")
+			"}\n"
+		)
 
 		if (CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
-			try_run(run_result compile_result SOURCES ${file} RUN_OUTPUT_VARIABLE compute_capabilities)
+			try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file} RUN_OUTPUT_VARIABLE compute_capabilities)
 		else()
 			try_run(
-				run_result compile_result SOURCES ${file}
+				run_result compile_result ${PROJECT_BINARY_DIR} ${file}
 				CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
 				LINK_LIBRARIES ${CUDA_LIBRARIES}
 				RUN_OUTPUT_VARIABLE compute_capabilities
