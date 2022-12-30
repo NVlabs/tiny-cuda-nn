@@ -31,6 +31,7 @@ project(
 
 option(TCNN_BUILD_BENCHMARK "Build tiny-cuda-nn example benchmark?" ON)
 option(TCNN_BUILD_EXAMPLES "Build tiny-cuda-nn example applications?" ON)
+option(TCNN_ALLOW_CUBLAS_CUSOLVER "Allows tiny-cuda-nn to use cuBLAS and cuSolver. Only required for the Shampoo optimizer." OFF)
 set(TCNN_CUDA_ARCHITECTURES "" CACHE STRING "Build tiny-cuda-nn for a specific GPU architecture.")
 
 ###############################################################################
@@ -211,10 +212,12 @@ if (CUDA_VERSION VERSION_LESS 10.2)
 	message(FATAL_ERROR "CUDA version too low. tiny-cuda-nn require CUDA 10.2 or higher.")
 endif()
 
+list(APPEND TCNN_LIBRARIES cuda)
 list(APPEND TCNN_DEFINITIONS -DTCNN_MIN_GPU_ARCH=${MIN_GPU_ARCH})
-if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
+if (TCNN_ALLOW_CUBLAS_CUSOLVER AND CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
 	# Only compile the shampoo optimizer if
 	# a new enough cuBLAS version is available.
+	list(APPEND TCNN_LIBRARIES cublas)
 	list(APPEND TCNN_DEFINITIONS -DTCNN_SHAMPOO)
 endif()
 
@@ -238,16 +241,9 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 # Dependencies
 ###############################################################################
 
-if (MSVC)
-else()
+if (NOT MSVC)
 	set(CUDA_TOOLKIT_ROOT_DIR /opt/cuda/targets/x86_64-linux)
 endif()
-find_library(
-	CUDA_CUBLASLT_LIBRARY cublasLt
-	${CUDA_TOOLKIT_ROOT_DIR}/lib64
-	${CUDA_TOOLKIT_ROOT_DIR}/lib
-	${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-)
 
 set(BUILD_SHARED_LIBS OFF)
 add_subdirectory("dependencies/fmt")
@@ -292,7 +288,7 @@ target_include_directories(tiny-cuda-nn PUBLIC
 	"dependencies/cutlass/tools/util/include"
 	"dependencies/fmt/include"
 )
-target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} cuda cublas fmt)
+target_link_libraries(tiny-cuda-nn PUBLIC ${CUDA_LIBRARIES} ${TCNN_LIBRARIES} fmt)
 
 if (TCNN_BUILD_EXAMPLES)
 	add_subdirectory("samples")
