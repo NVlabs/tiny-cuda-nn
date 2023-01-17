@@ -70,7 +70,7 @@ model.network->inference(inference_inputs, inference_outputs);
 
 We provide a sample application where an image function _(x,y) -> (R,G,B)_ is learned. It can be run via
 ```sh
-tiny-cuda-nn/build$ ./mlp_learning_an_image ../data/images/albert.jpg ../data/config_hash.json
+tiny-cuda-nn$ ./build/mlp_learning_an_image data/images/albert.jpg data/config_hash.json
 ```
 producing an image every 1000 training steps. Each 1000 steps should take roughly 0.42 seconds with the default configuration on an RTX 3090.
 
