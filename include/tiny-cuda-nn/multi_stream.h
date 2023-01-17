@@ -74,6 +74,11 @@ public:
 		CUDA_CHECK_THROW(cudaStreamWaitEvent(m_stream, event, 0));
 	}
 
+	void wait_for(cudaStream_t stream) {
+		CUDA_CHECK_THROW(cudaEventRecord(m_event, stream));
+		wait_for(m_event);
+	}
+
 	void signal(cudaStream_t stream) {
 		CUDA_CHECK_THROW(cudaEventRecord(m_event, m_stream));
 		CUDA_CHECK_THROW(cudaStreamWaitEvent(stream, m_event, 0));
