@@ -90,4 +90,7 @@ public:
 template <typename T>
 Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& params, uint32_t alignment = 8);
 
+template <typename T>
+void register_encoding(const std::string& name, const std::function<Encoding<T>*(uint32_t, const json&)>& factory);
+
 TCNN_NAMESPACE_END

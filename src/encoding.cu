@@ -82,75 +82,98 @@ std::string to_string(ReductionType reduction_type) {
 }
 
 template <typename T>
-Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment) {
-	std::string encoding_type = encoding.value("otype", "OneBlob");
+void register_builtin_encodings() {
+	register_encoding<T>("Composite", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new CompositeEncoding<T>{encoding, n_dims_to_encode};
+	});
 
-	Encoding<T>* result;
+	register_encoding<T>("Identity", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new IdentityEncoding<T>{n_dims_to_encode, encoding.value("scale", 1.0f), encoding.value("offset", 0.0f)};
+	});
 
-	if (equals_case_insensitive(encoding_type, "Composite")) {
-		result = new CompositeEncoding<T>{
-			encoding,
-			n_dims_to_encode,
-		};
-	} else if (equals_case_insensitive(encoding_type, "Identity")) {
-		result = new IdentityEncoding<T>{
-			n_dims_to_encode,
-			encoding.value("scale", 1.0f),
-			encoding.value("offset", 0.0f),
-		};
-	} else if (equals_case_insensitive(encoding_type, "Frequency")) {
-		result = new FrequencyEncoding<T>{
-			encoding.value("n_frequencies", 12u),
-			n_dims_to_encode,
-		};
-	} else if (equals_case_insensitive(encoding_type, "TriangleWave")) {
-		result = new TriangleWaveEncoding<T>{
-			encoding.value("n_frequencies", 12u),
-			n_dims_to_encode,
-		};
-	} else if (equals_case_insensitive(encoding_type, "SphericalHarmonics")) {
-		result = new SphericalHarmonicsEncoding<T>{
-			encoding.value("degree", 4u),
-			n_dims_to_encode,
-		};
-	} else if (equals_case_insensitive(encoding_type, "OneBlob")) {
-		result = new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
-	} else if (equals_case_insensitive(encoding_type, "OneBlobFrequency") || equals_case_insensitive(encoding_type, "NRC")) {
-		json nrc_composite = {
-			{"otype", "Composite"},
-			{"nested", {
-				{
-					{"n_dims_to_encode", 3},
-					{"otype", "TriangleWave"},
-					{"n_frequencies", encoding.value("n_frequencies", 12u)},
-				}, {
-					{"n_dims_to_encode", 5},
-					{"otype", "OneBlob"},
-					{"n_bins", encoding.value("n_bins", 4u)},
-				}, {
-					{"otype", "Identity"},
-				},
-			}},
-		};
+	register_encoding<T>("Frequency", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new FrequencyEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
+	});
 
-		result = new CompositeEncoding<T>{
-			nrc_composite,
+	register_encoding<T>("TriangleWave", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new TriangleWaveEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
+	});
+
+	register_encoding<T>("SphericalHarmonics", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new SphericalHarmonicsEncoding<T>{encoding.value("degree", 4u), n_dims_to_encode};
+	});
+
+	register_encoding<T>("OneBlob", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
+	});
+
+	auto nrc_factory = [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new CompositeEncoding<T>{
+			{
+				{"otype", "Composite"},
+				{"nested", {
+					{
+						{"n_dims_to_encode", 3},
+						{"otype", "TriangleWave"},
+						{"n_frequencies", encoding.value("n_frequencies", 12u)},
+					}, {
+						{"n_dims_to_encode", 5},
+						{"otype", "OneBlob"},
+						{"n_bins", encoding.value("n_bins", 4u)},
+					}, {
+						{"otype", "Identity"},
+					},
+				}},
+			},
 			n_dims_to_encode,
 		};
-	} else if (
-		equals_case_insensitive(encoding_type, "Grid") ||
-		equals_case_insensitive(encoding_type, "HashGrid") ||
-		equals_case_insensitive(encoding_type, "TiledGrid") ||
-		equals_case_insensitive(encoding_type, "DenseGrid")
-	) {
-		result = create_grid_encoding<T>(n_dims_to_encode, encoding);
-	} else {
-		throw std::runtime_error{fmt::format("Invalid encoding type: {}", encoding_type)};
+	};
+	register_encoding<T>("OneBlobFrequency", nrc_factory);
+	register_encoding<T>("NRC", nrc_factory);
+
+	auto grid_factory = [](uint32_t n_dims_to_encode, const json& encoding) {
+		return create_grid_encoding<T>(n_dims_to_encode, encoding);
+	};
+	register_encoding<T>("Grid", grid_factory);
+	register_encoding<T>("HashGrid", grid_factory);
+	register_encoding<T>("TiledGrid", grid_factory);
+	register_encoding<T>("DenseGrid", grid_factory);
+}
+
+template <typename T>
+auto& encoding_factories() {
+	static std::unordered_map<std::string, std::function<Encoding<T>*(uint32_t, const json&)>> factories;
+	return factories;
+}
+
+template <typename T>
+void register_encoding(const std::string& name, const std::function<Encoding<T>*(uint32_t, const json&)>& factory) {
+	if (encoding_factories<T>().count(to_lower(name)) > 0) {
+		throw std::runtime_error{fmt::format("Can not register encoding '{}' twice.", name)};
 	}
 
+	encoding_factories<T>().insert({to_lower(name), factory});
+}
+
+template <typename T>
+Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment) {
+	// Calls register_builtin_encodings<T>() on first invocation of create_encoding<T>(...)
+	// in a thread-safe manner and ensures all concurrent calls progress further only
+	// once register_builtin_encodings<T>() terminated. See the C++ documentation on static
+	// local variables for more information.
+	static struct Init { Init() { register_builtin_encodings<T>(); } } init;
+
+	std::string name = encoding.value("otype", "OneBlob");
+
+	if (encoding_factories<T>().count(to_lower(name)) == 0) {
+		throw std::runtime_error{fmt::format("Encoding '{}' not found", name)};
+	}
+
+	Encoding<T>* result = encoding_factories<T>().at(to_lower(name))(n_dims_to_encode, encoding);
 	if (alignment > 0) {
 		result->set_alignment(alignment);
 	}
+
 	return result;
 }
 
