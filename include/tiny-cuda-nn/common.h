@@ -157,15 +157,19 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 class ScopeGuard {
 public:
 	ScopeGuard() = default;
-	ScopeGuard(const std::function<void()>& callback) : mCallback{callback} {}
-	ScopeGuard(std::function<void()>&& callback) : mCallback{std::move(callback)} {}
+	ScopeGuard(const std::function<void()>& callback) : m_callback{callback} {}
+	ScopeGuard(std::function<void()>&& callback) : m_callback{std::move(callback)} {}
 	ScopeGuard& operator=(const ScopeGuard& other) = delete;
 	ScopeGuard(const ScopeGuard& other) = delete;
-	ScopeGuard& operator=(ScopeGuard&& other) { std::swap(mCallback, other.mCallback); return *this; }
+	ScopeGuard& operator=(ScopeGuard&& other) { std::swap(m_callback, other.m_callback); return *this; }
 	ScopeGuard(ScopeGuard&& other) { *this = std::move(other); }
-	~ScopeGuard() { if (mCallback) { mCallback(); } }
+	~ScopeGuard() { if (m_callback) { m_callback(); } }
+
+	void disarm() {
+		m_callback = {};
+	}
 private:
-	std::function<void()> mCallback;
+	std::function<void()> m_callback;
 };
 
 //////////////////////////////////////
