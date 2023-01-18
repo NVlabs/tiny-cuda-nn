@@ -122,7 +122,7 @@ The number of encoded dimensions is `n_levels * n_features_per_level`.
 	"per_level_scale": 2.0,    // The geometric growth factor, i.e.
 	                           // the factor by which the resolution
 	                           // of each grid is larger (per axis)
-	                           // than that of the preceeding level.
+	                           // than that of the preceding level.
 	"interpolation": "Linear"  // How to interpolate nearby grid
 	                           // lookups. Can be "Nearest", "Linear",
 	                           // or "Smoothstep" (for smooth deri-
