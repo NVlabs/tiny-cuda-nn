@@ -69,6 +69,11 @@ if os.name == "nt":
 		if cl_path is None:
 			raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
 		os.environ["PATH"] += ";" + cl_path
+	else:
+		# cl.exe was found in PATH, so we can assume that the user is already in a developer command prompt
+		# In this case, BuildExtensions requires the following environment variable to be set such that it
+		# won't try to activate a developer command prompt a second time.
+		os.environ["DISTUTILS_USE_SDK"] = "1"
 
 # Get CUDA version and make sure the targeted compute capability is compatible
 if os.system("nvcc --version") == 0:
