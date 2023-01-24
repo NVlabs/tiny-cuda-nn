@@ -1,12 +1,31 @@
 import os
 
-import torch
+import re
 from setuptools import setup
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+from pkg_resources import parse_version
+import subprocess
 import sys
+import torch
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+
+def min_supported_compute_capability(cuda_version):
+	if cuda_version >= parse_version("12.0"):
+		return 50
+	else:
+		return 20
+
+def max_supported_compute_capability(cuda_version):
+	if cuda_version < parse_version("11.0"):
+		return 75
+	elif cuda_version < parse_version("11.1"):
+		return 80
+	elif cuda_version < parse_version("11.8"):
+		return 86
+	else:
+		return 90
 
 # Find version of tinycudann by scraping CMakeLists.txt
 with open(os.path.join(ROOT_DIR, "CMakeLists.txt"), "r") as cmakelists:
@@ -29,8 +48,6 @@ elif torch.cuda.is_available():
 else:
 	raise EnvironmentError("Unknown compute capability. Specify the target compute capabilities in the TCNN_CUDA_ARCHITECTURES environment variable or install PyTorch with the CUDA backend to detect it automatically.")
 
-min_compute_capability = min(compute_capabilities)
-
 include_networks = True
 if "--no-networks" in sys.argv:
 	include_networks = False
@@ -52,6 +69,27 @@ if os.name == "nt":
 		if cl_path is None:
 			raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
 		os.environ["PATH"] += ";" + cl_path
+
+# Get CUDA version and make sure the targeted compute capability is compatible
+if os.system("nvcc --version") == 0:
+	nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode()
+	cuda_version = re.search(r"release (\S+),", nvcc_out)
+
+	if cuda_version:
+		cuda_version = parse_version(cuda_version.group(1))
+		print(f"Detected CUDA version {cuda_version}")
+		supported_compute_capabilities = [
+			cc for cc in compute_capabilities if cc >= min_supported_compute_capability(cuda_version) and cc <= max_supported_compute_capability(cuda_version)
+		]
+
+		if not supported_compute_capabilities:
+			supported_compute_capabilities = [max_supported_compute_capability(cuda_version)]
+
+		if supported_compute_capabilities != compute_capabilities:
+			print(f"Compute capabilities {compute_capabilities} are not all supported by the installed CUDA version {cuda_version}. Targeting {supported_compute_capabilities} instead.")
+			compute_capabilities = supported_compute_capabilities
+
+min_compute_capability = min(compute_capabilities)
 
 nvcc_flags = [
 	"-std=c++14",
