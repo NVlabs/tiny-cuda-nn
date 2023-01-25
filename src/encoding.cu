@@ -30,6 +30,7 @@
 #include <tiny-cuda-nn/encoding.h>
 
 #include <tiny-cuda-nn/encodings/composite.h>
+#include <tiny-cuda-nn/encodings/empty.h>
 #include <tiny-cuda-nn/encodings/frequency.h>
 #include <tiny-cuda-nn/encodings/grid.h>
 #include <tiny-cuda-nn/encodings/identity.h>
@@ -87,24 +88,36 @@ void register_builtin_encodings() {
 		return new CompositeEncoding<T>{encoding, n_dims_to_encode};
 	});
 
-	register_encoding<T>("Identity", [](uint32_t n_dims_to_encode, const json& encoding) {
-		return new IdentityEncoding<T>{n_dims_to_encode, encoding.value("scale", 1.0f), encoding.value("offset", 0.0f)};
+	register_encoding<T>("Empty", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new EmptyEncoding<T>{n_dims_to_encode};
 	});
 
 	register_encoding<T>("Frequency", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new FrequencyEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
 	});
 
-	register_encoding<T>("TriangleWave", [](uint32_t n_dims_to_encode, const json& encoding) {
-		return new TriangleWaveEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
+	auto grid_factory = [](uint32_t n_dims_to_encode, const json& encoding) {
+		return create_grid_encoding<T>(n_dims_to_encode, encoding);
+	};
+	register_encoding<T>("Grid", grid_factory);
+	register_encoding<T>("HashGrid", grid_factory);
+	register_encoding<T>("TiledGrid", grid_factory);
+	register_encoding<T>("DenseGrid", grid_factory);
+
+	register_encoding<T>("Identity", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new IdentityEncoding<T>{n_dims_to_encode, encoding.value("scale", 1.0f), encoding.value("offset", 0.0f)};
+	});
+
+	register_encoding<T>("OneBlob", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
 	});
 
 	register_encoding<T>("SphericalHarmonics", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new SphericalHarmonicsEncoding<T>{encoding.value("degree", 4u), n_dims_to_encode};
 	});
 
-	register_encoding<T>("OneBlob", [](uint32_t n_dims_to_encode, const json& encoding) {
-		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
+	register_encoding<T>("TriangleWave", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new TriangleWaveEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
 	});
 
 	auto nrc_factory = [](uint32_t n_dims_to_encode, const json& encoding) {
@@ -130,14 +143,6 @@ void register_builtin_encodings() {
 	};
 	register_encoding<T>("OneBlobFrequency", nrc_factory);
 	register_encoding<T>("NRC", nrc_factory);
-
-	auto grid_factory = [](uint32_t n_dims_to_encode, const json& encoding) {
-		return create_grid_encoding<T>(n_dims_to_encode, encoding);
-	};
-	register_encoding<T>("Grid", grid_factory);
-	register_encoding<T>("HashGrid", grid_factory);
-	register_encoding<T>("TiledGrid", grid_factory);
-	register_encoding<T>("DenseGrid", grid_factory);
 }
 
 template <typename T>
