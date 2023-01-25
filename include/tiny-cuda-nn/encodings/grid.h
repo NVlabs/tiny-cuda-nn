@@ -1044,8 +1044,8 @@ public:
 					out(elem)[n_output_dims + dim] = 0;
 				});
 			} else {
-				parallel_for_gpu_aos(synced_streams.get(1), num_elements, m_n_to_pad, [num_elements, n_output_dims=m_n_output_dims, out_soa=output->data()] __device__ (size_t elem, size_t dim) {
-					out_soa[elem + (n_output_dims + dim) * num_elements] = 0;
+				parallel_for_gpu(synced_streams.get(1), num_elements * m_n_to_pad, [out=output->data() + num_elements * m_n_output_dims] __device__ (size_t i) {
+					out[i] = 0;
 				});
 			}
 		}
