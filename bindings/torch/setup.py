@@ -96,7 +96,7 @@ if os.system("nvcc --version") == 0:
 
 min_compute_capability = min(compute_capabilities)
 
-nvcc_flags = [
+base_nvcc_flags = [
 	"-std=c++14",
 	"--extended-lambda",
 	"--expt-relaxed-constexpr",
@@ -106,23 +106,17 @@ nvcc_flags = [
 	"-U__CUDA_NO_HALF_CONVERSIONS__",
 	"-U__CUDA_NO_HALF2_OPERATORS__",
 ]
-nvcc_flags += [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"] for compute_capability in compute_capabilities]
 
 if os.name == "posix":
-	cflags = ["-std=c++14"]
-	nvcc_flags += [
+	base_cflags = ["-std=c++14"]
+	base_nvcc_flags += [
 		"-Xcompiler=-mf16c",
 		"-Xcompiler=-Wno-float-conversion",
 		"-Xcompiler=-fno-strict-aliasing",
 	]
 elif os.name == "nt":
-	cflags = ["/std:c++14"]
+	base_cflags = ["/std:c++14"]
 
-definitions = [
-	f"-DTCNN_MIN_GPU_ARCH={min_compute_capability}"
-]
-nvcc_flags += definitions
-cflags += definitions
 
 # Some containers set this to contain old architectures that won't compile. We only need the one installed in the machine.
 os.environ["TORCH_CUDA_ARCH_LIST"] = ""
@@ -130,7 +124,7 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = ""
 # List of sources.
 bindings_dir = os.path.dirname(__file__)
 root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
-source_files = [
+base_source_files = [
 	"tinycudann/bindings.cpp",
 	"../../dependencies/fmt/src/format.cc",
 	"../../dependencies/fmt/src/os.cc",
@@ -140,32 +134,43 @@ source_files = [
 	"../../src/encoding.cu",
 ]
 
-if include_networks:
-	source_files += [
-		"../../src/network.cu",
-		"../../src/cutlass_mlp.cu",
-	]
 
-	if min_compute_capability > 70:
-		source_files.append("../../src/fully_fused_mlp.cu")
-else:
-	nvcc_flags.append("-DTCNN_NO_NETWORKS")
-	cflags.append("-DTCNN_NO_NETWORKS")
+def make_extension(compute_capability):
+    nvcc_flags = base_nvcc_flags + [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"]]
+    definitions = [
+        f"-DTCNN_MIN_GPU_ARCH={compute_capability}"
+    ]
 
-ext = CUDAExtension(
-	name=f"tinycudann_bindings_{min_compute_capability}._C",
-	sources=source_files,
-	include_dirs=[
-		"%s/include" % root_dir,
-		"%s/dependencies" % root_dir,
-		"%s/dependencies/cutlass/include" % root_dir,
-		"%s/dependencies/cutlass/tools/util/include" % root_dir,
-		"%s/dependencies/fmt/include" % root_dir,
-	],
-	extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
-	libraries=["cuda", "cudadevrt", "cudart_static"],
-)
-ext_modules = [ext]
+    if include_networks:
+        source_files = base_source_files + [
+                "../../src/network.cu",
+                "../../src/cutlass_mlp.cu",
+        ]
+
+        if compute_capability > 70:
+                source_files.append("../../src/fully_fused_mlp.cu")
+    else:
+        definitions.append("-DTCNN_NO_NETWORKS")
+
+    nvcc_flags = nvcc_flags + definitions
+    cflags = base_cflags + definitions
+
+    ext = CUDAExtension(
+        name=f"tinycudann_bindings._{compute_capability}_C",
+        sources=source_files,
+        include_dirs=[
+            "%s/include" % root_dir,
+            "%s/dependencies" % root_dir,
+            "%s/dependencies/cutlass/include" % root_dir,
+            "%s/dependencies/cutlass/tools/util/include" % root_dir,
+            "%s/dependencies/fmt/include" % root_dir,
+        ],
+        extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
+        libraries=["cuda", "cudadevrt", "cudart_static"],
+    )
+    return ext
+
+ext_modules = [make_extension(comp) for comp in compute_capabilities]
 
 setup(
 	name="tinycudann",
