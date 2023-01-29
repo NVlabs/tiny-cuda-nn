@@ -136,39 +136,39 @@ base_source_files = [
 
 
 def make_extension(compute_capability):
-    nvcc_flags = base_nvcc_flags + [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"]]
-    definitions = [
-        f"-DTCNN_MIN_GPU_ARCH={compute_capability}"
-    ]
+	nvcc_flags = base_nvcc_flags + [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"]]
+	definitions = [
+		f"-DTCNN_MIN_GPU_ARCH={compute_capability}"
+	]
 
-    if include_networks:
-        source_files = base_source_files + [
-                "../../src/network.cu",
-                "../../src/cutlass_mlp.cu",
-        ]
+	if include_networks:
+		source_files = base_source_files + [
+				"../../src/network.cu",
+				"../../src/cutlass_mlp.cu",
+		]
 
-        if compute_capability > 70:
-                source_files.append("../../src/fully_fused_mlp.cu")
-    else:
-        definitions.append("-DTCNN_NO_NETWORKS")
+		if compute_capability > 70:
+			source_files.append("../../src/fully_fused_mlp.cu")
+	else:
+		definitions.append("-DTCNN_NO_NETWORKS")
 
-    nvcc_flags = nvcc_flags + definitions
-    cflags = base_cflags + definitions
+	nvcc_flags = nvcc_flags + definitions
+	cflags = base_cflags + definitions
 
-    ext = CUDAExtension(
-        name=f"tinycudann_bindings._{compute_capability}_C",
-        sources=source_files,
-        include_dirs=[
-            "%s/include" % root_dir,
-            "%s/dependencies" % root_dir,
-            "%s/dependencies/cutlass/include" % root_dir,
-            "%s/dependencies/cutlass/tools/util/include" % root_dir,
-            "%s/dependencies/fmt/include" % root_dir,
-        ],
-        extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
-        libraries=["cuda", "cudadevrt", "cudart_static"],
-    )
-    return ext
+	ext = CUDAExtension(
+		name=f"tinycudann_bindings._{compute_capability}_C",
+		sources=source_files,
+		include_dirs=[
+			"%s/include" % root_dir,
+			"%s/dependencies" % root_dir,
+			"%s/dependencies/cutlass/include" % root_dir,
+			"%s/dependencies/cutlass/tools/util/include" % root_dir,
+			"%s/dependencies/fmt/include" % root_dir,
+		],
+		extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
+		libraries=["cuda", "cudadevrt", "cudart_static"],
+	)
+	return ext
 
 ext_modules = [make_extension(comp) for comp in compute_capabilities]
 
