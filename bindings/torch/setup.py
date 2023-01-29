@@ -124,6 +124,7 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = ""
 # List of sources.
 bindings_dir = os.path.dirname(__file__)
 root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
+base_definitions = []
 base_source_files = [
 	"tinycudann/bindings.cpp",
 	"../../dependencies/fmt/src/format.cc",
@@ -134,23 +135,22 @@ base_source_files = [
 	"../../src/encoding.cu",
 ]
 
+if include_networks:
+	base_source_files += [
+		"../../src/network.cu",
+		"../../src/cutlass_mlp.cu",
+	]
+else:
+	base_definitions.append("-DTCNN_NO_NETWORKS")
 
 def make_extension(compute_capability):
 	nvcc_flags = base_nvcc_flags + [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"]]
-	definitions = [
-		f"-DTCNN_MIN_GPU_ARCH={compute_capability}"
-	]
+	definitions = base_definitions + [f"-DTCNN_MIN_GPU_ARCH={compute_capability}"]
 
-	if include_networks:
-		source_files = base_source_files + [
-				"../../src/network.cu",
-				"../../src/cutlass_mlp.cu",
-		]
-
-		if compute_capability > 70:
-			source_files.append("../../src/fully_fused_mlp.cu")
+	if include_networks and compute_capability > 70:
+		source_files = base_source_files + ["../../src/fully_fused_mlp.cu"]
 	else:
-		definitions.append("-DTCNN_NO_NETWORKS")
+		source_files = base_source_files
 
 	nvcc_flags = nvcc_flags + definitions
 	cflags = base_cflags + definitions
