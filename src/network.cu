@@ -122,7 +122,7 @@ uint32_t minimum_alignment(const json& network) {
 			default: throw std::runtime_error{fmt::format("FullyFusedMLP only supports 16, 32, 64, and 128 neurons, but got {}. Use CutlassMLP instead if this is a requirement.", n_neurons)};
 		}
 #else
-		throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <70."};
+		throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <=70."};
 #endif
 	} else {
 		return CutlassMLP<network_precision_t>::REQUIRED_ALIGNMENT();
