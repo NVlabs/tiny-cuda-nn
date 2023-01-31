@@ -110,7 +110,6 @@ base_nvcc_flags = [
 if os.name == "posix":
 	base_cflags = ["-std=c++14"]
 	base_nvcc_flags += [
-		"-Xcompiler=-mf16c",
 		"-Xcompiler=-Wno-float-conversion",
 		"-Xcompiler=-fno-strict-aliasing",
 	]
