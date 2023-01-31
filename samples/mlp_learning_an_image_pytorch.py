@@ -98,7 +98,6 @@ if __name__ == "__main__":
 	print("================================================================")
 	print("This script replicates the behavior of the native CUDA example  ")
 	print("mlp_learning_an_image.cu using tiny-cuda-nn's PyTorch extension.")
-	print("This extension >> runs ~3x slower than native << as of now.     ")
 	print("================================================================")
 
 	device = torch.device("cuda")
@@ -143,7 +142,7 @@ if __name__ == "__main__":
 
 	prev_time = time.perf_counter()
 
-	batch_size = 2**16
+	batch_size = 2**18
 	interval = 10
 
 	print(f"Beginning optimization with {args.n_steps} training steps.")
@@ -151,7 +150,6 @@ if __name__ == "__main__":
 	try:
 		batch = torch.rand([batch_size, 2], device=device, dtype=torch.float32)
 		traced_image = torch.jit.trace(image, batch)
-		traced_image(batch)
 	except:
 		# If tracing causes an error, fall back to regular execution
 		print(f"WARNING: PyTorch JIT trace failed. Performance will be slightly worse than regular.")

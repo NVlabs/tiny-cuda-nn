@@ -210,7 +210,7 @@ int main(int argc, char* argv[]) {
 		// Fourth step: train the model by sampling the above image and optimizing an error metric
 
 		// Various constants for the network and optimization
-		const uint32_t batch_size = 1 << 16;
+		const uint32_t batch_size = 1 << 18;
 		const uint32_t n_training_steps = argc >= 4 ? atoi(argv[3]) : 10000000;
 		const uint32_t n_input_dims = 2; // 2-D image coordinate
 		const uint32_t n_output_dims = 3; // RGB color
