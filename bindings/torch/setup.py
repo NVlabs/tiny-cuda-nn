@@ -91,7 +91,7 @@ if os.system("nvcc --version") == 0:
 			supported_compute_capabilities = [max_supported_compute_capability(cuda_version)]
 
 		if supported_compute_capabilities != compute_capabilities:
-			print(f"Compute capabilities {compute_capabilities} are not all supported by the installed CUDA version {cuda_version}. Targeting {supported_compute_capabilities} instead.")
+			print(f"WARNING: Compute capabilities {compute_capabilities} are not all supported by the installed CUDA version {cuda_version}. Targeting {supported_compute_capabilities} instead.")
 			compute_capabilities = supported_compute_capabilities
 
 min_compute_capability = min(compute_capabilities)

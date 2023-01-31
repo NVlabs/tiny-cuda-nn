@@ -28,15 +28,15 @@ def _get_system_compute_capability():
 
 	if not all(cc == system_capability for cc in device_capability):
 		warnings.warn(
-			f"System has multiple GPUs with different compute capabilities: {device_capability}.\n"
-			f"Using compute capability {system_capability} for best compatibility.\n"
-			"This may result in suboptimal performance.")
+			f"System has multiple GPUs with different compute capabilities: {device_capability}. "
+			f"Using compute capability {system_capability} for best compatibility. "
+			f"This may result in suboptimal performance."
+		)
 	return system_capability
 
 # Determine the capability of the system as the minimum of all
 # devices, ensuring that we have no runtime errors.
 system_compute_capability = _get_system_compute_capability()
-
 
 # Try to import the highest compute capability version of tcnn that
 # we can find and is compatible with the system's compute capability.
@@ -48,6 +48,8 @@ for cc in reversed(ALL_COMPUTE_CAPABILITIES):
 
 	try:
 		_C = importlib.import_module(f"tinycudann_bindings._{cc}_C")
+		if cc != system_compute_capability:
+			warnings.warn(f"tinycudann was built for lower compute capability ({cc}) than the system's ({system_compute_capability}). Performance may be suboptimal.")
 		break
 	except ModuleNotFoundError:
 		pass
@@ -98,7 +100,7 @@ class _module_function(torch.autograd.Function):
 			return None, None, None, None
 
 		if not doutput.is_cuda:
-			print("TCNN WARNING: doutput must be a CUDA tensor, but isn't. This indicates suboptimal performance.")
+			warnings.warn("doutput must be a CUDA tensor, but isn't. This indicates suboptimal performance.")
 			doutput = doutput.cuda()
 
 		input, params, output = ctx.saved_tensors
@@ -164,7 +166,7 @@ class Module(torch.nn.Module):
 
 	def forward(self, x):
 		if not x.is_cuda:
-			print("TCNN WARNING: input must be a CUDA tensor, but isn't. This indicates suboptimal performance.")
+			warnings.warn("input must be a CUDA tensor, but isn't. This indicates suboptimal performance.")
 			x = x.cuda()
 
 		batch_size = x.shape[0]
