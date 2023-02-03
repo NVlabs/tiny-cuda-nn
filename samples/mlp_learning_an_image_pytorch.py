@@ -86,10 +86,10 @@ class Image(torch.nn.Module):
 def get_args():
 	parser = argparse.ArgumentParser(description="Image benchmark using PyTorch bindings.")
 
-	parser.add_argument("image", nargs="?", default="data/images/albert.jpg", help="Image to match")
-	parser.add_argument("config", nargs="?", default="data/config_hash.json", help="JSON config for tiny-cuda-nn")
-	parser.add_argument("n_steps", nargs="?", type=int, default=10000000, help="Number of training steps")
-	parser.add_argument("result_filename", nargs="?", default="", help="Number of training steps")
+	parser.add_argument("--image", nargs="?", default="data/images/albert.jpg", help="Image to match")
+	parser.add_argument("--config", nargs="?", default="data/config_hash.json", help="JSON config for tiny-cuda-nn")
+	parser.add_argument("--n_steps", nargs="?", type=int, default=10000000, help="Number of training steps")
+	parser.add_argument("--result_filename", nargs="?", default="", help="Number of training steps")
 
 	args = parser.parse_args()
 	return args
