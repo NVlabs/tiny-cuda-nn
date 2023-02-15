@@ -75,6 +75,11 @@ public:
 
 	virtual MatrixLayout preferred_output_layout() const = 0;
 
+	virtual size_t n_nested() const { return 0; }
+	virtual const std::shared_ptr<Encoding<T>>& nested(size_t idx = 0) const {
+		throw std::runtime_error{"Encoding does not support nesting."};
+	}
+
 	// By default, an encoding has no parameters
 	void set_params_impl(T* params, T* inference_params, T* gradients) override { }
 	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override { }
