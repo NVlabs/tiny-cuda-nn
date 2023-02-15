@@ -903,6 +903,8 @@ public:
 	virtual size_t level_n_params(uint32_t level) const = 0;
 	virtual size_t level_params_offset(uint32_t level) const = 0;
 
+	virtual const GridOffsetTable& grid_offset_table() const = 0;
+
 	float max_level() const {
 		return m_max_level;
 	}
@@ -1369,6 +1371,10 @@ public:
 		}
 
 		return m_offset_table.data[level];
+	}
+
+	const GridOffsetTable& grid_offset_table() const override {
+		return m_offset_table;
 	}
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override {
