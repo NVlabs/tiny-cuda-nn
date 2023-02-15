@@ -121,11 +121,11 @@ public:
 		}
 	}
 
-	uint32_t n_nested() const override {
+	size_t n_nested() const override {
 		return m_nested.size();
 	}
 
-	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {
+	const std::shared_ptr<Optimizer<T>>& nested(size_t idx) const override {
 		CHECK_THROW(idx < m_nested.size());
 		return m_nested[idx];
 	}

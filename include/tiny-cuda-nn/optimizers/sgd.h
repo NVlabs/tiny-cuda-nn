@@ -113,10 +113,6 @@ public:
 		return nullptr;
 	}
 
-	uint32_t n_nested() const override {
-		return 0;
-	}
-
 	void update_hyperparams(const json& params) override {
 		if (params.contains("learning_rate")) {
 			m_learning_rate = params["learning_rate"];

@@ -108,11 +108,11 @@ public:
 		return m_nested->custom_weights();
 	}
 
-	uint32_t n_nested() const override {
+	size_t n_nested() const override {
 		return 1;
 	}
 
-	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {
+	const std::shared_ptr<Optimizer<T>>& nested(size_t idx) const override {
 		CHECK_THROW(idx == 0);
 		return m_nested;
 	}

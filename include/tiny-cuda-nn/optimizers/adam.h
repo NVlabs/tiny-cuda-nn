@@ -207,10 +207,6 @@ public:
 		return nullptr;
 	}
 
-	uint32_t n_nested() const override {
-		return 0;
-	}
-
 	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];

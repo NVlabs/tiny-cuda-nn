@@ -53,8 +53,8 @@ public:
 	virtual uint32_t n_weights() const = 0;
 	virtual T* custom_weights() const = 0;
 
-	virtual uint32_t n_nested() const = 0;
-	virtual const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx = 0) const {
+	virtual size_t n_nested() const { return 0; }
+	virtual const std::shared_ptr<Optimizer<T>>& nested(size_t idx = 0) const {
 		throw std::runtime_error{"Optimizer does not support nesting."};
 	}
 
