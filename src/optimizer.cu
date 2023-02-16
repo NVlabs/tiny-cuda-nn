@@ -35,6 +35,7 @@
 #include <tiny-cuda-nn/optimizers/composite.h>
 #include <tiny-cuda-nn/optimizers/ema.h>
 #include <tiny-cuda-nn/optimizers/exponential_decay.h>
+#include <tiny-cuda-nn/optimizers/lion.h>
 #include <tiny-cuda-nn/optimizers/lookahead.h>
 #include <tiny-cuda-nn/optimizers/novograd.h>
 #include <tiny-cuda-nn/optimizers/sgd.h>
@@ -62,6 +63,8 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 		return new EmaOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "ExponentialDecay")) {
 		return new ExponentialDecayOptimizer<T>{optimizer};
+	} else if (equals_case_insensitive(optimizer_type, "Lion")) {
+		return new LionOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Lookahead")) {
 		return new LookaheadOptimizer<T>{optimizer};
 	} else if (equals_case_insensitive(optimizer_type, "Novograd")) {
