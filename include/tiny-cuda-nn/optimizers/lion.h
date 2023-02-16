@@ -25,6 +25,8 @@
 /** @file   lion.h
  *  @author James Perlman, NVIDIA superfan
  *  @brief  CUDA Implementation of the lion optimizer: https://arxiv.org/abs/2302.06675
+ *  @note   This code is based on https://github.com/google/automl/blob/master/lion/lion_pytorch.py
+ *          Copyright (c) 2023, Google Research. Apache 2.0 License.
  */
 
 #pragma once
