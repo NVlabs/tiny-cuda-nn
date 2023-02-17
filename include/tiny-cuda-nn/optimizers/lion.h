@@ -48,7 +48,6 @@ TCNN_NAMESPACE_BEGIN
 template <typename T>
 __global__ void lion_step(
     const uint32_t n_weights,
-    const uint32_t n_hashgrid_weights,
     const float loss_scale,
     const float learning_rate,
     const float beta1,
@@ -93,7 +92,6 @@ public:
 
 	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
 		m_n_weights = n_weights;
-        m_n_hashgrid_weights = layer_sizes[0].first;
 
 		m_exponential_averages.resize(m_n_weights);
 		m_exponential_averages.memset(0);
@@ -104,7 +102,6 @@ public:
 
 		linear_kernel(lion_step<T>, 0, stream,
 			m_n_weights,
-            m_n_hashgrid_weights,
 			loss_scale,
 			m_base_learning_rate,
 			m_beta1,
@@ -181,7 +178,6 @@ public:
 
 private:
 	uint32_t m_n_weights;
-    uint32_t m_n_hashgrid_weights;
 
 	GPUMemory<float> m_exponential_averages;
 
@@ -189,7 +185,7 @@ private:
 
 	// Hyperparameters
 	float m_base_learning_rate = 1e-4f;
-    float m_weight_decay = 0.0f;
+	float m_weight_decay = 0.0f;
 	float m_beta1 = 0.9f;
 	float m_beta2 = 0.99f;
 };
