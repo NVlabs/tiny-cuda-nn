@@ -73,6 +73,12 @@ __host__ __device__ void warp_activation(Activation activation, const fragment_t
 				result.x[t] = frag.x[t] * (T)((T)frag.x[t] > (T)0.0f);
 			}
 			return;
+        case Activation::LeakyReLU:
+            TCNN_PRAGMA_UNROLL
+            for (int t=0; t < result.num_elements; t++) {
+                result.x[t] = frag.x[t] * (T)((T)frag.x[t] > (T)0.0f ? 1.0f : 0.01f);
+            }
+            return;
 		case Activation::Exponential:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {
@@ -134,6 +140,12 @@ __host__ __device__ void warp_activation_backward_in(Activation activation, cons
 				result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f);
 			}
 			return;
+        case Activation::LeakyReLU:
+            TCNN_PRAGMA_UNROLL
+            for (int t=0; t < result.num_elements; t++) {
+                result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f ? 1.0f : 0.01f);
+            }
+            return;
 		case Activation::Exponential:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {
@@ -199,6 +211,12 @@ __host__ __device__ void warp_activation_backward(Activation activation, const f
 				result.x[t] = frag.x[t] * (T)(forward_frag.x[t] > (T)0.0f);
 			}
 			return;
+        case Activation::LeakyReLU:
+            TCNN_PRAGMA_UNROLL
+            for (int t=0; t < result.num_elements; t++) {
+                result.x[t] = frag.x[t] * (T)(forward_frag.x[t] > (T)0.0f ? 1.0f : 0.01f);
+            }
+            return;
 		case Activation::Exponential:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {

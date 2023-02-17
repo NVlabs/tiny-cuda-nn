@@ -43,7 +43,9 @@ Activation string_to_activation(const std::string& activation_name) {
 		return Activation::None;
 	} else if (equals_case_insensitive(activation_name, "ReLU")) {
 		return Activation::ReLU;
-	} else if (equals_case_insensitive(activation_name, "Exponential")) {
+	} else if (equals_case_insensitive(activation_name, "LeakyReLU")) {
+        return Activation::LeakyReLU;
+    } else if (equals_case_insensitive(activation_name, "Exponential")) {
 		return Activation::Exponential;
 	} else if (equals_case_insensitive(activation_name, "Sigmoid")) {
 		return Activation::Sigmoid;
@@ -64,6 +66,7 @@ std::string to_string(Activation activation) {
 	switch (activation) {
 		case Activation::None: return "None";
 		case Activation::ReLU: return "ReLU";
+        case Activation::LeakyReLU: return "LeakyReLU";
 		case Activation::Exponential: return "Exponential";
 		case Activation::Sigmoid: return "Sigmoid";
 		case Activation::Sine: return "Sine";
