@@ -244,6 +244,14 @@ private:
 // Kernel helpers //
 ////////////////////
 
+#ifdef __NVCC__
+#  ifdef __NVCC_DIAG_PRAGMA_SUPPORT__
+#    pragma nv_diag_suppress = unsigned_compare_with_zero
+#  else
+#    pragma diag_suppress = unsigned_compare_with_zero
+#  endif
+#endif
+
 #if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
 #define TCNN_HOST_DEVICE __host__ __device__
 #define TCNN_DEVICE __device__
@@ -291,6 +299,21 @@ TCNN_HOST_DEVICE T div_round_up(T val, T divisor) {
 template <typename T>
 TCNN_HOST_DEVICE T next_multiple(T val, T divisor) {
 	return div_round_up(val, divisor) * divisor;
+}
+
+template <typename T>
+constexpr TCNN_HOST_DEVICE bool is_pot(T val) {
+	return (val & (val - 1)) == 0;
+}
+
+inline constexpr TCNN_HOST_DEVICE uint32_t next_pot(uint32_t v) {
+	--v;
+	v |= v >> 1;
+	v |= v >> 2;
+	v |= v >> 4;
+	v |= v >> 8;
+	v |= v >> 16;
+	return v+1;
 }
 
 constexpr uint32_t batch_size_granularity = 128;
@@ -421,19 +444,137 @@ inline std::string bytes_to_string(size_t bytes) {
 	return oss.str();
 }
 
-template <typename T, uint32_t N_ELEMS>
-struct vector_t {
+template <typename T, uint32_t N_DIMS, bool ALIGNED=false>
+struct alignas(ALIGNED ? next_pot(sizeof(T) * N_DIMS) : 0) vector_t {
+	vector_t() = default;
+
+	TCNN_HOST_DEVICE vector_t(T scalar) {
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N_DIMS; ++i) {
+			data[i] = scalar;
+		}
+	}
+
+	template <typename U, uint32_t N, bool A>
+	TCNN_HOST_DEVICE vector_t(const vector_t<U, N, A>& other) {
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < min(N_DIMS, N); ++i) {
+			data[i] = (T)other[i];
+		}
+	}
+
 	TCNN_HOST_DEVICE T& operator[](uint32_t idx) {
 		return data[idx];
 	}
 
-	TCNN_HOST_DEVICE T operator [](uint32_t idx) const {
+	TCNN_HOST_DEVICE T operator[](uint32_t idx) const {
 		return data[idx];
 	}
 
-	T data[N_ELEMS];
-	static constexpr uint32_t N = N_ELEMS;
+	TCNN_HOST_DEVICE T& operator()(uint32_t idx) {
+		return data[idx];
+	}
+
+	TCNN_HOST_DEVICE T operator()(uint32_t idx) const {
+		return data[idx];
+	}
+
+	TCNN_HOST_DEVICE static constexpr uint32_t size() {
+		return N_DIMS;
+	}
+
+	T data[N_DIMS];
+	static constexpr uint32_t N = N_DIMS;
 };
+
+template <typename T, uint32_t N, bool A>
+TCNN_HOST_DEVICE vector_t<T, N, A> operator*(T s, const vector_t<T, N, A>& v) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // __hmul2 is only supported with compute capability 60 and above
+	if (std::is_same<T, __half>::value && A && N % 2 == 0) {
+		vector_t<T, N, A> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N/2; ++i) {
+			*(__half2*)&result.data[i*2] = __hmul2({s, s}, *(__half2*)&v.data[i*2]);
+		}
+		return result;
+	} else
+#endif
+	{
+		vector_t<T, N, A> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			result[i] = s * v[i];
+		}
+		return result;
+	}
+}
+
+template <typename T, uint32_t N, bool A>
+TCNN_HOST_DEVICE vector_t<T, N, A> operator+(const vector_t<T, N, A>& v1, const vector_t<T, N, A>& v2) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // __hadd2 is only supported with compute capability 60 and above
+	if (std::is_same<T, __half>::value && A && N % 2 == 0) {
+		vector_t<T, N, A> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N/2; ++i) {
+			*(__half2*)&result.data[i*2] = __hadd2(*(__half2*)&v1.data[i*2], *(__half2*)&v2.data[i*2]);
+		}
+		return result;
+	} else
+#endif
+	{
+		vector_t<T, N, A> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			result[i] = v1[i] + v2[i];
+		}
+		return result;
+	}
+}
+
+template <typename T, uint32_t N, bool A>
+TCNN_HOST_DEVICE vector_t<T, N, A> fma(T s, const vector_t<T, N, A>& v1, const vector_t<T, N, A>& v2) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // __hfma2 is only supported with compute capability 60 and above
+	if (std::is_same<T, __half>::value && A && N % 2 == 0) {
+		vector_t<T, N, A> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N/2; ++i) {
+			*(__half2*)&result.data[i*2] = __hfma2({s, s}, *(__half2*)&v1.data[i*2], *(__half2*)&v2.data[i*2]);
+		}
+		return result;
+	} else
+#endif
+	{
+		vector_t<T, N, A> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			result[i] = fmaf(s, v1[i], v2[i]);
+		}
+		return result;
+	}
+}
+
+template <typename T, uint32_t N, bool A>
+TCNN_HOST_DEVICE vector_t<T, N, A> mix(const vector_t<T, N, A>& v1, const vector_t<T, N, A>& v2, T t) {
+	return fma(((T)1.0f - t), v1, t * v2);
+}
+
+template <uint32_t N>
+using vecf = vector_t<float, N>;
+
+template <uint32_t N>
+using vech = vector_t<__half, N>;
+
+template <uint32_t N>
+using vec = vector_t<network_precision_t, N>;
+
+template <uint32_t N>
+using avecf = vector_t<float, N, true>;
+
+template <uint32_t N>
+using avech = vector_t<__half, N, true>;
+
+template <uint32_t N>
+using avec = vector_t<network_precision_t, N, true>;
 
 template <uint32_t N_FLOATS>
 using vector_fullp_t = vector_t<float, N_FLOATS>;

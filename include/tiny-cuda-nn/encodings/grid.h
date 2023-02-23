@@ -224,7 +224,6 @@ __global__ void kernel_grid(
 	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
 	const float log2_per_level_scale,
-	const float quantize_threshold,
 	float max_level,
 	const float* __restrict__ max_level_gpu,
 	const InterpolationType interpolation_type,
@@ -257,7 +256,7 @@ __global__ void kernel_grid(
 		if (dy_dx) {
 			TCNN_PRAGMA_UNROLL
 			for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
-				((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = {0};
+				((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = {0.0f};
 			}
 		}
 
@@ -288,7 +287,7 @@ __global__ void kernel_grid(
 
 	auto grid_val = [&](const uint32_t local_pos[N_POS_DIMS]) {
 		const uint32_t index = grid_index<N_POS_DIMS, HASH_TYPE>(grid_type, hashmap_size, resolution, local_pos) * N_FEATURES_PER_LEVEL;
-		return *(vector_t<T, N_FEATURES_PER_LEVEL>*)&grid[index];
+		return *(vector_t<T, N_FEATURES_PER_LEVEL, true>*)&grid[index];
 	};
 
 	if (interpolation_type == InterpolationType::Nearest) {
@@ -305,7 +304,7 @@ __global__ void kernel_grid(
 		if (dy_dx) {
 			TCNN_PRAGMA_UNROLL
 			for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
-				((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = {0};
+				((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = {0.0f};
 			}
 		}
 
@@ -314,7 +313,7 @@ __global__ void kernel_grid(
 
 	if (encoded_positions) {
 		// N-linear interpolation
-		vector_t<T, N_FEATURES_PER_LEVEL> result = {};
+		vector_t<T, N_FEATURES_PER_LEVEL, true> result = {};
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t idx = 0; idx < (1 << N_POS_DIMS); ++idx) {
@@ -332,14 +331,7 @@ __global__ void kernel_grid(
 				}
 			}
 
-			auto val = grid_val(pos_grid_local);
-
-			TCNN_PRAGMA_UNROLL
-			for (uint32_t feature = 0; feature < N_FEATURES_PER_LEVEL; ++feature) {
-				float data = (float)((T*)&val)[feature];
-				if (fabsf(data) < quantize_threshold) data = 0.f;
-				((T*)&result)[feature] += (T)(weight * data);
-			}
+			result = fma((T)weight, grid_val(pos_grid_local), result);
 		}
 
 		TCNN_PRAGMA_UNROLL
@@ -350,7 +342,7 @@ __global__ void kernel_grid(
 
 	// Gradient
 	if (dy_dx) {
-		vector_fullp_t<N_POS_DIMS> grads[N_FEATURES_PER_LEVEL] = {};
+		avecf<N_POS_DIMS> grads[N_FEATURES_PER_LEVEL] = {0.0f};
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
@@ -386,7 +378,7 @@ __global__ void kernel_grid(
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
-			((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = grads[f];
+			((avecf<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = grads[f];
 		}
 	}
 }
@@ -557,11 +549,11 @@ __global__ void kernel_grid_backward_input(
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
-	vector_fullp_t<N_POS_DIMS> result = {0};
+	avecf<N_POS_DIMS> result = {0.0f};
 
 	for (int k = 0; k < num_grid_features; ++k) {
 		float dL_dy_local = (float)dL_dy_rm[i + k * num_elements];
-		auto dy_dx_local = ((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+		auto dy_dx_local = ((avecf<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
@@ -705,7 +697,6 @@ __global__ void kernel_grid_backward_input_backward_input(
 	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
 	const float log2_per_level_scale,
-	const float quantize_threshold,
 	float max_level,
 	const float* __restrict__ max_level_gpu,
 	const InterpolationType interpolation_type,
@@ -921,14 +912,6 @@ public:
 		m_max_level_gpu = value;
 	}
 
-	float quantize_threshold() const {
-		return m_quantize_threshold;
-	}
-
-	void set_quantize_threshold(float value) {
-		m_quantize_threshold = value;
-	}
-
 protected:
 	// Disables lookups of finer levels than this.
 	// The default value of 1000 effectively disables the feature
@@ -936,9 +919,6 @@ protected:
 
 	// If this pointer is non-null, it is expected to point to per-element m_max_level
 	float* m_max_level_gpu = nullptr;
-
-	// Features with values less then this threshold are quantized to zero
-	float m_quantize_threshold = 0.f;
 };
 
 template <typename T, uint32_t N_POS_DIMS=3, uint32_t N_FEATURES_PER_LEVEL=2, HashType HASH_TYPE=HashType::CoherentPrime>
@@ -1062,12 +1042,12 @@ public:
 		T* encoded_positions_soa = output ? output->data() : nullptr;
 		GPUMemoryArena::Allocation workspace;
 		if (output && output->layout() == AoS) {
-			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
+			workspace = allocate_workspace(synced_streams.get(0), num_elements * m_n_features * sizeof(T));
 			encoded_positions_soa = (T*)workspace.data();
 		}
 
 		if (prepare_input_gradients) {
-			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), stream};
+			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), synced_streams.get(0)};
 		}
 
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, HASH_TYPE><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
@@ -1076,7 +1056,6 @@ public:
 			m_offset_table,
 			m_base_resolution,
 			std::log2(m_per_level_scale),
-			this->m_quantize_threshold,
 			this->m_max_level,
 			this->m_max_level_gpu,
 			m_interpolation_type,
@@ -1305,7 +1284,6 @@ public:
 				m_offset_table,
 				m_base_resolution,
 				std::log2(m_per_level_scale),
-				this->m_quantize_threshold,
 				this->m_max_level,
 				this->m_max_level_gpu,
 				m_interpolation_type,
