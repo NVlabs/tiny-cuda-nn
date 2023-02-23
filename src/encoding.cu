@@ -30,6 +30,7 @@
 #include <tiny-cuda-nn/encoding.h>
 
 #include <tiny-cuda-nn/encodings/composite.h>
+#include <tiny-cuda-nn/encodings/sequential.h>
 #include <tiny-cuda-nn/encodings/empty.h>
 #include <tiny-cuda-nn/encodings/frequency.h>
 #include <tiny-cuda-nn/encodings/grid.h>
@@ -86,6 +87,10 @@ template <typename T>
 void register_builtin_encodings() {
 	register_encoding<T>("Composite", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new CompositeEncoding<T>{encoding, n_dims_to_encode};
+	});
+
+	register_encoding<T>("Sequential", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new SequentialEncoding<T>{encoding, n_dims_to_encode};
 	});
 
 	register_encoding<T>("Empty", [](uint32_t n_dims_to_encode, const json& encoding) {

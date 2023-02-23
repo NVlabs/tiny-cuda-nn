@@ -119,7 +119,7 @@ public:
 	}
 
 	uint32_t output_width() const override {
-		return padded_output_width();
+		return 0;
 	}
 
 	uint32_t required_input_alignment() const override {

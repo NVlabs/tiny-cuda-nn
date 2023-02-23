@@ -371,7 +371,15 @@ public:
 	}
 
 	uint32_t output_width() const override {
-		return padded_output_width();
+		if (m_reduction_type != ReductionType::Concatenation) {
+			return m_nested.empty() ? 0 : m_nested.front()->output_width();
+		}
+
+		uint32_t total = 0;
+		for (const auto& nested : m_nested) {
+			total += nested->output_width();
+		}
+		return total;
 	}
 
 	uint32_t required_input_alignment() const override {

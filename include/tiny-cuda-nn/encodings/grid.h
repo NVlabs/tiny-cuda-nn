@@ -1330,7 +1330,7 @@ public:
 	}
 
 	uint32_t output_width() const override {
-		return padded_output_width();
+		return m_n_output_dims;
 	}
 
 	uint32_t required_input_alignment() const override {
