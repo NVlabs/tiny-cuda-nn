@@ -69,7 +69,7 @@ __host__ __device__ T relu(T val) {
 
 template <>
 inline __host__ __device__ __half relu(__half val) {
-#ifdef  __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 	return __hmax(val, (__half)0.0f);
 #else
 	return (__half)relu<float>((float)val);
