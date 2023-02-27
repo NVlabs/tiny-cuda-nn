@@ -80,7 +80,7 @@ using network_precision_t = float;
 
 enum class Activation {
 	ReLU,
-    LeakyReLU,
+	LeakyReLU,
 	Exponential,
 	Sine,
 	Sigmoid,
