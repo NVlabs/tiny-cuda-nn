@@ -287,7 +287,7 @@ __global__ void kernel_grid(
 
 	auto grid_val = [&](const uint32_t local_pos[N_POS_DIMS]) {
 		const uint32_t index = grid_index<N_POS_DIMS, HASH_TYPE>(grid_type, hashmap_size, resolution, local_pos) * N_FEATURES_PER_LEVEL;
-		return *(vector_t<T, N_FEATURES_PER_LEVEL, true>*)&grid[index];
+		return *(vector_t<T, N_FEATURES_PER_LEVEL>*)&grid[index];
 	};
 
 	if (interpolation_type == InterpolationType::Nearest) {
@@ -313,7 +313,7 @@ __global__ void kernel_grid(
 
 	if (encoded_positions) {
 		// N-linear interpolation
-		vector_t<T, N_FEATURES_PER_LEVEL, true> result = {};
+		vector_t<T, N_FEATURES_PER_LEVEL> result = {};
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t idx = 0; idx < (1 << N_POS_DIMS); ++idx) {
@@ -342,7 +342,7 @@ __global__ void kernel_grid(
 
 	// Gradient
 	if (dy_dx) {
-		avecf<N_POS_DIMS> grads[N_FEATURES_PER_LEVEL] = {0.0f};
+		vecf<N_POS_DIMS> grads[N_FEATURES_PER_LEVEL] = {0.0f};
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
@@ -378,7 +378,7 @@ __global__ void kernel_grid(
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t f = 0; f < N_FEATURES_PER_LEVEL; ++f) {
-			((avecf<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = grads[f];
+			((vecf<N_POS_DIMS>*)dy_dx)[i + (level * N_FEATURES_PER_LEVEL + f) * num_elements] = grads[f];
 		}
 	}
 }
@@ -549,11 +549,11 @@ __global__ void kernel_grid_backward_input(
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= num_elements) return;
 
-	avecf<N_POS_DIMS> result = {0.0f};
+	vecf<N_POS_DIMS> result = {0.0f};
 
 	for (int k = 0; k < num_grid_features; ++k) {
 		float dL_dy_local = (float)dL_dy_rm[i + k * num_elements];
-		auto dy_dx_local = ((avecf<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+		auto dy_dx_local = ((vecf<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
 
 		TCNN_PRAGMA_UNROLL
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
