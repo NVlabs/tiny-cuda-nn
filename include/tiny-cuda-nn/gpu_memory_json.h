@@ -52,7 +52,7 @@ inline void to_json(nlohmann::json& j, const GPUMemory<T>& gpu_data) {
 template <typename T>
 inline void from_json(const nlohmann::json& j, GPUMemory<T>& gpu_data) {
 	if (j.is_binary()) {
-		const nlohmann::json::binary_t& cpu_data = j;
+		const nlohmann::json::binary_t& cpu_data = j.get_binary();
 		gpu_data.resize(cpu_data.size()/sizeof(T));
 		json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
 	} else if (j.is_object()) {
