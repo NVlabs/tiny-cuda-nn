@@ -124,6 +124,16 @@ public:
 			// This is cheaper than creating a new instance from scratch (and may involve just updating
 			// pointers rather than changing the topology of the graph.)
 			if (m_graph_instance) {
+#if CUDA_VERSION >= 12000
+				cudaGraphExecUpdateResultInfo update_result;
+				CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &update_result));
+
+				// If the update failed, reset graph instance. We will create a new one next.
+				if (update_result.result != cudaGraphExecUpdateSuccess) {
+					CUDA_CHECK_THROW(cudaGraphExecDestroy(m_graph_instance));
+					m_graph_instance = nullptr;
+				}
+#else
 				cudaGraphExecUpdateResult update_result;
 				cudaGraphNode_t error_node;
 				CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &error_node, &update_result));
@@ -133,6 +143,7 @@ public:
 					CUDA_CHECK_THROW(cudaGraphExecDestroy(m_graph_instance));
 					m_graph_instance = nullptr;
 				}
+#endif
 			}
 
 			if (!m_graph_instance) {
