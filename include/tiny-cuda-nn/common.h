@@ -302,6 +302,11 @@ TCNN_HOST_DEVICE T next_multiple(T val, T divisor) {
 }
 
 template <typename T>
+TCNN_HOST_DEVICE T previous_multiple(T val, T divisor) {
+	return (val / divisor) * divisor;
+}
+
+template <typename T>
 constexpr TCNN_HOST_DEVICE bool is_pot(T val) {
 	return (val & (val - 1)) == 0;
 }

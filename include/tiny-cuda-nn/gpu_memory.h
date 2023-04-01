@@ -352,7 +352,7 @@ public:
 		}
 
 		if (idx > m_size) {
-			throw std::runtime_error{fmt::format("GPUMemory our of bounds: idx={} size={}", idx, m_size)};
+			throw std::runtime_error{fmt::format("GPUMemory out of bounds: idx={} size={}", idx, m_size)};
 		}
 
 		return m_data[idx];
@@ -432,11 +432,16 @@ public:
 
 		// Align memory at least by a cache line (128 bytes).
 		m_alignment = (size_t)128;
-		m_max_size = next_multiple(cuda_memory_info().total, cuda_memory_granularity());
+		m_max_size = previous_multiple(cuda_memory_info().total, cuda_memory_granularity());
 
 		m_free_intervals = {{0, m_max_size}};
 
-		if (!cuda_supports_virtual_memory()) {
+		// Reserve an address range that would be sufficient for housing the entire
+		// available GPU RAM (if nothing else was using the GPU). This is unlikely
+		// to exhaust all available addresses (even if multiple GPUMemoryArenas are
+		// used simultaneously), while also ensuring that we never exhaust the
+		// reserved address range without running out of physical memory beforehand.
+		if (!cuda_supports_virtual_memory() || cuMemAddressReserve(&m_base_address, m_max_size, 0, 0, 0) != CUDA_SUCCESS) {
 			// Use regular memory as fallback
 			m_fallback_memory = std::make_shared<GPUMemory<uint8_t>>();
 
@@ -450,13 +455,6 @@ public:
 			}
 			return;
 		}
-
-		// Reserve an address range that would be sufficient for housing the entire
-		// available GPU RAM (if nothing else was using the GPU). This is unlikely
-		// to exhaust all available addresses (even if multiple GPUMemoryArenas are
-		// used simultaneously), while also ensuring that we never exhaust the
-		// reserved address range without running out of physical memory beforehand.
-		CU_CHECK_THROW(cuMemAddressReserve(&m_base_address, m_max_size, 0, 0, 0));
 	}
 
 	GPUMemoryArena(GPUMemoryArena&& other) = default;
