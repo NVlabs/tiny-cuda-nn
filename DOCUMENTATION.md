@@ -18,14 +18,15 @@ Activation functions are specified by string, e.g. as follows:
 The following activation functions are supported:
 - `"None"` (identity)
 - `"ReLU"`
-- `"LeakyReLU"` (defined as `max(0, x) + 0.01 * min(0, x)`)
+- `"Leaky ReLU"` (defined as `max(0, x) + 0.01 * min(0, x)`)
 - `"Exponential"`
 - `"Sine"`
 - `"Sigmoid"` (the logistic function)
-- `"Squareplus"` (defined as `0.5 * (x + sqrt(x*x + 4))`)
-- `"Softplus"` (defined as `log(exp(x) + 1)`)
+- `"Squareplus"` (defined as `X = 10*x; 0.5 * (X + sqrt(X*X + 4)) / 10`)
+- `"Softplus"` (defined as `X = 10*x; log(exp(X) + 1) / 10`)
 - `"Tanh"` (defined as `(exp(x) - exp(-x)) / (exp(x) + exp(-x))`)
 
+The factor and divisor `10` in the `Squareplus` and `Softplus` activations can be thought of as "zooming out" such that these smooth activations more closely resembly the ReLU. If this is undesired in your use case, you can change the compile-time constant `K_ACT` in `include/tiny-cuda-nn/common_device.h`.
 
 ### Fully Fused MLP
 
