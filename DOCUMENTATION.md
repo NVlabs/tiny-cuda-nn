@@ -90,7 +90,7 @@ Allows composing multiple encodings. The following example replicates the Neural
 
 From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
 
-The number of encoded dimensions is twice the specified number of frequencies for each input dimension.
+The number of encoded dimensions is twice the specified number of frequencies for each input dimension. E.g. with `n_frequencies == 4`, an input dimension `x` becomes `sin(πx), cos(πx), sin(2πx), cos(2πx), sin(4πx), cos(4πx), sin(8πx), cos(8πx)`.
 
 ```json5
 {
