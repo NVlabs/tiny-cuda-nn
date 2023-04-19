@@ -165,7 +165,7 @@ def make_extension(compute_capability):
 			"%s/dependencies/fmt/include" % root_dir,
 		],
 		extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
-		libraries=["cuda", "cudadevrt", "cudart_static"],
+		libraries=["cuda"],
 	)
 	return ext
 

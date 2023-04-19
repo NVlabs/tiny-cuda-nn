@@ -1,6 +1,8 @@
 .DS_Store
 *.egg-info
 __pycache__
+*.o
+/*.jpg
 build*
 dist
 /.vscode
