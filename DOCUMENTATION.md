@@ -92,6 +92,8 @@ From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works 
 
 The number of encoded dimensions is twice the specified number of frequencies for each input dimension. E.g. with `n_frequencies == 4`, an input dimension `x` becomes `sin(πx), cos(πx), sin(2πx), cos(2πx), sin(4πx), cos(4πx), sin(8πx), cos(8πx)`.
 
+Note that many NeRF implementations (including the official ones) omit the factor of `π` from eq. (4) of the paper. This makes little difference in practice as coordinate normalization usually differs by similar amounts. Due to the logarithmic scaling of this encoding, this means that one or two fewer or additional frequency bands might be required to match results across implementations.
+
 ```json5
 {
 	"otype": "Frequency", // Component type.
