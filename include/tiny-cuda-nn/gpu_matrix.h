@@ -31,7 +31,6 @@
 
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/matrix_layout.h>
 
 #include <pcg32/pcg32.h>
 
@@ -62,9 +61,7 @@ public:
 		}
 
 		if (memory.bytes() < total_n_bytes) {
-#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-			std::cout << "GPUMatrix: Allocating " << bytes_to_string(total_n_bytes) << " shared among " << matrices.size() << " matrices." << std::endl;
-#endif
+			log_debug("GPUMatrix: allocating {} shared among {} matrices.", bytes_to_string(total_n_bytes), matrices.size());
 			memory.resize(total_n_bytes);
 		}
 
@@ -103,36 +100,6 @@ public:
 
 	template <typename T, MatrixLayout layout>
 	static GPUMemoryArena::Allocation allocate_shared_memory(cudaStream_t stream, std::vector<GPUMatrix<T, layout>>& matrices);
-};
-
-template <typename T>
-struct MatrixView {
-	TCNN_HOST_DEVICE MatrixView() : data{nullptr}, stride_i{0}, stride_j{0} {}
-	TCNN_HOST_DEVICE MatrixView(T* data, uint32_t stride_i, uint32_t stride_j) : data{data}, stride_i{stride_i}, stride_j{stride_j} {}
-	TCNN_HOST_DEVICE MatrixView(const MatrixView<std::remove_const_t<T>>& other) : data{other.data}, stride_i{other.stride_i}, stride_j{other.stride_j} {}
-
-	TCNN_HOST_DEVICE T& operator()(uint32_t i, uint32_t j = 0) const {
-		return data[i * stride_i + j * stride_j];
-	}
-
-	TCNN_HOST_DEVICE void advance(uint32_t m, uint32_t n) {
-		data = &(*this)(m, n);
-	}
-
-	TCNN_HOST_DEVICE void advance_rows(uint32_t m) {
-		advance(m, 0);
-	}
-
-	TCNN_HOST_DEVICE void advance_cols(uint32_t n) {
-		advance(0, n);
-	}
-
-	TCNN_HOST_DEVICE explicit operator bool() const {
-		return data;
-	}
-
-	T* data;
-	uint32_t stride_i, stride_j;
 };
 
 template <typename T>
@@ -180,6 +147,7 @@ public:
 	}
 
 	GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) = delete;
+	GPUMatrixDynamic<T>& operator=(const GPUMatrixDynamic<T>& other) = delete;
 
 	virtual ~GPUMatrixDynamic() {}
 
@@ -287,7 +255,32 @@ public:
 		CUDA_CHECK_THROW(cudaMemsetAsync(data(), value, n_bytes(), stream));
 	}
 
+	std::vector<T> to_cpu_vector() {
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
+		std::vector<T> v(n_elements());
+		CUDA_CHECK_THROW(cudaMemcpy(v.data(), data(), n_bytes(), cudaMemcpyDeviceToHost));
+		return v;
+	}
+
 	// Various initializations
+	void initialize_uniform(pcg32& rnd, float low, float high) {
+		CHECK_THROW(data());
+		CHECK_THROW(is_contiguous());
+
+		// Define probability distribution
+		float scale = high - low;
+
+		// Sample initialized values
+		std::vector<T> new_data(n_elements());
+
+		for (size_t i = 0; i < new_data.size(); ++i) {
+			new_data[i] = (T)(low + rnd.next_float() * scale);
+		}
+
+		CUDA_CHECK_THROW(cudaMemcpy(data(), new_data.data(), n_bytes(), cudaMemcpyHostToDevice));
+	}
+
 	void initialize_xavier_uniform(pcg32& rnd, float scale = 1) {
 		CHECK_THROW(data());
 		CHECK_THROW(is_contiguous());
@@ -463,6 +456,7 @@ public:
 	}
 
 	GPUMatrix(const GPUMatrixDynamic<T>& other) = delete;
+	GPUMatrix<T>& operator=(const GPUMatrixDynamic<T>& other) = delete;
 
 	virtual ~GPUMatrix() {}
 

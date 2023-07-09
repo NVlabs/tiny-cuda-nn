@@ -27,10 +27,8 @@
  *  @brief  API interface of a TCNN object
  */
 
-#include <tiny-cuda-nn/object.h>
-
-#include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/common_device.h>
+#include <tiny-cuda-nn/object.h>
 
 namespace tcnn {
 

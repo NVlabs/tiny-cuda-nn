@@ -216,7 +216,7 @@ void CutlassMLP<T>::backward_impl(
 	const GPUMatrixDynamic<T>& dL_doutput,
 	GPUMatrixDynamic<T>* dL_dinput,
 	bool use_inference_params,
-	EGradientMode param_gradients_mode
+	GradientMode param_gradients_mode
 ) {
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
@@ -238,7 +238,7 @@ void CutlassMLP<T>::backward_impl(
 	// - input_gradient = weights.T * output_gradient
 	// - RELU: pre_activation_gradinet = post_activation_gradient if val > 0 else 0
 
-	const float param_gradient_beta = param_gradients_mode == EGradientMode::Accumulate ? 1.0f : 0.0f;
+	const float param_gradient_beta = param_gradients_mode == GradientMode::Accumulate ? 1.0f : 0.0f;
 
 	std::vector<SyncedMultiStream> multi_streams;
 
@@ -250,7 +250,7 @@ void CutlassMLP<T>::backward_impl(
 
 	// If there are no hidden layers, the network is just a simple matmul
 	if (m_n_hidden_layers == 0) {
-		if (param_gradients_mode != EGradientMode::Ignore) {
+		if (param_gradients_mode != GradientMode::Ignore) {
 			multi_streams.emplace_back(stream, 2);
 			fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 		}
@@ -266,7 +266,7 @@ void CutlassMLP<T>::backward_impl(
 	uint32_t backward_tmp_idx = 0;
 
 	// Output layer
-	if (param_gradients_mode != EGradientMode::Ignore) {
+	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
 		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
 
@@ -286,7 +286,7 @@ void CutlassMLP<T>::backward_impl(
 	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
 		uint32_t matrix_idx = m_n_hidden_matmuls - i - 1;
 
-		if (param_gradients_mode != EGradientMode::Ignore) {
+		if (param_gradients_mode != GradientMode::Ignore) {
 			multi_streams.emplace_back(stream, 2);
 			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 		}
@@ -302,7 +302,7 @@ void CutlassMLP<T>::backward_impl(
 		++backward_tmp_idx;
 	}
 
-	if (param_gradients_mode != EGradientMode::Ignore) {
+	if (param_gradients_mode != GradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
 		fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 	}

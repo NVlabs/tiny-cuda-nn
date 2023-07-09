@@ -49,6 +49,14 @@ namespace tcnn {
 
 namespace tcnn { namespace cpp {
 
+enum class LogSeverity {
+	Info,
+	Debug,
+	Warning,
+	Error,
+	Success,
+};
+
 using json = nlohmann::json;
 
 uint32_t batch_size_granularity();
@@ -60,12 +68,16 @@ void free_temporary_memory();
 
 bool has_networks();
 
-enum EPrecision {
+enum class Precision {
 	Fp32,
 	Fp16,
 };
 
-EPrecision preferred_precision();
+float default_loss_scale(Precision p);
+
+Precision preferred_precision();
+
+void set_log_callback(const std::function<void(LogSeverity, const std::string&)>& callback);
 
 struct Context {
 	std::unique_ptr<tcnn::Context> ctx;
@@ -73,7 +85,7 @@ struct Context {
 
 class Module {
 public:
-	Module(EPrecision param_precision, EPrecision output_precision) : m_param_precision{param_precision}, m_output_precision{output_precision} {}
+	Module(Precision param_precision, Precision output_precision) : m_param_precision{param_precision}, m_output_precision{output_precision} {}
 	virtual ~Module() {}
 
 	virtual void inference(cudaStream_t stream, uint32_t n_elements, const float* input, void* output, void* params) = 0;
@@ -82,29 +94,24 @@ public:
 	virtual void backward_backward_input(cudaStream_t stream, const Context& ctx, uint32_t n_elements, const float* dL_ddLdinput, const float* input, const void* dL_doutput, void* dL_dparams, void* dL_ddLdoutput, float* dL_dinput, const void* params) = 0;
 
 	virtual uint32_t n_input_dims() const = 0;
+	virtual uint32_t n_output_dims() const = 0;
+	Precision output_precision() const { return m_output_precision; }
 
 	virtual size_t n_params() const = 0;
-	EPrecision param_precision() const {
-		return m_param_precision;
-	}
+	Precision param_precision() const { return m_param_precision; }
 
 	virtual void initialize_params(size_t seed, float* params_full_precision, float scale = 1.0f) = 0;
-
-	virtual uint32_t n_output_dims() const = 0;
-	EPrecision output_precision() const {
-		return m_output_precision;
-	}
 
 	virtual json hyperparams() const = 0;
 	virtual std::string name() const = 0;
 
 private:
-	EPrecision m_param_precision;
-	EPrecision m_output_precision;
+	Precision m_param_precision;
+	Precision m_output_precision;
 };
 
 Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network);
 Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network);
-Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision);
+Module* create_encoding(uint32_t n_input_dims, const json& encoding, Precision requested_precision);
 
 }}

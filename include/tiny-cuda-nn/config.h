@@ -39,6 +39,8 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/trainer.h>
 
+#include <type_traits>
+
 namespace tcnn {
 
 struct TrainableModel {

@@ -29,7 +29,7 @@
 
 #pragma once
 
-#include <tiny-cuda-nn/common.h>
+#include <tiny-cuda-nn/common_host.h>
 
 #include <cuda.h>
 
@@ -54,10 +54,10 @@ public:
 	~CudaGraph() {
 		try {
 			reset();
-		} catch (std::runtime_error error) {
+		} catch (const std::runtime_error& error) {
 			// Don't need to report on destruction problems when the driver is shutting down.
 			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
-				std::cerr << "Could not destroy cuda graph: " << error.what() << std::endl;
+				log_warning("Could not destroy cuda graph: {}", error.what());
 			}
 		}
 	}

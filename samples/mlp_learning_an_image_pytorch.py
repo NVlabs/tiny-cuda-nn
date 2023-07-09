@@ -100,6 +100,8 @@ if __name__ == "__main__":
 	print("mlp_learning_an_image.cu using tiny-cuda-nn's PyTorch extension.")
 	print("================================================================")
 
+	print(f"Using PyTorch version {torch.__version__} with CUDA {torch.version.cuda}")
+
 	device = torch.device("cuda")
 	args = get_args()
 

@@ -37,35 +37,68 @@
 #include <tiny-cuda-nn/losses/relative_l2.h>
 #include <tiny-cuda-nn/losses/relative_l2_luminance.h>
 #include <tiny-cuda-nn/losses/cross_entropy.h>
+#include <tiny-cuda-nn/losses/variance_is.h>
 
 namespace tcnn {
 
 template <typename T>
-Loss<T>* create_loss(const json& loss) {
-	std::string loss_type = loss.value("otype", "RelativeL2");
-
-	if (equals_case_insensitive(loss_type, "L2")) {
-		return new L2Loss<T>{};
-	} else if (equals_case_insensitive(loss_type, "RelativeL2")) {
-		return new RelativeL2Loss<T>{};
-	} else if (equals_case_insensitive(loss_type, "RelativeL2Luminance")) {
-		return new RelativeL2LuminanceLoss<T>{};
-	} else if (equals_case_insensitive(loss_type, "L1")) {
-		return new L1Loss<T>{};
-	} else if (equals_case_insensitive(loss_type, "RelativeL1")) {
-		return new RelativeL1Loss<T>{};
-	} else if (equals_case_insensitive(loss_type, "Mape")) {
-		return new MapeLoss<T>{};
-	} else if (equals_case_insensitive(loss_type, "Smape")) {
-		return new SmapeLoss<T>{};
-	} else if (equals_case_insensitive(loss_type, "CrossEntropy")) {
-		return new CrossEntropyLoss<T>{};
-	} else {
-		throw std::runtime_error{fmt::format("Invalid loss type: {}", loss_type)};
+void register_loss(ci_hashmap<std::function<Loss<T>*(const json&)>>& factories, const std::string& name, const std::function<Loss<T>*(const json&)>& factory) {
+	if (factories.count(name) > 0) {
+		throw std::runtime_error{fmt::format("Can not register loss '{}' twice.", name)};
 	}
+
+	factories.insert({name, factory});
+}
+
+template <typename T>
+auto register_builtin_losses() {
+	ci_hashmap<std::function<Loss<T>*(const json&)>> factories;
+
+	register_loss<T>(factories, "L2", [](const json& loss) { return new L2Loss<T>{}; });
+	register_loss<T>(factories, "RelativeL2", [](const json& loss) { return new RelativeL2Loss<T>{}; });
+	register_loss<T>(factories, "RelativeL2Luminance", [](const json& loss) { return new RelativeL2LuminanceLoss<T>{}; });
+	register_loss<T>(factories, "L1", [](const json& loss) { return new L1Loss<T>{}; });
+	register_loss<T>(factories, "RelativeL1", [](const json& loss) { return new RelativeL1Loss<T>{}; });
+	register_loss<T>(factories, "Mape", [](const json& loss) { return new MapeLoss<T>{}; });
+	register_loss<T>(factories, "Smape", [](const json& loss) { return new SmapeLoss<T>{}; });
+	register_loss<T>(factories, "CrossEntropy", [](const json& loss) { return new CrossEntropyLoss<T>{}; });
+	register_loss<T>(factories, "Variance", [](const json& loss) { return new VarianceIsLoss<T>{}; });
+
+	return factories;
+}
+
+template <typename T>
+auto& loss_factories() {
+	static ci_hashmap<std::function<Loss<T>*(const json&)>> factories = register_builtin_losses<T>();
+	return factories;
+}
+
+template <typename T>
+void register_loss(const std::string& name, const std::function<Loss<T>*(const json&)>& factory) {
+	register_loss(loss_factories<T>(), name, factory);
+}
+
+template <typename T>
+Loss<T>* create_loss(const json& loss) {
+	std::string name = loss.value("otype", "RelativeL2");
+
+	if (loss_factories<T>().count(name) == 0) {
+		throw std::runtime_error{fmt::format("Loss '{}' not found", name)};
+	}
+
+	return loss_factories<T>().at(name)(loss);
 }
 
 template Loss<float>* create_loss(const json& loss);
 template Loss<__half>* create_loss(const json& loss);
+
+std::vector<std::string> builtin_losses() {
+	std::vector<std::string> result;
+	for (const auto& kv : loss_factories<float>()) {
+		result.emplace_back(kv.first);
+	}
+
+	return result;
+}
 
 }

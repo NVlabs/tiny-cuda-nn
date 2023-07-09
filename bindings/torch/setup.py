@@ -4,8 +4,10 @@ import re
 from setuptools import setup
 from pkg_resources import parse_version
 import subprocess
+import shutil
 import sys
 import torch
+from glob import glob
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -123,15 +125,21 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = ""
 # List of sources.
 bindings_dir = os.path.dirname(__file__)
 root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
-base_definitions = []
+
+base_definitions = [
+	# PyTorch-supplied parameters may be unaligned. TCNN must be made aware of this such that
+	# it does not optimize for aligned memory accesses.
+	"-DTCNN_PARAMS_UNALIGNED",
+]
+
 base_source_files = [
 	"tinycudann/bindings.cpp",
 	"../../dependencies/fmt/src/format.cc",
 	"../../dependencies/fmt/src/os.cc",
 	"../../src/cpp_api.cu",
-	"../../src/common.cu",
-	"../../src/common_device.cu",
+	"../../src/common_host.cu",
 	"../../src/encoding.cu",
+	"../../src/object.cu",
 ]
 
 if include_networks:

@@ -36,8 +36,6 @@
 
 namespace tcnn {
 
-using default_rng_t = pcg32;
-
 template <typename T, typename RNG, size_t N_TO_GENERATE, typename F>
 __global__ void generate_random_kernel(const size_t n_elements, RNG rng, T* __restrict__ out, const F transform) {
 	const size_t i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -61,7 +59,7 @@ void generate_random(cudaStream_t stream, RNG& rng, size_t n_elements, T* out, F
 	static constexpr size_t N_TO_GENERATE = 4;
 
 	size_t n_threads = div_round_up(n_elements, N_TO_GENERATE);
-	generate_random_kernel<T, RNG, N_TO_GENERATE><<<n_blocks_linear(n_threads), n_threads_linear, 0, stream>>>(n_elements, rng, out, transform);
+	generate_random_kernel<T, RNG, N_TO_GENERATE><<<n_blocks_linear(n_threads), N_THREADS_LINEAR, 0, stream>>>(n_elements, rng, out, transform);
 
 	rng.advance(n_elements);
 }

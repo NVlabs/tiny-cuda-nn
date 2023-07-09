@@ -38,45 +38,6 @@
 
 namespace tcnn {
 
-Activation string_to_activation(const std::string& activation_name) {
-	if (equals_case_insensitive(activation_name, "None")) {
-		return Activation::None;
-	} else if (equals_case_insensitive(activation_name, "ReLU")) {
-		return Activation::ReLU;
-	} else if (equals_case_insensitive(activation_name, "LeakyReLU")) {
-		return Activation::LeakyReLU;
-	} else if (equals_case_insensitive(activation_name, "Exponential")) {
-		return Activation::Exponential;
-	} else if (equals_case_insensitive(activation_name, "Sigmoid")) {
-		return Activation::Sigmoid;
-	} else if (equals_case_insensitive(activation_name, "Sine")) {
-		return Activation::Sine;
-	} else if (equals_case_insensitive(activation_name, "Squareplus")) {
-		return Activation::Squareplus;
-	} else if (equals_case_insensitive(activation_name, "Softplus")) {
-		return Activation::Softplus;
-	} else if (equals_case_insensitive(activation_name, "Tanh")) {
-		return Activation::Tanh;
-	}
-
-	throw std::runtime_error{fmt::format("Invalid activation name: {}", activation_name)};
-}
-
-std::string to_string(Activation activation) {
-	switch (activation) {
-		case Activation::None: return "None";
-		case Activation::ReLU: return "ReLU";
-		case Activation::LeakyReLU: return "LeakyReLU";
-		case Activation::Exponential: return "Exponential";
-		case Activation::Sigmoid: return "Sigmoid";
-		case Activation::Sine: return "Sine";
-		case Activation::Squareplus: return "Squareplus";
-		case Activation::Softplus: return "Softplus";
-		case Activation::Tanh: return "Tanh";
-		default: throw std::runtime_error{"Invalid activation."};
-	}
-}
-
 template <typename T>
 void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, MatrixLayout layout, float* output) {
 	linear_kernel(extract_dimension_pos_neg_kernel<T>, 0, stream, num_elements, dim, fan_in, fan_out, encoded, layout, output);
@@ -92,10 +53,11 @@ std::string select_network(const json& network) {
 	// If the GPU architecture is insufficient for
 	if (MIN_GPU_ARCH <= 70 || std::is_same<network_precision_t, float>::value) {
 		if (want_fully_fused_mlp && MIN_GPU_ARCH <= 70) {
-			std::cout
-				<< "Warning: FullyFusedMLP is not supported for the selected architecture " << MIN_GPU_ARCH << ". "
-				<< "Falling back to CutlassMLP. For maximum performance, raise the target GPU architecture to 75+."
-				<< std::endl;
+			log_warning(
+				"FullyFusedMLP is not supported for the selected architecture {}. Falling back to CutlassMLP. "
+				"For maximum performance, raise the target GPU architecture to 75+.",
+				MIN_GPU_ARCH
+			);
 		}
 
 		want_cutlass_mlp |= want_fully_fused_mlp;
@@ -177,4 +139,10 @@ Network<T>* create_network(const json& network) {
 
 template Network<network_precision_t>* create_network(const json& network);
 
+std::vector<std::string> builtin_networks() {
+	return {
+		"FullyFusedMLP",
+		"CutlassMLP",
+	};
+}
 }

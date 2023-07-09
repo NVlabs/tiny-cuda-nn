@@ -44,6 +44,7 @@
 #include <json/json.hpp>
 
 #include <pybind11_json/pybind11_json.hpp>
+#include <pybind11/functional.h>
 
 #include <tiny-cuda-nn/cpp_api.h>
 
@@ -53,10 +54,10 @@
 #define CHECK_THROW(x) \
 	do { if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); } while(0)
 
-c10::ScalarType torch_type(tcnn::cpp::EPrecision precision) {
+c10::ScalarType torch_type(tcnn::cpp::Precision precision) {
 	switch (precision) {
-		case tcnn::cpp::EPrecision::Fp32: return torch::kFloat32;
-		case tcnn::cpp::EPrecision::Fp16: return torch::kHalf;
+		case tcnn::cpp::Precision::Fp32: return torch::kFloat32;
+		case tcnn::cpp::Precision::Fp16: return torch::kHalf;
 		default: throw std::runtime_error{"Unknown precision tcnn->torch"};
 	}
 }
@@ -246,41 +247,19 @@ public:
 		return output;
 	}
 
-	uint32_t n_input_dims() const {
-		return m_module->n_input_dims();
-	}
+	uint32_t n_input_dims() const { return m_module->n_input_dims(); }
 
-	uint32_t n_params() const {
-		return (uint32_t)m_module->n_params();
-	}
+	uint32_t n_params() const { return (uint32_t)m_module->n_params(); }
+	tcnn::cpp::Precision param_precision() const { return m_module->param_precision(); }
+	c10::ScalarType c10_param_precision() const { return torch_type(param_precision()); }
 
-	tcnn::cpp::EPrecision param_precision() const {
-		return m_module->param_precision();
-	}
+	uint32_t n_output_dims() const { return m_module->n_output_dims(); }
+	tcnn::cpp::Precision output_precision() const { return m_module->output_precision(); }
+	c10::ScalarType c10_output_precision() const { return torch_type(output_precision()); }
 
-	c10::ScalarType c10_param_precision() const {
-		return torch_type(param_precision());
-	}
+	nlohmann::json hyperparams() const { return m_module->hyperparams(); }
+	std::string name() const { return m_module->name(); }
 
-	uint32_t n_output_dims() const {
-		return m_module->n_output_dims();
-	}
-
-	tcnn::cpp::EPrecision output_precision() const {
-		return m_module->output_precision();
-	}
-
-	c10::ScalarType c10_output_precision() const {
-		return torch_type(output_precision());
-	}
-
-	nlohmann::json hyperparams() const {
-		return m_module->hyperparams();
-	}
-
-	std::string name() const {
-		return m_module->name();
-	}
 
 private:
 	std::unique_ptr<tcnn::cpp::Module> m_module;
@@ -296,21 +275,33 @@ Module create_network(uint32_t n_input_dims, uint32_t n_output_dims, const nlohm
 }
 #endif
 
-Module create_encoding(uint32_t n_input_dims, const nlohmann::json& encoding, tcnn::cpp::EPrecision requested_precision) {
+Module create_encoding(uint32_t n_input_dims, const nlohmann::json& encoding, tcnn::cpp::Precision requested_precision) {
 	return Module{tcnn::cpp::create_encoding(n_input_dims, encoding, requested_precision)};
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-	py::enum_<tcnn::cpp::EPrecision>(m, "Precision")
-		.value("Fp32", tcnn::cpp::EPrecision::Fp32)
-		.value("Fp16", tcnn::cpp::EPrecision::Fp16)
+	py::enum_<tcnn::cpp::LogSeverity>(m, "LogSeverity")
+		.value("Info", tcnn::cpp::LogSeverity::Info)
+		.value("Debug", tcnn::cpp::LogSeverity::Debug)
+		.value("Warning", tcnn::cpp::LogSeverity::Warning)
+		.value("Error", tcnn::cpp::LogSeverity::Error)
+		.value("Success", tcnn::cpp::LogSeverity::Success)
+		.export_values()
+		;
+
+	py::enum_<tcnn::cpp::Precision>(m, "Precision")
+		.value("Fp32", tcnn::cpp::Precision::Fp32)
+		.value("Fp16", tcnn::cpp::Precision::Fp16)
 		.export_values()
 		;
 
 	m.def("batch_size_granularity", &tcnn::cpp::batch_size_granularity);
+	m.def("default_loss_scale", &tcnn::cpp::default_loss_scale);
 	m.def("free_temporary_memory", &tcnn::cpp::free_temporary_memory);
 	m.def("has_networks", &tcnn::cpp::has_networks);
 	m.def("preferred_precision", &tcnn::cpp::preferred_precision);
+
+	m.def("set_log_callback", &tcnn::cpp::set_log_callback);
 
 	// Encapsulates an abstract context of an operation
 	// (commonly the forward pass) to be passed on to other

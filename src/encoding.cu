@@ -38,85 +38,55 @@
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
 
+
 namespace tcnn {
 
-InterpolationType string_to_interpolation_type(const std::string& interpolation_type) {
-	if (equals_case_insensitive(interpolation_type, "Nearest")) {
-		return InterpolationType::Nearest;
-	} else if (equals_case_insensitive(interpolation_type, "Linear")) {
-		return InterpolationType::Linear;
-	} else if (equals_case_insensitive(interpolation_type, "Smoothstep")) {
-		return InterpolationType::Smoothstep;
+template <typename T>
+void register_encoding(ci_hashmap<std::function<Encoding<T>*(uint32_t, const json&)>>& factories, const std::string& name, const std::function<Encoding<T>*(uint32_t, const json&)>& factory) {
+	if (factories.count(name) > 0) {
+		throw std::runtime_error{fmt::format("Can not register encoding '{}' twice.", name)};
 	}
 
-	throw std::runtime_error{fmt::format("Invalid interpolation type: {}", interpolation_type)};
-}
-
-std::string to_string(InterpolationType interpolation_type) {
-	switch (interpolation_type) {
-		case InterpolationType::Nearest: return "Nearest";
-		case InterpolationType::Linear: return "Linear";
-		case InterpolationType::Smoothstep: return "Smoothstep";
-		default: throw std::runtime_error{"Invalid interpolation type."};
-	}
-}
-
-ReductionType string_to_reduction_type(const std::string& reduction_type) {
-	if (equals_case_insensitive(reduction_type, "Concatenation")) {
-		return ReductionType::Concatenation;
-	} else if (equals_case_insensitive(reduction_type, "Sum")) {
-		return ReductionType::Sum;
-	} else if (equals_case_insensitive(reduction_type, "Product")) {
-		return ReductionType::Product;
-	}
-
-	throw std::runtime_error{fmt::format("Invalid reduction type: {}", reduction_type)};
-}
-
-std::string to_string(ReductionType reduction_type) {
-	switch (reduction_type) {
-		case ReductionType::Concatenation: return "Concatenation";
-		case ReductionType::Sum: return "Sum";
-		case ReductionType::Product: return "Product";
-		default: throw std::runtime_error{"Invalid reduction type."};
-	}
+	factories.insert({name, factory});
 }
 
 template <typename T>
-void register_builtin_encodings() {
-	register_encoding<T>("Composite", [](uint32_t n_dims_to_encode, const json& encoding) {
+auto register_builtin_encodings() {
+	ci_hashmap<std::function<Encoding<T>*(uint32_t, const json&)>> factories;
+
+	register_encoding<T>(factories, "Composite", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new CompositeEncoding<T>{encoding, n_dims_to_encode};
 	});
 
-	register_encoding<T>("Empty", [](uint32_t n_dims_to_encode, const json& encoding) {
+	register_encoding<T>(factories, "Empty", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new EmptyEncoding<T>{n_dims_to_encode};
 	});
 
-	register_encoding<T>("Frequency", [](uint32_t n_dims_to_encode, const json& encoding) {
+	register_encoding<T>(factories, "Frequency", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new FrequencyEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
 	});
 
 	auto grid_factory = [](uint32_t n_dims_to_encode, const json& encoding) {
 		return create_grid_encoding<T>(n_dims_to_encode, encoding);
 	};
-	register_encoding<T>("Grid", grid_factory);
-	register_encoding<T>("HashGrid", grid_factory);
-	register_encoding<T>("TiledGrid", grid_factory);
-	register_encoding<T>("DenseGrid", grid_factory);
+	register_encoding<T>(factories, "Grid", grid_factory);
+	register_encoding<T>(factories, "HashGrid", grid_factory);
+	register_encoding<T>(factories, "TiledGrid", grid_factory);
+	register_encoding<T>(factories, "DenseGrid", grid_factory);
 
-	register_encoding<T>("Identity", [](uint32_t n_dims_to_encode, const json& encoding) {
+	register_encoding<T>(factories, "Identity", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new IdentityEncoding<T>{n_dims_to_encode, encoding.value("scale", 1.0f), encoding.value("offset", 0.0f)};
 	});
 
-	register_encoding<T>("OneBlob", [](uint32_t n_dims_to_encode, const json& encoding) {
+	register_encoding<T>(factories, "OneBlob", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new OneBlobEncoding<T>{encoding.value("n_bins", 16u), n_dims_to_encode};
 	});
 
-	register_encoding<T>("SphericalHarmonics", [](uint32_t n_dims_to_encode, const json& encoding) {
+	register_encoding<T>(factories, "SphericalHarmonics", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new SphericalHarmonicsEncoding<T>{encoding.value("degree", 4u), n_dims_to_encode};
 	});
 
-	register_encoding<T>("TriangleWave", [](uint32_t n_dims_to_encode, const json& encoding) {
+	register_encoding<T>(factories, "TriangleWave", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new TriangleWaveEncoding<T>{encoding.value("n_frequencies", 12u), n_dims_to_encode};
 	});
 
@@ -141,40 +111,32 @@ void register_builtin_encodings() {
 			n_dims_to_encode,
 		};
 	};
-	register_encoding<T>("OneBlobFrequency", nrc_factory);
-	register_encoding<T>("NRC", nrc_factory);
+	register_encoding<T>(factories, "OneBlobFrequency", nrc_factory);
+	register_encoding<T>(factories, "NRC", nrc_factory);
+
+	return factories;
 }
 
 template <typename T>
 auto& encoding_factories() {
-	static std::unordered_map<std::string, std::function<Encoding<T>*(uint32_t, const json&)>> factories;
+	static ci_hashmap<std::function<Encoding<T>*(uint32_t, const json&)>> factories = register_builtin_encodings<T>();
 	return factories;
 }
 
 template <typename T>
 void register_encoding(const std::string& name, const std::function<Encoding<T>*(uint32_t, const json&)>& factory) {
-	if (encoding_factories<T>().count(to_lower(name)) > 0) {
-		throw std::runtime_error{fmt::format("Can not register encoding '{}' twice.", name)};
-	}
-
-	encoding_factories<T>().insert({to_lower(name), factory});
+	register_encoding(encoding_factories<T>(), name, factory);
 }
 
 template <typename T>
 Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment) {
-	// Calls register_builtin_encodings<T>() on first invocation of create_encoding<T>(...)
-	// in a thread-safe manner and ensures all concurrent calls progress further only
-	// once register_builtin_encodings<T>() terminated. See the C++ documentation on static
-	// local variables for more information.
-	static struct Init { Init() { register_builtin_encodings<T>(); } } init;
-
 	std::string name = encoding.value("otype", "OneBlob");
 
-	if (encoding_factories<T>().count(to_lower(name)) == 0) {
+	if (encoding_factories<T>().count(name) == 0) {
 		throw std::runtime_error{fmt::format("Encoding '{}' not found", name)};
 	}
 
-	Encoding<T>* result = encoding_factories<T>().at(to_lower(name))(n_dims_to_encode, encoding);
+	Encoding<T>* result = encoding_factories<T>().at(name)(n_dims_to_encode, encoding);
 	if (alignment > 0) {
 		result->set_alignment(alignment);
 	}
@@ -187,5 +149,13 @@ template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, const json
 #endif
 template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
 
+std::vector<std::string> builtin_encodings() {
+	std::vector<std::string> result;
+	for (const auto& kv : encoding_factories<float>()) {
+		result.emplace_back(kv.first);
+	}
+
+	return result;
+}
 
 }
