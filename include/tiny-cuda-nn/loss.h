@@ -40,8 +40,6 @@ class Loss : public ObjectWithMutableHyperparams {
 public:
 	virtual void evaluate(
 		cudaStream_t stream,
-		const uint32_t stride,
-		const uint32_t dims,
 		const float loss_scale,
 		const GPUMatrix<T>& prediction,
 		const GPUMatrix<float>& target,
@@ -49,6 +47,17 @@ public:
 		GPUMatrix<T>& gradients,
 		const GPUMatrix<float>* data_pdf = nullptr
 	) const = 0;
+
+	void evaluate(
+		const float loss_scale,
+		const GPUMatrix<T>& prediction,
+		const GPUMatrix<float>& target,
+		GPUMatrix<float>& values,
+		GPUMatrix<T>& gradients,
+		const GPUMatrix<float>* data_pdf = nullptr
+	) const {
+		evaluate(nullptr, loss_scale, prediction, target, values, gradients, data_pdf);
+	}
 };
 
 template <typename T>

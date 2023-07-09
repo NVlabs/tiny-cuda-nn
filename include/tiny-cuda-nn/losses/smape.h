@@ -82,8 +82,6 @@ class SmapeLoss : public Loss<T> {
 public:
 	void evaluate(
 		cudaStream_t stream,
-		const uint32_t stride,
-		const uint32_t dims,
 		const float loss_scale,
 		const GPUMatrix<T>& prediction,
 		const GPUMatrix<float>& target,
@@ -91,9 +89,13 @@ public:
 		GPUMatrix<T>& gradients,
 		const GPUMatrix<float>* data_pdf = nullptr
 	) const override {
+		const uint32_t dims = target.m();
+		const uint32_t stride = prediction.m();
+
 		CHECK_THROW(prediction.n() == target.n());
-		CHECK_THROW(prediction.m() == stride);
-		CHECK_THROW(target.m() == dims);
+		CHECK_THROW(values.m() == stride);
+		CHECK_THROW(gradients.m() == stride);
+		CHECK_THROW(!data_pdf || data_pdf->m() == dims);
 
 		linear_kernel(smape_loss<T>, 0, stream,
 			prediction.n_elements(),
@@ -112,7 +114,7 @@ public:
 
 	json hyperparams() const override {
 		return {
-			{"otype", "SMAPE"},
+			{"otype", "Smape"},
 		};
 	}
 };
