@@ -297,14 +297,13 @@ CWISE_OP(pow, TVEC, pow(a[i], b[i]), const TVEC& a, const TVEC& b)
 CWISE_OP(isfinite, BVEC, isfinite(a[i]), const TVEC& a)
 
 #if defined(__CUDACC__)
-inline TCNN_DEVICE void atomic_add_gmem_h2(half2* addr, half2 in) {
-	int in_int = *((int*)&in);
-	asm ("red.relaxed.gpu.global.add.noftz.f16x2 [%0], %1;" :: "l"(addr), "r"(in_int));
-}
-
 inline TCNN_DEVICE void atomic_add_gmem_float(float* addr, float in) {
+#if TCNN_MIN_GPU_ARCH >= 70
 	int in_int = *((int*)&in);
 	asm ("red.relaxed.gpu.global.add.f32 [%0], %1;" :: "l"(addr), "r"(in_int));
+#else
+	atomicAdd(addr, in);
+#endif
 }
 
 template <typename T, uint32_t N, size_t A>
@@ -324,6 +323,15 @@ TCNN_DEVICE void atomic_add_gmem(float* dst, const tvec<float, N, A>& a) {
 }
 
 #if TCNN_MIN_GPU_ARCH >= 60
+inline TCNN_DEVICE void atomic_add_gmem_h2(half2* addr, half2 in) {
+#if TCNN_MIN_GPU_ARCH >= 70
+	int in_int = *((int*)&in);
+	asm ("red.relaxed.gpu.global.add.noftz.f16x2 [%0], %1;" :: "l"(addr), "r"(in_int));
+#else
+	atomicAdd(addr, in);
+#endif
+}
+
 template <uint32_t N, size_t A, typename = std::enable_if_t<N % 2 == 0>>
 TCNN_DEVICE void atomic_add(__half* dst, const tvec<__half, N, A>& a) {
 	TCNN_PRAGMA_UNROLL
