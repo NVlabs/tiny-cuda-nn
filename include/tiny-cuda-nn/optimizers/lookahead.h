@@ -39,7 +39,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void lookahead_step(
@@ -167,4 +167,4 @@ private:
 	GPUMemory<T> m_weights_lookahead;
 };
 
-TCNN_NAMESPACE_END
+}

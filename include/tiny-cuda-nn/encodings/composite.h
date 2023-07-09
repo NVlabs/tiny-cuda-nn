@@ -42,7 +42,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void reduce_sum_forward(
@@ -135,8 +135,7 @@ __global__ void reduce_product_backward(
 template <typename T>
 class CompositeEncoding : public Encoding<T> {
 public:
-	CompositeEncoding(const json& params, uint32_t n_dims_to_encode)
-	: m_n_dims_to_encode{n_dims_to_encode} {
+	CompositeEncoding(const json& params, uint32_t n_dims_to_encode) : m_n_dims_to_encode{n_dims_to_encode} {
 		if (!params.contains("nested") || !params["nested"].is_array()) {
 			throw std::runtime_error{"Must provide an array of nested encodings to CompositeEncoding."};
 		}
@@ -155,7 +154,7 @@ public:
 		}
 
 		if (total_nested_dims_to_encode != 0xFFFFFFFF && total_nested_dims_to_encode > n_dims_to_encode) {
-			throw std::runtime_error{"CompositeEncoding: nested encodings must not encode more dims than composite"};
+			throw std::runtime_error{fmt::format("CompositeEncoding: nested encodings must not encode more dims {} than composite {}", total_nested_dims_to_encode, n_dims_to_encode)};
 		}
 
 		uint32_t unspecified_dims_to_encode = total_nested_dims_to_encode == 0xFFFFFFFF ? 0xFFFFFFFF : (n_dims_to_encode - total_nested_dims_to_encode);
@@ -288,7 +287,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
 		if (m_n_dims_to_encode == 0) {
 			return;
@@ -459,4 +458,4 @@ private:
 	ReductionType m_reduction_type = ReductionType::Concatenation;
 };
 
-TCNN_NAMESPACE_END
+}

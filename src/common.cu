@@ -37,7 +37,7 @@
 #include <cctype>
 #include <unordered_map>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 static_assert(
 	__CUDACC_VER_MAJOR__ > 10 || (__CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2),
@@ -119,4 +119,4 @@ std::string type_to_string<__half>() {
 	return "__half";
 }
 
-TCNN_NAMESPACE_END
+}

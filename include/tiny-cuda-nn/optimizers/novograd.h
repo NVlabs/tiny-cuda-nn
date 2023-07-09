@@ -34,13 +34,12 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/reduce_sum.h>
 
-#include <iostream>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void novo_step(
@@ -128,9 +127,9 @@ public:
 
 			if (workspace_size > m_reduction_workspace.size()) {
 				workspace_size *= 2;
-#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-				std::cout << "NOVOGRAD: resizing reduction buffer to " << workspace_size << std::endl;
-#endif
+
+				log_debug("Novograd: resizing reduction buffer to {}", bytes_to_string(workspace_size));
+
 				m_reduction_workspace.resize(workspace_size);
 			}
 
@@ -261,4 +260,4 @@ private:
 	float m_absolute_weight_decay = 0.0f;
 };
 
-TCNN_NAMESPACE_END
+}

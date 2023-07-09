@@ -22,9 +22,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/** @file   relative_l2.h
+/** @file   constant.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  Implementation of the relative l2 loss and its gradient (following Noise2Noise [Lehtinen et al. 2018])
+ *  @brief  Implementation of the constant loss, which returns a given constant
+ *          value as its gradient. Useful for computing gradients of the model
+ *          with respect to individual output dimensions.
  */
 
 #pragma once
@@ -37,13 +39,12 @@
 namespace tcnn {
 
 template <typename T>
-__global__ void relative_l2_loss(
+__global__ void constant_gradient_loss(
 	const uint32_t n_elements,
 	const uint32_t stride,
 	const uint32_t dims,
 	const float loss_scale,
-	const T* __restrict__ predictions,
-	const float* __restrict__ targets,
+	const float* __restrict__ constant_gradient,
 	float* __restrict__ values,
 	T* __restrict__ gradients,
 	const float* __restrict__ data_pdf = nullptr
@@ -61,23 +62,17 @@ __global__ void relative_l2_loss(
 
 	const uint32_t target_idx = inter_elem_idx * dims + intra_elem_idx;
 
-	const uint32_t n_total = n_elements / stride * dims;
-
-	const float prediction = (float)predictions[i];
-	const float prediction_sq_plus_epsilon = prediction * prediction + 0.01f;
-
 	const float pdf = data_pdf ? data_pdf[target_idx] : 1;
-	const float difference = prediction - targets[target_idx];
 
-	values[i] = difference * difference / prediction_sq_plus_epsilon / pdf / n_total;
-
-	float gradient = 2 * difference / prediction_sq_plus_epsilon / pdf;
-	gradients[i] = (T)(loss_scale * gradient / n_total);
+	values[i] = 0;
+	gradients[i] = (T)(loss_scale * constant_gradient[intra_elem_idx] / pdf);
 }
 
 template <typename T>
-class RelativeL2Loss : public Loss<T> {
+class ConstantGradientLoss : public Loss<T> {
 public:
+	ConstantGradientLoss(const std::vector<float>& constant_gradient) : m_constant_gradient{constant_gradient} {}
+
 	void evaluate(
 		cudaStream_t stream,
 		const float loss_scale,
@@ -95,13 +90,17 @@ public:
 		CHECK_THROW(gradients.m() == stride);
 		CHECK_THROW(!data_pdf || data_pdf->m() == dims);
 
-		linear_kernel(relative_l2_loss<T>, 0, stream,
+		CHECK_THROW(m_constant_gradient.size() == dims);
+
+		auto workspace = allocate_workspace(stream, dims * sizeof(float));
+		CUDA_CHECK_THROW(cudaMemcpyAsync(workspace.data(), m_constant_gradient.data(), dims * sizeof(float), cudaMemcpyHostToDevice, stream));
+
+		linear_kernel(constant_gradient_loss<T>, 0, stream,
 			prediction.n_elements(),
 			stride,
 			dims,
 			loss_scale,
-			prediction.data(),
-			target.data(),
+			(const float*)workspace.data(),
 			values.data(),
 			gradients.data(),
 			data_pdf ? data_pdf->data() : nullptr
@@ -112,9 +111,13 @@ public:
 
 	json hyperparams() const override {
 		return {
-			{"otype", "RelativeL2"},
+			{"otype", "ConstantGradient"},
+			{"value", m_constant_gradient},
 		};
 	}
+
+private:
+	std::vector<float> m_constant_gradient;
 };
 
 }

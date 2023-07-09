@@ -39,7 +39,9 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/trainer.h>
 
-TCNN_NAMESPACE_BEGIN
+#include <type_traits>
+
+namespace tcnn {
 
 struct TrainableModel {
 	std::shared_ptr<Loss<network_precision_t>> loss;
@@ -60,4 +62,4 @@ inline TrainableModel create_from_config(
 	return {loss, optimizer, network, trainer};
 }
 
-TCNN_NAMESPACE_END
+}

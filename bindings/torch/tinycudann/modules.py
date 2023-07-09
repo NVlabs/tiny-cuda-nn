@@ -8,6 +8,7 @@
 
 import gc
 import importlib
+import os
 import warnings
 
 import torch
@@ -57,6 +58,14 @@ for cc in reversed(ALL_COMPUTE_CAPABILITIES):
 if _C is None:
 	raise EnvironmentError(f"Could not find compatible tinycudann extension for compute capability {system_compute_capability}.")
 
+# Pipe tcnn warnings and errors into Python
+# def _log(severity, msg):
+# 	if severity == _C.LogSeverity.Warning:
+# 		warnings.warn(f"tinycudann warning: {msg}")
+# 	elif severity == _C.LogSeverity.Error:
+# 		warnings.warn(f"tinycudann error: {msg}")
+
+# _C.set_log_callback(_log)
 def _torch_precision(tcnn_precision):
 	if tcnn_precision == _C.Precision.Fp16:
 		return torch.half
@@ -162,7 +171,7 @@ class Module(torch.nn.Module):
 		self.params = torch.nn.Parameter(initial_params, requires_grad=True)
 		self.register_parameter(name="params", param=self.params)
 
-		self.loss_scale = 128.0 if self.native_tcnn_module.param_precision() == _C.Precision.Fp16 else 1.0
+		self.loss_scale = _C.default_loss_scale(self.native_tcnn_module.param_precision())
 
 	def forward(self, x):
 		if not x.is_cuda:

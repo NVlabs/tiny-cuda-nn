@@ -29,7 +29,7 @@
 
 #include <tiny-cuda-nn/reduce_sum.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 __global__ void block_reduce1(
 	const uint32_t n_elements,
@@ -64,4 +64,4 @@ uint32_t reduce_sum_workspace_size(uint32_t n_elements) {
 	return n_blocks_linear(n_elements);
 }
 
-TCNN_NAMESPACE_END
+}

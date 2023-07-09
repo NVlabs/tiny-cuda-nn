@@ -4,8 +4,10 @@ import re
 from setuptools import setup
 from pkg_resources import parse_version
 import subprocess
+import shutil
 import sys
 import torch
+from glob import glob
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -75,6 +77,8 @@ if os.name == "nt":
 		# won't try to activate a developer command prompt a second time.
 		os.environ["DISTUTILS_USE_SDK"] = "1"
 
+cpp_standard = 14
+
 # Get CUDA version and make sure the targeted compute capability is compatible
 if os.system("nvcc --version") == 0:
 	nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode()
@@ -83,6 +87,9 @@ if os.system("nvcc --version") == 0:
 	if cuda_version:
 		cuda_version = parse_version(cuda_version.group(1))
 		print(f"Detected CUDA version {cuda_version}")
+		if cuda_version >= parse_version("11.0"):
+			cpp_standard = 17
+
 		supported_compute_capabilities = [
 			cc for cc in compute_capabilities if cc >= min_supported_compute_capability(cuda_version) and cc <= max_supported_compute_capability(cuda_version)
 		]
@@ -96,8 +103,10 @@ if os.system("nvcc --version") == 0:
 
 min_compute_capability = min(compute_capabilities)
 
+print(f"Targeting C++ standard {cpp_standard}")
+
 base_nvcc_flags = [
-	"-std=c++14",
+	f"-std=c++{cpp_standard}",
 	"--extended-lambda",
 	"--expt-relaxed-constexpr",
 	# The following definitions must be undefined
@@ -108,13 +117,13 @@ base_nvcc_flags = [
 ]
 
 if os.name == "posix":
-	base_cflags = ["-std=c++14"]
+	base_cflags = [f"-std=c++{cpp_standard}"]
 	base_nvcc_flags += [
 		"-Xcompiler=-Wno-float-conversion",
 		"-Xcompiler=-fno-strict-aliasing",
 	]
 elif os.name == "nt":
-	base_cflags = ["/std:c++14"]
+	base_cflags = [f"/std:c++{cpp_standard}"]
 
 
 # Some containers set this to contain old architectures that won't compile. We only need the one installed in the machine.
@@ -123,15 +132,21 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = ""
 # List of sources.
 bindings_dir = os.path.dirname(__file__)
 root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
-base_definitions = []
+
+base_definitions = [
+	# PyTorch-supplied parameters may be unaligned. TCNN must be made aware of this such that
+	# it does not optimize for aligned memory accesses.
+	"-DTCNN_PARAMS_UNALIGNED",
+]
+
 base_source_files = [
 	"tinycudann/bindings.cpp",
 	"../../dependencies/fmt/src/format.cc",
 	"../../dependencies/fmt/src/os.cc",
 	"../../src/cpp_api.cu",
-	"../../src/common.cu",
-	"../../src/common_device.cu",
+	"../../src/common_host.cu",
 	"../../src/encoding.cu",
+	"../../src/object.cu",
 ]
 
 if include_networks:
@@ -158,11 +173,11 @@ def make_extension(compute_capability):
 		name=f"tinycudann_bindings._{compute_capability}_C",
 		sources=source_files,
 		include_dirs=[
-			"%s/include" % root_dir,
-			"%s/dependencies" % root_dir,
-			"%s/dependencies/cutlass/include" % root_dir,
-			"%s/dependencies/cutlass/tools/util/include" % root_dir,
-			"%s/dependencies/fmt/include" % root_dir,
+			f"{root_dir}/include",
+			f"{root_dir}/dependencies",
+			f"{root_dir}/dependencies/cutlass/include",
+			f"{root_dir}/dependencies/cutlass/tools/util/include",
+			f"{root_dir}/dependencies/fmt/include",
 		],
 		extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
 		libraries=["cuda"],

@@ -187,7 +187,7 @@ int main(int argc, char* argv[]) {
 		// int sampling_height = 1024;
 
 		uint32_t n_coords = sampling_width * sampling_height;
-		uint32_t n_coords_padded = next_multiple(n_coords, batch_size_granularity);
+		uint32_t n_coords_padded = next_multiple(n_coords, BATCH_SIZE_GRANULARITY);
 
 		GPUMemory<float> sampled_image(n_coords * 3);
 		GPUMemory<float> xs_and_ys(n_coords_padded * 2);
@@ -309,7 +309,7 @@ int main(int argc, char* argv[]) {
 
 		// If only the memory arenas pertaining to a single stream are to be freed, use
 		//free_gpu_memory_arena(stream);
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		std::cout << "Uncaught exception: " << e.what() << std::endl;
 	}
 

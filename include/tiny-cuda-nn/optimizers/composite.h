@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 std::vector<std::pair<uint32_t, uint32_t>> slice_weights(
 	const std::vector<std::pair<uint32_t, uint32_t>>& object_layer_size,
@@ -172,4 +172,4 @@ private:
 	GPUMemory<T> m_custom_weights;
 };
 
-TCNN_NAMESPACE_END
+}

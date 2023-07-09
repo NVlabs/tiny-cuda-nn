@@ -39,7 +39,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void average_step(
@@ -173,4 +173,4 @@ private:
 	GPUMemory<T> m_weights_average;
 };
 
-TCNN_NAMESPACE_END
+}

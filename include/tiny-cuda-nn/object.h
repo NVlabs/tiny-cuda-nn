@@ -29,7 +29,7 @@
 
 #pragma once
 
-#include <tiny-cuda-nn/common.h>
+#include <tiny-cuda-nn/common_host.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
 
 #include <json/json.hpp>
@@ -38,7 +38,7 @@
 
 #include <memory>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 using json = nlohmann::json;
 
@@ -112,7 +112,7 @@ void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float fact
 template <typename T>
 void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const T* in, float* out);
 
-enum class EGradientMode {
+enum class GradientMode {
 	Ignore,
 	Overwrite,
 	Accumulate,
@@ -127,7 +127,7 @@ public:
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<COMPUTE_T>& output, bool use_inference_params = true) {
 		CHECK_THROW(input.m() == input_width());
 		CHECK_THROW(output.m() == padded_output_width());
-		CHECK_THROW(input.n() % batch_size_granularity == 0);
+		CHECK_THROW(input.n() % BATCH_SIZE_GRANULARITY == 0);
 		CHECK_THROW(input.n() == output.n());
 
 		if (this->n_params() > 0) {
@@ -144,12 +144,19 @@ public:
 		inference_mixed_precision(nullptr, input, output, use_inference_params);
 	}
 
-	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
+	void inference(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output, bool use_inference_params = true) {
 		CHECK_THROW(input.m() == input_width());
 		CHECK_THROW(output.m() == output_width());
-		CHECK_THROW(input.n() % batch_size_granularity == 0);
+		CHECK_THROW(input.n() % BATCH_SIZE_GRANULARITY == 0);
 		CHECK_THROW(input.n() == output.n());
-		CHECK_THROW(this->n_params() == 0 || this->inference_params() != nullptr);
+
+		if (this->n_params() > 0) {
+			if (use_inference_params) {
+				CHECK_THROW(this->inference_params() != nullptr);
+			} else {
+				CHECK_THROW(this->params() != nullptr);
+			}
+		}
 
 		GPUMatrixDynamic<COMPUTE_T> inference_output_tmp;
 		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
@@ -158,7 +165,7 @@ public:
 			inference_output_tmp = GPUMatrixDynamic<COMPUTE_T>{padded_output_width(), output.n(), stream, output.layout()};
 		}
 
-		inference_mixed_precision(stream, input, inference_output_tmp);
+		inference_mixed_precision(stream, input, inference_output_tmp, use_inference_params);
 
 		if (std::is_same<COMPUTE_T, float>::value && padded_output_width() == output_width()) {
 			return;
@@ -167,9 +174,8 @@ public:
 		const uint32_t n_elements = (uint32_t)output.n_elements();
 		trim_and_cast_from(stream, output.layout(), n_elements, padded_output_width(), output_width(), inference_output_tmp.data(), output.data());
 	}
-
-	void inference(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output) {
-		inference(nullptr, input, output);
+	void inference(const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<float>& output, bool use_inference_params = true) {
+		inference(nullptr, input, output, use_inference_params);
 	}
 
 	virtual std::unique_ptr<Context> forward_impl(
@@ -188,7 +194,7 @@ public:
 	) {
 		CHECK_THROW(input.m() == input_width());
 		CHECK_THROW(!output || output->m() == padded_output_width());
-		CHECK_THROW(input.n() % batch_size_granularity == 0);
+		CHECK_THROW(input.n() % BATCH_SIZE_GRANULARITY == 0);
 		CHECK_THROW(!output || input.n() == output->n());
 
 		if (this->n_params() > 0) {
@@ -218,7 +224,7 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) = 0;
 	void backward(
 		cudaStream_t stream,
@@ -228,7 +234,7 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) {
 		// Width
 		CHECK_THROW(input.m() == input_width());
@@ -237,7 +243,7 @@ public:
 		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
 
 		// Batch size
-		CHECK_THROW(input.n() % batch_size_granularity == 0);
+		CHECK_THROW(input.n() % BATCH_SIZE_GRANULARITY == 0);
 		CHECK_THROW(input.n() == output.n());
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_dinput || input.n() == dL_dinput->n());
@@ -250,7 +256,7 @@ public:
 				CHECK_THROW(this->params() != nullptr);
 			}
 
-			if (param_gradients_mode != EGradientMode::Ignore) {
+			if (param_gradients_mode != GradientMode::Ignore) {
 				CHECK_THROW(this->gradients() != nullptr);
 			}
 		}
@@ -264,9 +270,9 @@ public:
 		const GPUMatrixDynamic<COMPUTE_T>& dL_doutput,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) {
-		backward(nullptr, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
+		backward(nullptr, ctx, input, output, dL_doutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
 	virtual void backward_backward_input_impl(
@@ -278,7 +284,7 @@ public:
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) { throw std::runtime_error(std::string("DifferentiableObject::backward_backward_input_impl: not implemented error")); }
 	void backward_backward_input(
 		cudaStream_t stream,
@@ -289,7 +295,7 @@ public:
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) {
 		// Width
 		CHECK_THROW(input.m() == input_width());
@@ -299,7 +305,7 @@ public:
 		CHECK_THROW(!dL_dinput || dL_dinput->m() == input_width());
 
 		// Batch size
-		CHECK_THROW(input.n() % batch_size_granularity == 0);
+		CHECK_THROW(input.n() % BATCH_SIZE_GRANULARITY == 0);
 		CHECK_THROW(input.n() == dL_ddLdinput.n());
 		CHECK_THROW(input.n() == dL_doutput.n());
 		CHECK_THROW(!dL_ddLdoutput || input.n() == dL_ddLdoutput->n());
@@ -313,7 +319,7 @@ public:
 				CHECK_THROW(this->params() != nullptr);
 			}
 
-			if (param_gradients_mode != EGradientMode::Ignore) {
+			if (param_gradients_mode != GradientMode::Ignore) {
 				CHECK_THROW(this->gradients() != nullptr);
 			}
 		}
@@ -328,9 +334,9 @@ public:
 		GPUMatrixDynamic<COMPUTE_T>* dL_ddLdoutput = nullptr,
 		GPUMatrixDynamic<T>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) {
-		backward_backward_input(nullptr, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, dL_dinput, use_inference_params, param_gradients_mode);
+		backward_backward_input(nullptr, ctx, input, dL_ddLdinput, dL_doutput, dL_ddLdoutput, dL_dinput, use_inference_params, param_gradients_mode);
 	}
 
 	void input_gradient(
@@ -338,7 +344,7 @@ public:
 		uint32_t dim,
 		const GPUMatrix<T>& input,
 		GPUMatrix<T>& d_dinput,
-		float backprop_scale = 128.0f // Prevents underflows during half-precision backprop. Same reason for loss_scale to exist.
+		float backprop_scale = default_loss_scale<PARAMS_T>() // Prevents underflows during half-precision backprop. Same reason for loss_scale to exist.
 	) {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
@@ -354,7 +360,7 @@ public:
 		one_hot_batched(stream, output.n_elements(), padded_output_width(), dim, d_doutput.data(), backprop_scale);
 
 		auto ctx = forward(stream, input, &output, true /* inference matrices */, true /* prep forward buffers for input gradients */);
-		backward(stream, *ctx, input, output, d_doutput, &d_dinput, true /* inference matrices */, EGradientMode::Ignore);
+		backward(stream, *ctx, input, output, d_doutput, &d_dinput, true /* inference matrices */, GradientMode::Ignore);
 
 		mult(stream, d_dinput.n_elements(), d_dinput.data(), 1.0f / backprop_scale);
 	}
@@ -367,4 +373,4 @@ public:
 	virtual uint32_t required_input_alignment() const = 0;
 };
 
-TCNN_NAMESPACE_END
+}

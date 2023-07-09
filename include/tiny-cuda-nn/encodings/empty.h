@@ -41,7 +41,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void empty_backward(
@@ -97,7 +97,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
 		if (!dL_dinput || padded_output_width() == 0) {
 			return;
@@ -149,4 +149,4 @@ private:
 	uint32_t m_n_to_pad = 0;
 };
 
-TCNN_NAMESPACE_END
+}

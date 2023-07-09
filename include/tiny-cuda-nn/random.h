@@ -34,34 +34,7 @@
 
 #include <pcg32/pcg32.h>
 
-TCNN_NAMESPACE_BEGIN
-
-#define IQ_DEFAULT_STATE  0x853c49e6748fea9bULL
-
-/// Based on https://www.iquilezles.org/www/articles/sfrand/sfrand.htm
-struct iqrand {
-	/// Initialize the pseudorandom number generator with default seed
-	TCNN_HOST_DEVICE iqrand() : state((uint32_t)IQ_DEFAULT_STATE) {}
-
-	/// Initialize the pseudorandom number generator with the \ref seed() function
-	TCNN_HOST_DEVICE iqrand(uint32_t initstate) : state(initstate) {}
-
-	/// Generate a single precision floating point value on the interval [0, 1)
-	TCNN_HOST_DEVICE float next_float() {
-		union {
-			float fres;
-			unsigned int ires;
-		};
-
-		state *= 16807;
-		ires = ((((unsigned int)state)>>9 ) | 0x3f800000);
-		return fres - 1.0f;
-	}
-
-	uint32_t state;  // RNG state.  All values are possible.
-};
-
-using default_rng_t = pcg32;
+namespace tcnn {
 
 template <typename T, typename RNG, size_t N_TO_GENERATE, typename F>
 __global__ void generate_random_kernel(const size_t n_elements, RNG rng, T* __restrict__ out, const F transform) {
@@ -86,7 +59,7 @@ void generate_random(cudaStream_t stream, RNG& rng, size_t n_elements, T* out, F
 	static constexpr size_t N_TO_GENERATE = 4;
 
 	size_t n_threads = div_round_up(n_elements, N_TO_GENERATE);
-	generate_random_kernel<T, RNG, N_TO_GENERATE><<<n_blocks_linear(n_threads), n_threads_linear, 0, stream>>>(n_elements, rng, out, transform);
+	generate_random_kernel<T, RNG, N_TO_GENERATE><<<n_blocks_linear(n_threads), N_THREADS_LINEAR, 0, stream>>>(n_elements, rng, out, transform);
 
 	rng.advance(n_elements);
 }
@@ -111,4 +84,4 @@ void generate_random_logistic(RNG& rng, size_t n_elements, T* out, const T mean 
 	generate_random_logistic(nullptr, rng, n_elements, out, mean, stddev);
 }
 
-TCNN_NAMESPACE_END
+}

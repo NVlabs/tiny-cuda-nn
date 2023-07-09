@@ -41,7 +41,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename F>
 __device__ inline float one_blob_subwarp_aligned(F kernel, MatrixView<const float> data_in, const uint32_t elem_index, const uint32_t encoded_index, const uint32_t num_bins_log2) {
@@ -133,8 +133,8 @@ __global__ void kernel_one_blob_backward(
 	const uint32_t num_bins_log2,
 	MatrixView<const T> dL_dy,
 	MatrixView<const float> data_in,
-	MatrixView<float> dL_dx)
-{
+	MatrixView<float> dL_dx
+) {
 	const uint32_t i = blockIdx.x * blockDim.y + threadIdx.y;
 	const uint32_t j = threadIdx.x;
 	const uint32_t to_encode_index = j + i * blockDim.x;
@@ -191,7 +191,7 @@ public:
 		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
 
 		if (output->layout() == AoS) {
-			const uint32_t min_n_threads = n_threads_linear;
+			const uint32_t min_n_threads = N_THREADS_LINEAR;
 			const dim3 threads = { m_n_output_dims, div_round_up(min_n_threads, m_n_output_dims), 1 };
 			const uint32_t n_threads = threads.x * threads.y;
 			const dim3 blocks = { div_round_up(input.n() * m_n_output_dims, n_threads), 1, 1 };
@@ -208,7 +208,7 @@ public:
 				out(elem)[n_output_dims + dim] = (T)1.0f;
 			});
 		} else {
-			const uint32_t min_n_threads = n_threads_linear;
+			const uint32_t min_n_threads = N_THREADS_LINEAR;
 			const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
 			const uint32_t n_threads = threads.x * threads.y;
 			const dim3 blocks = { div_round_up(input.n() * m_n_dims_to_encode, n_threads), 1, 1 };
@@ -238,7 +238,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
 		if (!dL_dinput || padded_output_width() == 0) {
 			return;
@@ -246,7 +246,7 @@ public:
 
 		const uint32_t num_bins_log2 = (uint32_t)std::log2(m_n_bins);
 
-		const uint32_t min_n_threads = n_threads_linear;
+		const uint32_t min_n_threads = N_THREADS_LINEAR;
 		const dim3 threads = { m_n_dims_to_encode, div_round_up(min_n_threads, m_n_dims_to_encode), 1 };
 		const uint32_t n_threads = threads.x * threads.y;
 		const dim3 blocks = { div_round_up(input.n() * m_n_dims_to_encode, n_threads), 1, 1 };
@@ -306,4 +306,4 @@ private:
 	uint32_t m_n_to_pad = 0;
 };
 
-TCNN_NAMESPACE_END
+}

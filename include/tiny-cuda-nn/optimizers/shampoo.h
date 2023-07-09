@@ -39,13 +39,12 @@
 #include <mma.h>
 #include <cublas_v2.h>
 
-#include <iostream>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 inline std::string cublasGetError(cublasStatus_t error) {
 	switch (error) {
@@ -507,10 +506,10 @@ public:
 			reduce_sum(tmp2, [] __device__ (ROOT_TYPE val) { return val * val; }, sum_tmp, n_elements, stream, n_matrices);
 		}
 
-		set_matrix<<<n_blocks_linear(n_elements*n_matrices), n_threads_linear, 0, stream>>>(n_elements*n_matrices, n_elements, Mk, Xk, sum_tmp, [] __device__ (ROOT_TYPE c) {
+		set_matrix<<<n_blocks_linear(n_elements*n_matrices), N_THREADS_LINEAR, 0, stream>>>(n_elements*n_matrices, n_elements, Mk, Xk, sum_tmp, [] __device__ (ROOT_TYPE c) {
 			return std::sqrt((ROOT_TYPE)2.0) / std::pow(c, (ROOT_TYPE)(0.5 * 0.25));
 		}, n_matrices);
-		set_identity<<<n_blocks_linear(n_elements*n_matrices), n_threads_linear, 0, stream>>>(n_elements*n_matrices, M, Xk, sum_tmp, [] __device__ (ROOT_TYPE c) {
+		set_identity<<<n_blocks_linear(n_elements*n_matrices), N_THREADS_LINEAR, 0, stream>>>(n_elements*n_matrices, M, Xk, sum_tmp, [] __device__ (ROOT_TYPE c) {
 			return std::pow(std::sqrt((ROOT_TYPE)2.0) / std::pow(c, (ROOT_TYPE)(0.5 * 0.25)), (ROOT_TYPE)0.25);
 		}, n_matrices);
 		linear_kernel(set_identity<ROOT_TYPE>, 0, stream, n_elements*n_matrices, M, I5, 5.0f, n_matrices);
@@ -618,7 +617,7 @@ public:
 			CUDA_CHECK_THROW(cudaMemcpyAsync(delta.data(), sum_tmp, n_matrices * sizeof(ROOT_TYPE), cudaMemcpyDeviceToHost, stream));
 
 			if (std::any_of(std::begin(delta), std::end(delta), [](ROOT_TYPE v) { return !std::isfinite(v); })) {
-				std::cout << "Failed to converge! " << delta[0] << std::endl;
+				log_warning("Failed to converge: {}", delta[0]);
 				break;
 			} else if (std::all_of(std::begin(delta), std::end(delta), [epsilon](ROOT_TYPE v) { return v < epsilon; })) {
 				// Converged after i steps.
@@ -801,7 +800,7 @@ public:
 						reduce_sum(m_momentum.data() + offset_MN, [] __device__ (float val) { return val * val; }, m_sqr2_tmp.data() + interval.first, M*N, update_stream, n_matrices);
 					}
 
-					shampoo_step_batched<T><<<n_blocks_linear(M*N*n_matrices), n_threads_linear, 0, update_stream>>>(
+					shampoo_step_batched<T><<<n_blocks_linear(M*N*n_matrices), N_THREADS_LINEAR, 0, update_stream>>>(
 						M, N, n_matrices,
 						m_relative_weight_decay,
 						m_absolute_weight_decay,
@@ -849,8 +848,8 @@ public:
 			uint32_t M = m_L[interval.first].n();
 			uint32_t N = m_R[interval.first].n();
 
-			shampoo_symmetrize_batched<<<n_blocks_linear(M*M*n_matrices), n_threads_linear, 0, stream>>>(M, n_matrices, m_identity_strength, m_L[interval.first].data(), m_L_root[interval.first].data());
-			shampoo_symmetrize_batched<<<n_blocks_linear(N*N*n_matrices), n_threads_linear, 0, stream>>>(N, n_matrices, m_identity_strength, m_R[interval.first].data(), m_R_root[interval.first].data());
+			shampoo_symmetrize_batched<<<n_blocks_linear(M*M*n_matrices), N_THREADS_LINEAR, 0, stream>>>(M, n_matrices, m_identity_strength, m_L[interval.first].data(), m_L_root[interval.first].data());
+			shampoo_symmetrize_batched<<<n_blocks_linear(N*N*n_matrices), N_THREADS_LINEAR, 0, stream>>>(N, n_matrices, m_identity_strength, m_R[interval.first].data(), m_R_root[interval.first].data());
 
 			inverse_pth_root_batched(stream, M, m_L_root[interval.first].data(), m_inverse_pth_root_buffers[0], n_matrices, (uint32_t)j*2+0);
 			inverse_pth_root_batched(stream, N, m_R_root[interval.first].data(), m_inverse_pth_root_buffers[0], n_matrices, (uint32_t)j*2+1);
@@ -1048,4 +1047,4 @@ private:
 	cudaEvent_t m_global_event;
 };
 
-TCNN_NAMESPACE_END
+}

@@ -33,10 +33,8 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 
 #include <cassert>
-#include <iostream>
-#include <map>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 uint32_t reduce_sum_workspace_size(uint32_t n_elements);
 
@@ -196,15 +194,15 @@ __global__ void block_reduce1(
 
 template <typename T, typename F>
 void reduce_sum_old(T* device_pointer, F fun, float* workspace, uint32_t n_elements, cudaStream_t stream) {
-	linear_kernel(block_reduce0<T, F>, sizeof(float) * n_threads_linear, stream, n_elements, fun, device_pointer, workspace);
+	linear_kernel(block_reduce0<T, F>, sizeof(float) * N_THREADS_LINEAR, stream, n_elements, fun, device_pointer, workspace);
 
 	n_elements = n_blocks_linear(n_elements);
 
 	// If the first block reduction wasn't sufficient, keep reducing
 	while (n_elements > 1) {
-		linear_kernel(block_reduce1, sizeof(float) * n_threads_linear, stream, n_elements, workspace);
+		linear_kernel(block_reduce1, sizeof(float) * N_THREADS_LINEAR, stream, n_elements, workspace);
 		n_elements = n_blocks_linear(n_elements);
 	}
 }
 
-TCNN_NAMESPACE_END
+}

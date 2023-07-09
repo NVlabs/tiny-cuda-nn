@@ -34,11 +34,7 @@
 #define PCG32_DEFAULT_STREAM 0xda3e39cb94b95bdbULL
 #define PCG32_MULT           0x5851f42d4c957f2dULL
 
-#include <cmath>
-#include <cassert>
-
-
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 /// PCG32 Pseudorandom number generator
 struct pcg32 {
@@ -171,8 +167,6 @@ struct pcg32 {
 
 	/// Compute the distance between two PCG32 pseudorandom number generators
 	TCNN_HOST_DEVICE int64_t operator-(const pcg32 &other) const {
-		assert(inc == other.inc);
-
 		uint64_t
 			cur_mult = PCG32_MULT,
 			cur_plus = inc,
@@ -185,7 +179,7 @@ struct pcg32 {
 				cur_state = cur_state * cur_mult + cur_plus;
 				distance |= the_bit;
 			}
-			assert((state & the_bit) == (cur_state & the_bit));
+
 			the_bit <<= 1;
 			cur_plus = (cur_mult + 1ULL) * cur_plus;
 			cur_mult *= cur_mult;
@@ -204,4 +198,4 @@ struct pcg32 {
 	uint64_t inc;    // Controls which RNG sequence (stream) is selected. Must *always* be odd.
 };
 
-TCNN_NAMESPACE_END
+}

@@ -34,7 +34,7 @@
 
 #include <stdint.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 class Optimizer : public ObjectWithMutableHyperparams {
@@ -43,7 +43,7 @@ public:
 
 	virtual void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes = {}) = 0;
 	void allocate(const std::shared_ptr<ParametricObject<T>>& target) {
-		allocate(target->n_params(), target->layer_sizes());
+		allocate((uint32_t)target->n_params(), target->layer_sizes());
 	};
 
 	virtual void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) = 0;
@@ -65,4 +65,4 @@ public:
 template <typename T>
 Optimizer<T>* create_optimizer(const json& params);
 
-TCNN_NAMESPACE_END
+}

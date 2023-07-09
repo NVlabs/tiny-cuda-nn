@@ -29,27 +29,72 @@
 
 #pragma once
 
-// A macro is used such that external tools won't end up indenting entire files,
-// resulting in wasted horizontal space.
-#define TCNN_NAMESPACE_BEGIN namespace tcnn {
-#define TCNN_NAMESPACE_END }
+#if defined(_WIN32) && !defined(NOMINMAX)
+#  define NOMINMAX
+#endif
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
 
-#include <tiny-cuda-nn/cpp_api.h>
+#if defined(__CUDACC__)
+#  include <cuda_fp16.h>
+#endif
 
-#include <fmt/core.h>
+//////////////////////////////////////
+// CUDA ERROR HANDLING (EXCEPTIONS) //
+//////////////////////////////////////
 
-#include <array>
-#include <iostream>
-#include <sstream>
-#include <stdexcept>
-#include <string>
+#define STRINGIFY(x) #x
+#define STR(x) STRINGIFY(x)
+#define FILE_LINE __FILE__ ":" STR(__LINE__)
 
-#include <cuda_fp16.h>
+#if defined(__CUDA_ARCH__)
+	#define TCNN_PRAGMA_UNROLL _Pragma("unroll")
+	#define TCNN_PRAGMA_NO_UNROLL _Pragma("unroll 1")
+#else
+	#define TCNN_PRAGMA_UNROLL
+	#define TCNN_PRAGMA_NO_UNROLL
+#endif
 
-TCNN_NAMESPACE_BEGIN
+#ifdef __CUDACC__
+#  ifdef __NVCC_DIAG_PRAGMA_SUPPORT__
+#    pragma nv_diag_suppress = unsigned_compare_with_zero
+#  else
+#    pragma diag_suppress = unsigned_compare_with_zero
+#  endif
+#endif
+
+#if defined(__CUDACC__) || (defined(__clang__) && defined(__CUDA__))
+#define TCNN_HOST_DEVICE __host__ __device__
+#define TCNN_DEVICE __device__
+#define TCNN_HOST __host__
+#else
+#define TCNN_HOST_DEVICE
+#define TCNN_DEVICE
+#define TCNN_HOST
+#endif
+
+#include <tiny-cuda-nn/vec.h>
+
+#if defined(__CUDA_ARCH__)
+static_assert(__CUDA_ARCH__ >= TCNN_MIN_GPU_ARCH * 10, "MIN_GPU_ARCH=" STR(TCNN_MIN_GPU_ARCH) "0 must bound __CUDA_ARCH__=" STR(__CUDA_ARCH__) " from below, but doesn't.");
+#endif
+
+namespace tcnn {
 
 static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
+
+// When TCNN managed its model parameters, they are always aligned,
+// which yields performance benefits in practice. However, parameters
+// supplied by PyTorch are not necessarily aligned. The following
+// variable controls whether TCNN must deal with unaligned data.
+#if defined(TCNN_PARAMS_UNALIGNED)
+static constexpr bool PARAMS_ALIGNED = false;
+#else
+static constexpr bool PARAMS_ALIGNED = true;
+#endif
 
 #define TCNN_HALF_PRECISION (!(TCNN_MIN_GPU_ARCH == 61 || TCNN_MIN_GPU_ARCH <= 52))
 
@@ -66,17 +111,17 @@ static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 // 53-60, 62 |                      no |                       70 |  __half (no tensor cores)
 //  <=52, 61 |                      no |                       70 |   float (no tensor cores)
 
-#if TCNN_HALF_PRECISION
+#if defined(__CUDACC__)
+#  if TCNN_HALF_PRECISION
 using network_precision_t = __half;
-#else
+#  else
 using network_precision_t = float;
-#endif
+#  endif
 
 // Optionally: set the precision to `float` to disable tensor cores and debug potential
 //             problems with mixed-precision training.
 // using network_precision_t = float;
-
-// #define TCNN_VERBOSE_MEMORY_ALLOCS
+#endif
 
 enum class Activation {
 	ReLU,
@@ -90,186 +135,46 @@ enum class Activation {
 	None,
 };
 
+enum class GridType {
+	Hash,
+	Dense,
+	Tiled,
+};
+
+enum class HashType {
+	Prime,
+	CoherentPrime,
+	ReversedPrime,
+	Rng,
+};
+
+enum class InterpolationType {
+	Nearest,
+	Linear,
+	Smoothstep,
+};
+
+enum class MatrixLayout {
+	RowMajor = 0,
+	SoA = 0, // For data matrices TCNN's convention is RowMajor == SoA (struct of arrays)
+	ColumnMajor = 1,
+	AoS = 1,
+};
+
+static constexpr MatrixLayout RM = MatrixLayout::RowMajor;
+static constexpr MatrixLayout SoA = MatrixLayout::SoA;
+static constexpr MatrixLayout CM = MatrixLayout::ColumnMajor;
+static constexpr MatrixLayout AoS = MatrixLayout::AoS;
+
+enum class ReductionType {
+	Concatenation,
+	Sum,
+	Product,
+};
+
 //////////////////
 // Misc helpers //
 //////////////////
-
-int cuda_device();
-void set_cuda_device(int device);
-int cuda_device_count();
-
-bool cuda_supports_virtual_memory(int device);
-inline bool cuda_supports_virtual_memory() {
-	return cuda_supports_virtual_memory(cuda_device());
-}
-
-std::string cuda_device_name(int device);
-inline std::string cuda_device_name() {
-	return cuda_device_name(cuda_device());
-}
-
-uint32_t cuda_compute_capability(int device);
-inline uint32_t cuda_compute_capability() {
-	return cuda_compute_capability(cuda_device());
-}
-
-size_t cuda_memory_granularity(int device);
-inline size_t cuda_memory_granularity() {
-	return cuda_memory_granularity(cuda_device());
-}
-
-struct MemoryInfo {
-	size_t total;
-	size_t free;
-	size_t used;
-};
-
-MemoryInfo cuda_memory_info();
-
-std::string to_lower(std::string str);
-std::string to_upper(std::string str);
-inline bool equals_case_insensitive(const std::string& str1, const std::string& str2) {
-	return to_lower(str1) == to_lower(str2);
-}
-
-template <typename T>
-std::string type_to_string();
-
-inline bool is_pot(uint32_t num, uint32_t* log2 = nullptr) {
-	if (log2) *log2 = 0;
-	if (num > 0) {
-		while (num % 2 == 0) {
-			num /= 2;
-			if (log2) ++*log2;
-		}
-		if (num == 1) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-inline uint32_t powi(uint32_t base, uint32_t exponent) {
-	uint32_t result = 1;
-	for (uint32_t i = 0; i < exponent; ++i) {
-		result *= base;
-	}
-
-	return result;
-}
-
-class ScopeGuard {
-public:
-	ScopeGuard() = default;
-	ScopeGuard(const std::function<void()>& callback) : m_callback{callback} {}
-	ScopeGuard(std::function<void()>&& callback) : m_callback{std::move(callback)} {}
-	ScopeGuard& operator=(const ScopeGuard& other) = delete;
-	ScopeGuard(const ScopeGuard& other) = delete;
-	ScopeGuard& operator=(ScopeGuard&& other) { std::swap(m_callback, other.m_callback); return *this; }
-	ScopeGuard(ScopeGuard&& other) { *this = std::move(other); }
-	~ScopeGuard() { if (m_callback) { m_callback(); } }
-
-	void disarm() {
-		m_callback = {};
-	}
-private:
-	std::function<void()> m_callback;
-};
-
-//////////////////////////////////////
-// CUDA ERROR HANDLING (EXCEPTIONS) //
-//////////////////////////////////////
-
-#define STRINGIFY(x) #x
-#define STR(x) STRINGIFY(x)
-#define FILE_LINE __FILE__ ":" STR(__LINE__)
-
-#define CHECK_THROW(x) \
-	do { if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); } while(0)
-
-/// Checks the result of a cuXXXXXX call and throws an error on failure
-#define CU_CHECK_THROW(x)                                                                          \
-	do {                                                                                           \
-		CUresult result = x;                                                                       \
-		if (result != CUDA_SUCCESS) {                                                              \
-			const char *msg;                                                                       \
-			cuGetErrorName(result, &msg);                                                          \
-			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);   \
-		}                                                                                          \
-	} while(0)
-
-/// Checks the result of a cuXXXXXX call and prints an error on failure
-#define CU_CHECK_PRINT(x)                                                                          \
-	do {                                                                                           \
-		CUresult result = x;                                                                       \
-		if (result != CUDA_SUCCESS) {                                                              \
-			const char *msg;                                                                       \
-			cuGetErrorName(result, &msg);                                                          \
-			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;               \
-		}                                                                                          \
-	} while(0)
-
-/// Checks the result of a cudaXXXXXX call and throws an error on failure
-#define CUDA_CHECK_THROW(x)                                                                                               \
-	do {                                                                                                                  \
-		cudaError_t result = x;                                                                                           \
-		if (result != cudaSuccess)                                                                                        \
-			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cudaGetErrorString(result));  \
-	} while(0)
-
-/// Checks the result of a cudaXXXXXX call and prints an error on failure
-#define CUDA_CHECK_PRINT(x)                                                                                   \
-	do {                                                                                                      \
-		cudaError_t result = x;                                                                               \
-		if (result != cudaSuccess)                                                                            \
-			std::cout << FILE_LINE " " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
-	} while(0)
-
-#if defined(__CUDA_ARCH__)
-	#if defined(__CUDACC_RTC__) || (defined(__clang__) && defined(__CUDA__))
-		#define TCNN_PRAGMA_UNROLL _Pragma("unroll")
-		#define TCNN_PRAGMA_NO_UNROLL _Pragma("unroll 1")
-	#else
-		#define TCNN_PRAGMA_UNROLL #pragma unroll
-		#define TCNN_PRAGMA_NO_UNROLL #pragma unroll 1
-	#endif
-#else
-	#define TCNN_PRAGMA_UNROLL
-	#define TCNN_PRAGMA_NO_UNROLL
-#endif
-
-
-////////////////////
-// Kernel helpers //
-////////////////////
-
-#ifdef __NVCC__
-#  ifdef __NVCC_DIAG_PRAGMA_SUPPORT__
-#    pragma nv_diag_suppress = unsigned_compare_with_zero
-#  else
-#    pragma diag_suppress = unsigned_compare_with_zero
-#  endif
-#endif
-
-#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
-#define TCNN_HOST_DEVICE __host__ __device__
-#define TCNN_DEVICE __device__
-#define TCNN_HOST __host__
-#else
-#define TCNN_HOST_DEVICE
-#define TCNN_DEVICE
-#define TCNN_HOST
-#endif
-
-#if defined(__CUDA_ARCH__)
-static_assert(__CUDA_ARCH__ >= MIN_GPU_ARCH * 10, "MIN_GPU_ARCH=" STR(TCNN_MIN_GPU_ARCH) "0 must bound __CUDA_ARCH__=" STR(__CUDA_ARCH__) " from below, but doesn't.");
-#endif
-
-template <typename T>
-TCNN_HOST_DEVICE T clamp(T val, T lower, T upper) {
-	return val < lower ? lower : (upper < val ? upper : val);
-}
 
 template <typename T>
 TCNN_HOST_DEVICE void host_device_swap(T& a, T& b) {
@@ -321,271 +226,24 @@ inline constexpr TCNN_HOST_DEVICE uint32_t next_pot(uint32_t v) {
 	return v+1;
 }
 
-constexpr uint32_t batch_size_granularity = 128;
+template <typename T> constexpr TCNN_HOST_DEVICE float default_loss_scale();
+template <> constexpr TCNN_HOST_DEVICE float default_loss_scale<float>() { return 1.0f; }
+#ifdef __CUDACC__
+template <> constexpr TCNN_HOST_DEVICE float default_loss_scale<__half>() { return 128.0f; }
+#endif
 
-constexpr uint32_t n_threads_linear = 128;
+constexpr uint32_t BATCH_SIZE_GRANULARITY = 256;
+constexpr uint32_t N_THREADS_LINEAR = 128;
+constexpr uint32_t WARP_SIZE = 32;
+
+// Lower-case constants kept for backward compatibility with user code.
+constexpr uint32_t batch_size_granularity = BATCH_SIZE_GRANULARITY;
+constexpr uint32_t n_threads_linear = N_THREADS_LINEAR;
 
 template <typename T>
-constexpr uint32_t n_blocks_linear(T n_elements) {
-	return (uint32_t)div_round_up(n_elements, (T)n_threads_linear);
+constexpr TCNN_HOST_DEVICE uint32_t n_blocks_linear(T n_elements, uint32_t n_threads = N_THREADS_LINEAR) {
+	return (uint32_t)div_round_up(n_elements, (T)n_threads);
 }
-
-#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
-template <typename K, typename T, typename ... Types>
-inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T n_elements, Types ... args) {
-	if (n_elements <= 0) {
-		return;
-	}
-	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>(n_elements, args...);
-}
-
-template <typename F>
-__global__ void parallel_for_kernel(const size_t n_elements, F fun) {
-	const size_t i = threadIdx.x + blockIdx.x * blockDim.x;
-	if (i >= n_elements) return;
-
-	fun(i);
-}
-
-template <typename F>
-inline void parallel_for_gpu(uint32_t shmem_size, cudaStream_t stream, size_t n_elements, F&& fun) {
-	if (n_elements <= 0) {
-		return;
-	}
-	parallel_for_kernel<F><<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>(n_elements, fun);
-}
-
-template <typename F>
-inline void parallel_for_gpu(cudaStream_t stream, size_t n_elements, F&& fun) {
-	parallel_for_gpu(0, stream, n_elements, std::forward<F>(fun));
-}
-
-template <typename F>
-inline void parallel_for_gpu(size_t n_elements, F&& fun) {
-	parallel_for_gpu(nullptr, n_elements, std::forward<F>(fun));
-}
-
-template <typename F>
-__global__ void parallel_for_aos_kernel(const size_t n_elements, const uint32_t n_dims, F fun) {
-	const size_t dim = threadIdx.x;
-	const size_t elem = threadIdx.y + blockIdx.x * blockDim.y;
-	if (dim >= n_dims) return;
-	if (elem >= n_elements) return;
-
-	fun(elem, dim);
-}
-
-template <typename F>
-inline void parallel_for_gpu_aos(uint32_t shmem_size, cudaStream_t stream, size_t n_elements, uint32_t n_dims, F&& fun) {
-	if (n_elements <= 0 || n_dims <= 0) {
-		return;
-	}
-
-	const dim3 threads = { n_dims, div_round_up(n_threads_linear, n_dims), 1 };
-	const size_t n_threads = threads.x * threads.y;
-	const dim3 blocks = { (uint32_t)div_round_up(n_elements * n_dims, n_threads), 1, 1 };
-
-	parallel_for_aos_kernel<<<blocks, threads, shmem_size, stream>>>(
-		n_elements, n_dims, fun
-	);
-}
-
-template <typename F>
-inline void parallel_for_gpu_aos(cudaStream_t stream, size_t n_elements, uint32_t n_dims, F&& fun) {
-	parallel_for_gpu_aos(0, stream, n_elements, n_dims, std::forward<F>(fun));
-}
-
-template <typename F>
-inline void parallel_for_gpu_aos(size_t n_elements, uint32_t n_dims, F&& fun) {
-	parallel_for_gpu_aos(nullptr, n_elements, n_dims, std::forward<F>(fun));
-}
-
-template <typename F>
-__global__ void parallel_for_soa_kernel(const size_t n_elements, const uint32_t n_dims, F fun) {
-	const size_t elem = threadIdx.x + blockIdx.x * blockDim.x;
-	const size_t dim = blockIdx.y;
-	if (elem >= n_elements) return;
-	if (dim >= n_dims) return;
-
-	fun(elem, dim);
-}
-
-template <typename F>
-inline void parallel_for_gpu_soa(uint32_t shmem_size, cudaStream_t stream, size_t n_elements, uint32_t n_dims, F&& fun) {
-	if (n_elements <= 0 || n_dims <= 0) {
-		return;
-	}
-
-	const dim3 blocks = { n_blocks_linear(n_elements), n_dims, 1 };
-
-	parallel_for_soa_kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>(
-		n_elements, n_dims, fun
-	);
-}
-
-template <typename F>
-inline void parallel_for_gpu_soa(cudaStream_t stream, size_t n_elements, uint32_t n_dims, F&& fun) {
-	parallel_for_gpu_soa(0, stream, n_elements, n_dims, std::forward<F>(fun));
-}
-
-template <typename F>
-inline void parallel_for_gpu_soa(size_t n_elements, uint32_t n_dims, F&& fun) {
-	parallel_for_gpu_soa(nullptr, n_elements, n_dims, std::forward<F>(fun));
-}
-#endif
-
-inline std::string bytes_to_string(size_t bytes) {
-	std::array<std::string, 7> suffixes = {{ "B", "KB", "MB", "GB", "TB", "PB", "EB" }};
-
-	double count = (double)bytes;
-	uint32_t i = 0;
-	for (; i < suffixes.size() && count >= 1024; ++i) {
-		count /= 1024;
-	}
-
-	std::ostringstream oss;
-	oss.precision(3);
-	oss << count << " " << suffixes[i];
-	return oss.str();
-}
-
-template <typename T, uint32_t N_DIMS, bool ALIGNED=false>
-struct alignas(ALIGNED ? next_pot(sizeof(T) * N_DIMS) : 0) vector_t {
-	vector_t() = default;
-
-	TCNN_HOST_DEVICE vector_t(T scalar) {
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N_DIMS; ++i) {
-			data[i] = scalar;
-		}
-	}
-
-	template <typename U, uint32_t N, bool A>
-	TCNN_HOST_DEVICE vector_t(const vector_t<U, N, A>& other) {
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < min(N_DIMS, N); ++i) {
-			data[i] = (T)other[i];
-		}
-	}
-
-	TCNN_HOST_DEVICE T& operator[](uint32_t idx) {
-		return data[idx];
-	}
-
-	TCNN_HOST_DEVICE T operator[](uint32_t idx) const {
-		return data[idx];
-	}
-
-	TCNN_HOST_DEVICE T& operator()(uint32_t idx) {
-		return data[idx];
-	}
-
-	TCNN_HOST_DEVICE T operator()(uint32_t idx) const {
-		return data[idx];
-	}
-
-	TCNN_HOST_DEVICE static constexpr uint32_t size() {
-		return N_DIMS;
-	}
-
-	T data[N_DIMS];
-	static constexpr uint32_t N = N_DIMS;
-};
-
-template <typename T, uint32_t N, bool A>
-TCNN_HOST_DEVICE vector_t<T, N, A> operator*(T s, const vector_t<T, N, A>& v) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // __hmul2 is only supported with compute capability 60 and above
-	if (std::is_same<T, __half>::value && A && N % 2 == 0) {
-		vector_t<T, N, A> result;
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N/2; ++i) {
-			*(__half2*)&result.data[i*2] = __hmul2({s, s}, *(__half2*)&v.data[i*2]);
-		}
-		return result;
-	} else
-#endif
-	{
-		vector_t<T, N, A> result;
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
-			result[i] = s * v[i];
-		}
-		return result;
-	}
-}
-
-template <typename T, uint32_t N, bool A>
-TCNN_HOST_DEVICE vector_t<T, N, A> operator+(const vector_t<T, N, A>& v1, const vector_t<T, N, A>& v2) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // __hadd2 is only supported with compute capability 60 and above
-	if (std::is_same<T, __half>::value && A && N % 2 == 0) {
-		vector_t<T, N, A> result;
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N/2; ++i) {
-			*(__half2*)&result.data[i*2] = __hadd2(*(__half2*)&v1.data[i*2], *(__half2*)&v2.data[i*2]);
-		}
-		return result;
-	} else
-#endif
-	{
-		vector_t<T, N, A> result;
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
-			result[i] = v1[i] + v2[i];
-		}
-		return result;
-	}
-}
-
-template <typename T, uint32_t N, bool A>
-TCNN_HOST_DEVICE vector_t<T, N, A> fma(T s, const vector_t<T, N, A>& v1, const vector_t<T, N, A>& v2) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // __hfma2 is only supported with compute capability 60 and above
-	if (std::is_same<T, __half>::value && A && N % 2 == 0) {
-		vector_t<T, N, A> result;
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N/2; ++i) {
-			*(__half2*)&result.data[i*2] = __hfma2({s, s}, *(__half2*)&v1.data[i*2], *(__half2*)&v2.data[i*2]);
-		}
-		return result;
-	} else
-#endif
-	{
-		vector_t<T, N, A> result;
-		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
-			result[i] = fmaf(s, v1[i], v2[i]);
-		}
-		return result;
-	}
-}
-
-template <typename T, uint32_t N, bool A>
-TCNN_HOST_DEVICE vector_t<T, N, A> mix(const vector_t<T, N, A>& v1, const vector_t<T, N, A>& v2, T t) {
-	return fma(((T)1.0f - t), v1, t * v2);
-}
-
-template <uint32_t N>
-using vecf = vector_t<float, N>;
-
-template <uint32_t N>
-using vech = vector_t<__half, N>;
-
-template <uint32_t N>
-using vec = vector_t<network_precision_t, N>;
-
-template <uint32_t N>
-using avecf = vector_t<float, N, true>;
-
-template <uint32_t N>
-using avech = vector_t<__half, N, true>;
-
-template <uint32_t N>
-using avec = vector_t<network_precision_t, N, true>;
-
-template <uint32_t N_FLOATS>
-using vector_fullp_t = vector_t<float, N_FLOATS>;
-
-template <uint32_t N_HALFS>
-using vector_halfp_t = vector_t<__half, N_HALFS>;
 
 template <typename T>
 struct PitchedPtr {
@@ -615,4 +273,70 @@ struct PitchedPtr {
 	uint32_t stride_in_bytes;
 };
 
-TCNN_NAMESPACE_END
+template <typename T>
+struct MatrixView {
+	TCNN_HOST_DEVICE MatrixView() : data{nullptr}, stride_i{0}, stride_j{0} {}
+	TCNN_HOST_DEVICE MatrixView(T* data, uint32_t stride_i, uint32_t stride_j) : data{data}, stride_i{stride_i}, stride_j{stride_j} {}
+	TCNN_HOST_DEVICE MatrixView(const MatrixView<std::remove_const_t<T>>& other) : data{other.data}, stride_i{other.stride_i}, stride_j{other.stride_j} {}
+
+	TCNN_HOST_DEVICE T& operator()(uint32_t i, uint32_t j = 0) const {
+		return data[i * stride_i + j * stride_j];
+	}
+
+	TCNN_HOST_DEVICE void advance(uint32_t m, uint32_t n) {
+		data = &(*this)(m, n);
+	}
+
+	TCNN_HOST_DEVICE void advance_rows(uint32_t m) {
+		advance(m, 0);
+	}
+
+	TCNN_HOST_DEVICE void advance_cols(uint32_t n) {
+		advance(0, n);
+	}
+
+	template <uint32_t N>
+	TCNN_HOST_DEVICE tvec<std::remove_const_t<T>, N> row(uint32_t m) const {
+		tvec<std::remove_const_t<T>, N> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			result[i] = (*this)(m, i);
+		}
+		return result;
+	}
+
+	template <uint32_t N>
+	TCNN_HOST_DEVICE tvec<std::remove_const_t<T>, N> col(uint32_t n) const {
+		tvec<std::remove_const_t<T>, N> result;
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			result[i] = (*this)(i, n);
+		}
+		return result;
+	}
+
+	template <typename U, uint32_t N, size_t A>
+	TCNN_HOST_DEVICE void set_row(uint32_t m, const tvec<U, N, A>& val) {
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			(*this)(m, i) = val[i];
+		}
+	}
+
+	template <typename U, uint32_t N, size_t A>
+	TCNN_HOST_DEVICE void set_col(uint32_t n, const tvec<U, N, A>& val) {
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t i = 0; i < N; ++i) {
+			(*this)(i, n) = val[i];
+		}
+	}
+
+	TCNN_HOST_DEVICE explicit operator bool() const {
+		return data;
+	}
+
+	T* data;
+	uint32_t stride_i, stride_j;
+};
+
+}

@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void frequency_encoding(
@@ -61,21 +61,9 @@ __global__ void frequency_encoding(
 	const uint32_t i = encoded_index / fan_out;
 	const uint32_t j = encoded_index - i * fan_out;
 
-	/* Layout of outputs (for each input record):
-	 *     frequency-encoded input dimension 0
-	 *     frequency-encoded input dimension 1
-	 *     frequency-encoded input dimension ...
-	 *     padding (value 1.f)
-	 */
 	if (j >= fan_out_encoded) {
 		data_out(j, i) = 1;
 	} else {
-		/* Layout of encoded features (e.g. when inputs abcd.. are XYZ positions):
-		 *     sin(pi a.x), cos(pi a.x), sin(2pi a.x), cos(2pi a.x), sin(4pi a.x) ...
-		 *     sin(pi a.y), cos(pi a.y), sin(2pi a.y), cos(2pi a.y), sin(4pi a.y) ...
-		 *     sin(pi a.z), cos(pi a.z), sin(2pi a.z), cos(2pi a.z), sin(4pi a.z) ...
-		 *     (padding)
-		 */
 		const uint32_t encoded_input_feature_i = j / (n_frequencies * 2);
 		const uint32_t log2_frequency = (j / 2) % n_frequencies;
 
@@ -160,7 +148,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
 		if (!dL_dinput || padded_output_width() == 0) {
 			return;
@@ -227,4 +215,4 @@ private:
 	uint32_t m_n_to_pad = 0;
 };
 
-TCNN_NAMESPACE_END
+}

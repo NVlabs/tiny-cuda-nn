@@ -36,11 +36,13 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/network.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 class NetworkWithInputEncoding : public Network<float, T> {
 public:
+	NetworkWithInputEncoding(std::shared_ptr<Encoding<T>> encoding, std::shared_ptr<Network<T>> network) : m_encoding{encoding}, m_network{network} {}
+
 	NetworkWithInputEncoding(std::shared_ptr<Encoding<T>> encoding, uint32_t n_output_dims, const json& network) : m_encoding{encoding} {
 		encoding->set_alignment(minimum_alignment(network));
 
@@ -86,7 +88,7 @@ public:
 		const GPUMatrixDynamic<T>& dL_doutput,
 		GPUMatrixDynamic<float>* dL_dinput = nullptr,
 		bool use_inference_params = false,
-		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
 		GPUMatrixDynamic<T> dL_dnetwork_input;
 		if (m_encoding->n_params() > 0 || dL_dinput) {
@@ -177,8 +179,8 @@ public:
 	}
 
 private:
-	std::unique_ptr<Network<T>> m_network;
 	std::shared_ptr<Encoding<T>> m_encoding;
+	std::shared_ptr<Network<T>> m_network;
 
 	struct ForwardContext : public Context {
 		GPUMatrixDynamic<T> network_input;
@@ -187,4 +189,4 @@ private:
 	};
 };
 
-TCNN_NAMESPACE_END
+}
