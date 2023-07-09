@@ -77,6 +77,8 @@ if os.name == "nt":
 		# won't try to activate a developer command prompt a second time.
 		os.environ["DISTUTILS_USE_SDK"] = "1"
 
+cpp_standard = 14
+
 # Get CUDA version and make sure the targeted compute capability is compatible
 if os.system("nvcc --version") == 0:
 	nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode()
@@ -85,6 +87,9 @@ if os.system("nvcc --version") == 0:
 	if cuda_version:
 		cuda_version = parse_version(cuda_version.group(1))
 		print(f"Detected CUDA version {cuda_version}")
+		if cuda_version >= parse_version("11.0"):
+			cpp_standard = 17
+
 		supported_compute_capabilities = [
 			cc for cc in compute_capabilities if cc >= min_supported_compute_capability(cuda_version) and cc <= max_supported_compute_capability(cuda_version)
 		]
@@ -98,8 +103,10 @@ if os.system("nvcc --version") == 0:
 
 min_compute_capability = min(compute_capabilities)
 
+print(f"Targeting C++ standard {cpp_standard}")
+
 base_nvcc_flags = [
-	"-std=c++14",
+	f"-std=c++{cpp_standard}",
 	"--extended-lambda",
 	"--expt-relaxed-constexpr",
 	# The following definitions must be undefined
@@ -110,13 +117,13 @@ base_nvcc_flags = [
 ]
 
 if os.name == "posix":
-	base_cflags = ["-std=c++14"]
+	base_cflags = [f"-std=c++{cpp_standard}"]
 	base_nvcc_flags += [
 		"-Xcompiler=-Wno-float-conversion",
 		"-Xcompiler=-fno-strict-aliasing",
 	]
 elif os.name == "nt":
-	base_cflags = ["/std:c++14"]
+	base_cflags = [f"/std:c++{cpp_standard}"]
 
 
 # Some containers set this to contain old architectures that won't compile. We only need the one installed in the machine.
