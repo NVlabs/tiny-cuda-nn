@@ -38,7 +38,7 @@
 #include <tiny-cuda-nn/losses/relative_l2_luminance.h>
 #include <tiny-cuda-nn/losses/cross_entropy.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 Loss<T>* create_loss(const json& loss) {
@@ -68,4 +68,4 @@ Loss<T>* create_loss(const json& loss) {
 template Loss<float>* create_loss(const json& loss);
 template Loss<__half>* create_loss(const json& loss);
 
-TCNN_NAMESPACE_END
+}

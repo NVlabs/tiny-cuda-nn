@@ -33,7 +33,7 @@
 #include <tiny-cuda-nn/cutlass_matmul.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 CutlassMLP<T>::CutlassMLP(
@@ -373,4 +373,4 @@ void CutlassMLP<T>::initialize_params(pcg32& rnd, float* params_full_precision, 
 // Explicitly instantiate CutlassMLP classes.
 template class CutlassMLP<network_precision_t>;
 
-TCNN_NAMESPACE_END
+}

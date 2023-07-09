@@ -33,7 +33,7 @@
 
 #include <stack>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 void free_multi_streams(cudaStream_t parent_stream);
 
@@ -251,4 +251,4 @@ private:
 	size_t m_n_streams = 0;
 };
 
-TCNN_NAMESPACE_END
+}

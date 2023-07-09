@@ -45,7 +45,7 @@
 #include <iostream>
 #include <random>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T, typename PARAMS_T, typename COMPUTE_T=T>
 class Trainer : public ObjectWithMutableHyperparams {
@@ -352,4 +352,4 @@ private:
 	pcg32 m_rng;
 };
 
-TCNN_NAMESPACE_END
+}

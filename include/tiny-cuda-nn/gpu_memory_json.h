@@ -31,7 +31,7 @@
 
 #include <json/json.hpp>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 inline nlohmann::json::binary_t gpu_memory_to_json_binary(const void* gpu_data, size_t n_bytes) {
 	nlohmann::json::binary_t data_cpu;
@@ -70,4 +70,4 @@ inline void from_json(const nlohmann::json& j, GPUMemory<T>& gpu_data) {
 	}
 }
 
-TCNN_NAMESPACE_END
+}

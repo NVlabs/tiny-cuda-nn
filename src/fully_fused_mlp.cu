@@ -36,7 +36,7 @@
 
 #include <mma.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 void check_shmem_error(cudaError_t error) {
 	if (error != cudaSuccess) {
@@ -895,4 +895,4 @@ template class FullyFusedMLP<network_precision_t, 64>;
 template class FullyFusedMLP<network_precision_t, 32>;
 template class FullyFusedMLP<network_precision_t, 16>;
 
-TCNN_NAMESPACE_END
+}

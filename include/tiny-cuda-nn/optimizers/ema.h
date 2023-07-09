@@ -39,7 +39,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void ema_step_full_precision(
@@ -214,4 +214,4 @@ private:
 	GPUMemory<float> m_tmp;
 };
 
-TCNN_NAMESPACE_END
+}

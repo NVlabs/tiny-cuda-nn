@@ -31,7 +31,7 @@
 
 #include <tiny-cuda-nn/common.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 enum class MatrixLayout {
 	RowMajor = 0,
@@ -45,4 +45,4 @@ static constexpr MatrixLayout SoA = MatrixLayout::SoA;
 static constexpr MatrixLayout CM = MatrixLayout::ColumnMajor;
 static constexpr MatrixLayout AoS = MatrixLayout::AoS;
 
-TCNN_NAMESPACE_END
+}

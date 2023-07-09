@@ -36,7 +36,7 @@
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
 #endif
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 Activation string_to_activation(const std::string& activation_name) {
 	if (equals_case_insensitive(activation_name, "None")) {
@@ -177,4 +177,4 @@ Network<T>* create_network(const json& network) {
 
 template Network<network_precision_t>* create_network(const json& network);
 
-TCNN_NAMESPACE_END
+}

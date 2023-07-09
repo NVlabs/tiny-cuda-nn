@@ -46,7 +46,7 @@
 #include <unordered_map>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 #define DEBUG_GUARD_SIZE 0
 
@@ -751,4 +751,4 @@ inline void free_all_gpu_memory_arenas() {
 	global_gpu_memory_arenas().clear();
 }
 
-TCNN_NAMESPACE_END
+}

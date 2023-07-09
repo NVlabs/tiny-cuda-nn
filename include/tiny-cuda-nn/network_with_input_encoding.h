@@ -36,7 +36,7 @@
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/network.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 class NetworkWithInputEncoding : public Network<float, T> {
@@ -187,4 +187,4 @@ private:
 	};
 };
 
-TCNN_NAMESPACE_END
+}

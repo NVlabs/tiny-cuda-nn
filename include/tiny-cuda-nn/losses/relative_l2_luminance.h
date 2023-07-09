@@ -34,7 +34,7 @@
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/loss.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void relative_l2_luminance_loss(
@@ -126,4 +126,4 @@ public:
 	}
 };
 
-TCNN_NAMESPACE_END
+}

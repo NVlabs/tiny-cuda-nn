@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void novo_step(
@@ -261,4 +261,4 @@ private:
 	float m_absolute_weight_decay = 0.0f;
 };
 
-TCNN_NAMESPACE_END
+}

@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 class ExponentialDecayOptimizer : public Optimizer<T> {
@@ -159,4 +159,4 @@ private:
 	uint32_t m_decay_end = 10000000;
 };
 
-TCNN_NAMESPACE_END
+}

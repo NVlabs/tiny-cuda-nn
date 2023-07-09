@@ -45,7 +45,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 inline std::string cublasGetError(cublasStatus_t error) {
 	switch (error) {
@@ -1048,4 +1048,4 @@ private:
 	cudaEvent_t m_global_event;
 };
 
-TCNN_NAMESPACE_END
+}

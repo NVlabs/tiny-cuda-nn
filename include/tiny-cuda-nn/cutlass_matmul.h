@@ -45,11 +45,9 @@
 #include <cutlass/numeric_conversion.h>
 #include <cutlass/numeric_types.h>
 
-#include <iostream>
-#include <map>
 #include <type_traits>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 #define CUTLASS_CHECK_THROW(x)                                                                                        \
 	do {                                                                                                                   \
@@ -516,4 +514,4 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, 
 	fc_multiply_split_k<config>(stream, A, B, D, D, split_k_slices, beta);
 }
 
-TCNN_NAMESPACE_END
+}

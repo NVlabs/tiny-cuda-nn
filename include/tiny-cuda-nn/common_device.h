@@ -43,7 +43,7 @@
 
 #include <tiny-cuda-nn/gpu_matrix.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 static constexpr float PI = 3.14159265358979323846f;
 static constexpr float SQRT2 = 1.41421356237309504880f;
@@ -683,4 +683,4 @@ __global__ void mult_kernel(const uint32_t num_elements, const T* factor1, const
 	result[i] = factor1[i] * factor2[i];
 }
 
-TCNN_NAMESPACE_END
+}

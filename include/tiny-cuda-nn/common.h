@@ -29,10 +29,6 @@
 
 #pragma once
 
-// A macro is used such that external tools won't end up indenting entire files,
-// resulting in wasted horizontal space.
-#define TCNN_NAMESPACE_BEGIN namespace tcnn {
-#define TCNN_NAMESPACE_END }
 
 
 #include <tiny-cuda-nn/cpp_api.h>
@@ -47,7 +43,7 @@
 
 #include <cuda_fp16.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 
@@ -615,4 +611,4 @@ struct PitchedPtr {
 	uint32_t stride_in_bytes;
 };
 
-TCNN_NAMESPACE_END
+}

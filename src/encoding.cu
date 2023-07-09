@@ -38,7 +38,7 @@
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 InterpolationType string_to_interpolation_type(const std::string& interpolation_type) {
 	if (equals_case_insensitive(interpolation_type, "Nearest")) {
@@ -187,4 +187,5 @@ template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, const json
 #endif
 template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
 
-TCNN_NAMESPACE_END
+
+}

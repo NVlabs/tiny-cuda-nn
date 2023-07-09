@@ -39,7 +39,7 @@
 #include <array>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 class CutlassMLP : public Network<T> {
@@ -184,4 +184,4 @@ private:
 	std::vector<GPUMatrix<T, RM>> m_gradient_matrices;
 };
 
-TCNN_NAMESPACE_END
+}

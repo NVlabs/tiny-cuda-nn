@@ -33,7 +33,7 @@
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/object.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 class Loss : public ObjectWithMutableHyperparams {
@@ -54,4 +54,4 @@ public:
 template <typename T>
 Loss<T>* create_loss(const json& params);
 
-TCNN_NAMESPACE_END
+}

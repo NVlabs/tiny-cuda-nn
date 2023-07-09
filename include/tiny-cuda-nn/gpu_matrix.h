@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template<typename T>
 class GPUMatrixDynamic;
@@ -523,4 +523,4 @@ GPUMemoryArena::Allocation GPUMatrixBase::allocate_shared_memory(cudaStream_t st
 	return allocate_shared_memory(stream, matrix_pointers);
 }
 
-TCNN_NAMESPACE_END
+}

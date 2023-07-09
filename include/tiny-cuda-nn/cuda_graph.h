@@ -36,7 +36,7 @@
 #include <deque>
 #include <functional>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 class CudaGraph;
 
@@ -177,4 +177,4 @@ private:
 	bool m_synchronize_when_capture_done = false;
 };
 
-TCNN_NAMESPACE_END
+}

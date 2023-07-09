@@ -30,6 +30,6 @@
 
 #include <tiny-cuda-nn/common_device.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
-TCNN_NAMESPACE_END
+}

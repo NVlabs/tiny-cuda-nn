@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T, typename ARRAY_T>
 __device__ void sh_enc(uint32_t degree, float x, float y, float z, ARRAY_T& data_out) {
@@ -503,4 +503,4 @@ private:
 	uint32_t m_n_to_pad = 0;
 };
 
-TCNN_NAMESPACE_END
+}

@@ -42,7 +42,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void adam_step(
@@ -326,4 +326,4 @@ private:
 	bool m_optimize_non_matrix_params = true;
 };
 
-TCNN_NAMESPACE_END
+}

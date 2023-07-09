@@ -42,7 +42,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void reduce_sum_forward(
@@ -459,4 +459,4 @@ private:
 	ReductionType m_reduction_type = ReductionType::Concatenation;
 };
 
-TCNN_NAMESPACE_END
+}

@@ -34,32 +34,7 @@
 
 #include <pcg32/pcg32.h>
 
-TCNN_NAMESPACE_BEGIN
-
-#define IQ_DEFAULT_STATE  0x853c49e6748fea9bULL
-
-/// Based on https://www.iquilezles.org/www/articles/sfrand/sfrand.htm
-struct iqrand {
-	/// Initialize the pseudorandom number generator with default seed
-	TCNN_HOST_DEVICE iqrand() : state((uint32_t)IQ_DEFAULT_STATE) {}
-
-	/// Initialize the pseudorandom number generator with the \ref seed() function
-	TCNN_HOST_DEVICE iqrand(uint32_t initstate) : state(initstate) {}
-
-	/// Generate a single precision floating point value on the interval [0, 1)
-	TCNN_HOST_DEVICE float next_float() {
-		union {
-			float fres;
-			unsigned int ires;
-		};
-
-		state *= 16807;
-		ires = ((((unsigned int)state)>>9 ) | 0x3f800000);
-		return fres - 1.0f;
-	}
-
-	uint32_t state;  // RNG state.  All values are possible.
-};
+namespace tcnn {
 
 using default_rng_t = pcg32;
 
@@ -111,4 +86,4 @@ void generate_random_logistic(RNG& rng, size_t n_elements, T* out, const T mean 
 	generate_random_logistic(nullptr, rng, n_elements, out, mean, stddev);
 }
 
-TCNN_NAMESPACE_END
+}

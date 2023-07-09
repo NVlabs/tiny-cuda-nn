@@ -36,7 +36,7 @@
 #include <iostream>
 #include <map>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 uint32_t reduce_sum_workspace_size(uint32_t n_elements);
 
@@ -207,4 +207,4 @@ void reduce_sum_old(T* device_pointer, F fun, float* workspace, uint32_t n_eleme
 	}
 }
 
-TCNN_NAMESPACE_END
+}

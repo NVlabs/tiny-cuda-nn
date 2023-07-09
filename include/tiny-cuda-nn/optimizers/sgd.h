@@ -38,7 +38,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 __global__ void sgd_step(
@@ -152,4 +152,4 @@ private:
 	float m_l2_reg = 1e-8f;
 };
 
-TCNN_NAMESPACE_END
+}

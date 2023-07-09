@@ -32,7 +32,7 @@
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/object.h>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 Activation string_to_activation(const std::string& activation_name);
 std::string to_string(Activation activation);
@@ -65,4 +65,4 @@ Network<T, T>* create_network(const json& network);
 std::string select_network(const json& network);
 uint32_t minimum_alignment(const json& network);
 
-TCNN_NAMESPACE_END
+}

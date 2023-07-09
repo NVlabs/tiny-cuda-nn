@@ -44,7 +44,7 @@
 #endif
 
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 template <typename T>
 Optimizer<T>* create_optimizer(const json& optimizer) {
@@ -82,4 +82,4 @@ Optimizer<T>* create_optimizer(const json& optimizer) {
 template Optimizer<float>* create_optimizer(const json& optimizer);
 template Optimizer<__half>* create_optimizer(const json& optimizer);
 
-TCNN_NAMESPACE_END
+}

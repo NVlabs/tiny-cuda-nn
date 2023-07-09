@@ -42,7 +42,7 @@
 #include <string>
 #include <vector>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 static constexpr uint32_t MAX_N_LEVELS = 128;
 struct GridOffsetTable {
@@ -1477,4 +1477,4 @@ GridEncoding<T>* create_grid_encoding(uint32_t n_dims_to_encode, const json& enc
 	}
 }
 
-TCNN_NAMESPACE_END
+}

@@ -38,7 +38,7 @@
 
 #include <memory>
 
-TCNN_NAMESPACE_BEGIN
+namespace tcnn {
 
 using json = nlohmann::json;
 
@@ -367,4 +367,4 @@ public:
 	virtual uint32_t required_input_alignment() const = 0;
 };
 
-TCNN_NAMESPACE_END
+}
