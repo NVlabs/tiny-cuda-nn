@@ -829,9 +829,9 @@ __device__ inline void pos_fract(const float input, float* pos, float* pos_deriv
 	// This is mentioned in Appendix A of the "Instant Neural Graphics Primitives" paper.
 	// The offset can cause wraparound indexing in dense grids, which didn't negatively impact
 	// the approximation quality in any of our tests.
-	*pos = input * scale + 0.5f;
-	int tmp = floorf(*pos);
-	*pos_grid = (uint32_t)tmp;
+	*pos = fmaf(scale, input, 0.5f);
+	float tmp = floorf(*pos);
+	*pos_grid = (uint32_t)(int)tmp;
 	*pos -= (float)tmp;
 	*pos_2nd_derivative = interpolation_fun_2nd_derivative(*pos);
 	*pos_derivative = interpolation_fun_derivative(*pos);
@@ -845,10 +845,10 @@ __device__ inline void pos_fract(const float input, float* pos, float* pos_deriv
 	// This is mentioned in Appendix A of the "Instant Neural Graphics Primitives" paper.
 	// The offset can cause wraparound indexing in dense grids, which didn't negatively impact
 	// the approximation quality in any of our tests.
-	*pos = input * scale + 0.5f;
-	int tmp = floorf(*pos);
-	*pos_grid = (uint32_t)tmp;
-	*pos -= (float)tmp;
+	*pos = fmaf(scale, input, 0.5f);
+	float tmp = floorf(*pos);
+	*pos_grid = (uint32_t)(int)tmp;
+	*pos -= tmp;
 	*pos_derivative = interpolation_fun_derivative(*pos);
 	*pos = interpolation_fun(*pos);
 }
@@ -860,10 +860,10 @@ __device__ inline void pos_fract(const float input, float* pos, uint32_t* pos_gr
 	// This is mentioned in Appendix A of the "Instant Neural Graphics Primitives" paper.
 	// The offset can cause wraparound indexing in dense grids, which didn't negatively impact
 	// the approximation quality in any of our tests.
-	*pos = input * scale + 0.5f;
-	int tmp = floorf(*pos);
-	*pos_grid = (uint32_t)tmp;
-	*pos -= (float)tmp;
+	*pos = fmaf(scale, input, 0.5f);
+	float tmp = floorf(*pos);
+	*pos_grid = (uint32_t)(int)tmp;
+	*pos -= tmp;
 	*pos = interpolation_fun(*pos);
 }
 
