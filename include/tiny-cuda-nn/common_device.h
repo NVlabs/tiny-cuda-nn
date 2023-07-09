@@ -785,12 +785,12 @@ __host__ __device__ inline uint32_t morton3D_invert(uint32_t x) {
 }
 
 __host__ __device__ inline uint64_t expand_bits(uint64_t w)  {
-	w &=                0x00000000001fffff;
-	w = (w | w << 32) & 0x001f00000000ffff;
-	w = (w | w << 16) & 0x001f0000ff0000ff;
-	w = (w | w <<  8) & 0x010f00f00f00f00f;
-	w = (w | w <<  4) & 0x10c30c30c30c30c3;
-	w = (w | w <<  2) & 0x1249249249249249;
+	w &= 0x1fffff;
+	w = (w | w << 32) & 0x1f00000000ffff;
+	w = (w | w << 16) & 0x1f0000ff0000ff;
+	w = (w | w << 8) & 0x100f00f00f00f00f;
+	w = (w | w << 4) & 0x10c30c30c30c30c3;
+	w = (w | w << 2) & 0x1249249249249249;
 	return w;
 }
 
