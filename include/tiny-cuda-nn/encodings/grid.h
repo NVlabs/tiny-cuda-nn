@@ -817,7 +817,7 @@ public:
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
 		const uint32_t num_elements = input.n();
-		if ((!dL_dinput && param_gradients_mode == GradientMode::Ignore) || padded_output_width() == 0 || num_elements == 0) {
+		if ((!dL_dinput && param_gradients_mode == GradientMode::Ignore) || num_elements == 0) {
 			return;
 		}
 

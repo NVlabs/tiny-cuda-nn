@@ -99,7 +99,7 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
-		if (!dL_dinput || padded_output_width() == 0) {
+		if (!dL_dinput) {
 			return;
 		}
 
