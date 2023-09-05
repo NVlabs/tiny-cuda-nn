@@ -74,10 +74,10 @@ void set_verbose(bool verbose);
 /// Checks the result of a cuXXXXXX call and throws an error on failure
 #define CU_CHECK_THROW(x) \
 	do { \
-		CUresult result = x; \
-		if (result != CUDA_SUCCESS) { \
+		CUresult _result = x; \
+		if (_result != CUDA_SUCCESS) { \
 			const char *msg; \
-			cuGetErrorName(result, &msg); \
+			cuGetErrorName(_result, &msg); \
 			throw std::runtime_error{fmt::format(FILE_LINE " " #x " failed: {}", msg)}; \
 		} \
 	} while(0)
@@ -85,10 +85,10 @@ void set_verbose(bool verbose);
 /// Checks the result of a cuXXXXXX call and prints an error on failure
 #define CU_CHECK_PRINT(x) \
 	do { \
-		CUresult result = x; \
-		if (result != CUDA_SUCCESS) { \
+		CUresult _result = x; \
+		if (_result != CUDA_SUCCESS) { \
 			const char *msg; \
-			cuGetErrorName(result, &msg); \
+			cuGetErrorName(_result, &msg); \
 			log_error(FILE_LINE " " #x " failed: {}", msg); \
 		} \
 	} while(0)
@@ -96,17 +96,18 @@ void set_verbose(bool verbose);
 /// Checks the result of a cudaXXXXXX call and throws an error on failure
 #define CUDA_CHECK_THROW(x) \
 	do { \
-		cudaError_t result = x; \
-		if (result != cudaSuccess) \
-			throw std::runtime_error{fmt::format(FILE_LINE " " #x " failed: {}", cudaGetErrorString(result))}; \
+		cudaError_t _result = x; \
+		if (_result != cudaSuccess) \
+			throw std::runtime_error{fmt::format(FILE_LINE " " #x " failed: {}", cudaGetErrorString(_result))}; \
 	} while(0)
 
 /// Checks the result of a cudaXXXXXX call and prints an error on failure
 #define CUDA_CHECK_PRINT(x) \
 	do { \
-		cudaError_t result = x; \
-		if (result != cudaSuccess) \
-			log_error(FILE_LINE " " #x " failed: {}", cudaGetErrorString(result)); \
+		cudaError_t _result = x; \
+		if (_result != cudaSuccess) \
+			log_error(FILE_LINE " " #x " failed: {}", cudaGetErrorString(_result)); \
+	} while(0)
 	} while(0)
 
 //////////////////////////////

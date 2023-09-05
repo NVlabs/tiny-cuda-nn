@@ -508,6 +508,15 @@ DEF_NON_TEMPLATED_VECTOR_TYPES(u16vec, uint16_t)
 DEF_NON_TEMPLATED_VECTOR_TYPES(hvec, __half)
 #endif
 
+#if defined(__CUDACC__)
+inline TCNN_HOST_DEVICE float4 to_float4(const vec4& x) { return {x.x, x.y, x.z, x.w}; }
+inline TCNN_HOST_DEVICE float3 to_float3(const vec3& x) { return {x.x, x.y, x.z}; }
+inline TCNN_HOST_DEVICE float2 to_float2(const vec2& x) { return {x.x, x.y}; }
+inline TCNN_HOST_DEVICE vec4 to_vec4(const float4& x) { return {x.x, x.y, x.z, x.w}; }
+inline TCNN_HOST_DEVICE vec3 to_vec3(const float3& x) { return {x.x, x.y, x.z}; }
+inline TCNN_HOST_DEVICE vec2 to_vec2(const float2& x) { return {x.x, x.y}; }
+#endif
+
 template <typename T, uint32_t N, uint32_t M>
 struct tmat {
 	tmat() = default;
@@ -1067,14 +1076,14 @@ struct tquat {
 		} else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
 			T S = sqrt((T)1 + m[0][0] - m[1][1] - m[2][2]) * (T)2; // S=4*x
 			w = (m[1][2] - m[2][1]) / S;
-			x = 0.25 * S;
+			x = (T)0.25 * S;
 			y = (m[1][0] + m[0][1]) / S;
 			z = (m[2][0] + m[0][2]) / S;
 		} else if (m[1][1] > m[2][2]) {
 			T S = sqrt((T)1 + m[1][1] - m[0][0] - m[2][2]) * (T)2; // S=4*y
 			w = (m[2][0] - m[0][2]) / S;
 			x = (m[1][0] + m[0][1]) / S;
-			y = 0.25 * S;
+			y = (T)0.25 * S;
 			z = (m[2][1] + m[1][2]) / S;
 		} else {
 			T S = sqrt((T)1 + m[2][2] - m[0][0] - m[1][1]) * (T)2; // S=4*z

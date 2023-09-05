@@ -51,9 +51,9 @@ namespace tcnn {
 
 #define CUTLASS_CHECK_THROW(x)                                                                                        \
 	do {                                                                                                                   \
-		cutlass::Status error = x;                                                                                    \
-		if (error != cutlass::Status::kSuccess)                                                                            \
-			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cutlassGetStatusString(error)); \
+		cutlass::Status _result = x;                                                                                    \
+		if (_result != cutlass::Status::kSuccess)                                                                            \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cutlassGetStatusString(_result)); \
 	} while(0)
 
 using SmArch = std::conditional_t<MIN_GPU_ARCH >= 80,

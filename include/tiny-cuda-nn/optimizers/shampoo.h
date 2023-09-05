@@ -63,9 +63,9 @@ inline std::string cublasGetError(cublasStatus_t error) {
 
 #define CUBLAS_CHECK_THROW(x)                                                                                           \
 	do {                                                                                                                \
-		cublasStatus_t result = x;                                                                                      \
-		if (result != CUBLAS_STATUS_SUCCESS)                                                                            \
-			throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(result));  \
+		cublasStatus_t _result = x;                                                                                      \
+		if (_result != CUBLAS_STATUS_SUCCESS)                                                                            \
+			throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(_result));  \
 	} while(0)
 
 template <typename T>
