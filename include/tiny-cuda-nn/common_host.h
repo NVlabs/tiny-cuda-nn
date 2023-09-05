@@ -108,7 +108,6 @@ void set_verbose(bool verbose);
 		if (_result != cudaSuccess) \
 			log_error(FILE_LINE " " #x " failed: {}", cudaGetErrorString(_result)); \
 	} while(0)
-	} while(0)
 
 //////////////////////////////
 // Enum<->string conversion //
