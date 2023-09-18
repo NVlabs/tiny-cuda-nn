@@ -60,7 +60,7 @@ __global__ void identity(
 	const uint32_t j = encoded_index - i * fan_out;
 
 	if (j >= num_to_encode) {
-		data_out(j, i) = 1;
+		data_out(j, i) = 0; // data_out(j, i) = 0;
 	} else {
 		data_out(j, i) = data_in(j, i) * scale + offset;
 	}
@@ -82,6 +82,25 @@ __global__ void identity_backward(
 
 	// The identity encoding can simply pass through the derivative.
 	dL_dx(j, i) = (T)((float)dL_dy(j, i) * scale);
+}
+
+template <typename T>
+__global__ void identity_backward_backward(
+	const uint32_t num_outputs,
+	const uint32_t num_elements,
+	const uint32_t n_dims_to_encode,
+	const float scale,
+	MatrixView<const float> dL_ddLdy,
+	MatrixView<T> dL_ddLdx)
+{
+	const uint32_t output_index = threadIdx.x + blockIdx.x * blockDim.x;
+	if (output_index >= num_outputs) return;
+
+	const uint32_t i = output_index / n_dims_to_encode;
+	const uint32_t j = output_index - i * n_dims_to_encode;
+
+	// The identity encoding can simply pass through the derivative.
+	dL_ddLdx(j, i) = (T)(dL_ddLdy(j, i) * scale);
 }
 
 template <typename T>
@@ -137,6 +156,33 @@ public:
 			dL_doutput.view(),
 			dL_dinput->view()
 		);
+	}
+
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<float>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		GradientMode param_gradients_mode = GradientMode::Overwrite
+	) override {
+		if (!dL_dinput || !dL_ddLdoutput || padded_output_width() == 0) {
+			return;
+		}
+
+		linear_kernel(identity_backward_backward<T>, 0, stream,
+			input.n() * m_n_dims_to_encode,
+			input.n(),
+			m_n_dims_to_encode,
+			m_scale,
+			dL_ddLdinput.view(),
+			dL_ddLdoutput->view()
+		);
+
+		// dL_dinput: don't need to calculate this term, it's default set as 0.0
 	}
 
 	uint32_t input_width() const override {
