@@ -78,6 +78,9 @@ void register_loss(const std::string& name, const std::function<Loss<T>*(const j
 	register_loss(loss_factories<T>(), name, factory);
 }
 
+template void register_loss<float>(const std::string& name, const std::function<Loss<float>*(const json&)>& factory);
+template void register_loss<__half>(const std::string& name, const std::function<Loss<__half>*(const json&)>& factory);
+
 template <typename T>
 Loss<T>* create_loss(const json& loss) {
 	std::string name = loss.value("otype", "RelativeL2");
