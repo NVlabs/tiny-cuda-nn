@@ -970,11 +970,11 @@ TCNN_HOST_DEVICE tmat<T, N, N> mat_exp(const tmat<T, N, N>& m) {
 
 template <typename T>
 TCNN_HOST_DEVICE tmat<T, 3, 3> orthogonalize(const tmat<T, 3, 3>& m) {
-	return tmat<T, 3, 3>{
-		(T)0.5f * ((T)3 - dot(m[0], m[0])) * m[0],
-		(T)0.5f * ((T)3 - dot(m[1], m[1])) * m[1],
-		(T)0.5f * ((T)3 - dot(m[2], m[2])) * m[2],
-	};
+	// Iteration to bring an almost orthogonal matrix nearer to its closest
+	// orthogonal matrix. This can be run multiple times until convergence
+	// is measured or, alternatively, once per frame on something like a
+	// camera matrix to ensure it does not degenerate over time.
+	return (T)1.5f * m - (T)0.5f * (m * transpose(m) * m);
 }
 
 template <typename T>
