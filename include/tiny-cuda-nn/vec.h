@@ -970,11 +970,11 @@ TCNN_HOST_DEVICE tmat<T, N, N> mat_exp(const tmat<T, N, N>& m) {
 
 template <typename T>
 TCNN_HOST_DEVICE tmat<T, 3, 3> orthogonalize(const tmat<T, 3, 3>& m) {
-	return tmat<T, 3, 3>{
-		(T)0.5f * ((T)3 - dot(m[0], m[0])) * m[0],
-		(T)0.5f * ((T)3 - dot(m[1], m[1])) * m[1],
-		(T)0.5f * ((T)3 - dot(m[2], m[2])) * m[2],
-	};
+	// Iteration to bring an almost orthogonal matrix nearer to its closest
+	// orthogonal matrix. This can be run multiple times until convergence
+	// is measured or, alternatively, once per frame on something like a
+	// camera matrix to ensure it does not degenerate over time.
+	return (T)1.5f * m - (T)0.5f * (m * transpose(m) * m);
 }
 
 template <typename T>
@@ -1105,7 +1105,7 @@ template <typename T> TCNN_HOST_DEVICE tquat<T> operator*(const tquat<T>& a, T b
 template <typename T> TCNN_HOST_DEVICE tquat<T> operator/(const tquat<T>& a, T b) { return {a.w / b, a.x / b, a.y / b, a.z / b}; }
 
 template <typename T> TCNN_HOST_DEVICE T dot(const tquat<T>& a, const tquat<T>& b) { return (a.w * b.w + a.x * b.x) + (a.y * b.y + a.z * b.z); }
-template <typename T> TCNN_HOST_DEVICE T length2(const tquat<T>& a) { return sqrt(dot(a, a)); }
+template <typename T> TCNN_HOST_DEVICE T length2(const tquat<T>& a) { return dot(a, a); }
 template <typename T> TCNN_HOST_DEVICE T length(const tquat<T>& a) { return sqrt(length2(a)); }
 
 template <typename T> TCNN_HOST_DEVICE tquat<T> mix(const tquat<T>& a, const tquat<T>& b, T t) { return a * ((T)1 - t) + b * t; }
@@ -1183,7 +1183,7 @@ TCNN_HOST_DEVICE tmat<T, 3, 3> to_mat3(const tquat<T>& q) {
 
 template <typename T>
 TCNN_HOST_DEVICE tmat<T, 3, 3> slerp(const tmat<T, 3, 3>& a, const tmat<T, 3, 3>& b, float t) {
-	return to_mat3(slerp(tquat<T>(a), tquat<T>(b), t));
+	return to_mat3(normalize(slerp(normalize(tquat<T>(a)), normalize(tquat<T>(b)), t)));
 }
 
 template <typename T>

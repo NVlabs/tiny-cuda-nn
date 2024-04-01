@@ -70,4 +70,7 @@ std::unique_ptr<Loss<T>> default_loss(const std::string& name) {
 
 std::vector<std::string> builtin_losses();
 
+template <typename T>
+void register_loss(const std::string& name, const std::function<Loss<T>*(const json&)>& factory);
+
 }
