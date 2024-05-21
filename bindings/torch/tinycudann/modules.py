@@ -13,7 +13,7 @@ import warnings
 
 import torch
 
-ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86, 89, 90]
+ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86, 87, 89, 90]
 
 if not torch.cuda.is_available():
 	raise EnvironmentError("Unknown compute capability. Ensure PyTorch with CUDA support is installed.")
@@ -38,6 +38,10 @@ def _get_system_compute_capability():
 # Determine the capability of the system as the minimum of all
 # devices, ensuring that we have no runtime errors.
 system_compute_capability = _get_system_compute_capability()
+
+# Ensure the system's compute capability is represented in the list to avoid
+# total failure if a new capability is released without tiny-cuda-nn being updated.
+ALL_COMPUTE_CAPABILITIES.append(system_compute_capability)
 
 # Try to import the highest compute capability version of tcnn that
 # we can find and is compatible with the system's compute capability.
