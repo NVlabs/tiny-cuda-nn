@@ -284,3 +284,7 @@ endif()
 if (TCNN_BUILD_BENCHMARK)
 	add_subdirectory("benchmarks/image")
 endif()
+
+enable_testing()
+add_subdirectory(test)
+list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
