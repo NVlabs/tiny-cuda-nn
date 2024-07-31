@@ -56,7 +56,7 @@ void set_log_callback(const std::function<void(LogSeverity, const std::string&)>
 
 template <typename... Ts>
 void log(LogSeverity severity, const std::string& msg, Ts&&... args) {
-	log_callback()(severity, fmt::format(msg, std::forward<Ts>(args)...));
+	log_callback()(severity, fmt::format(fmt::runtime(msg), std::forward<Ts>(args)...));
 }
 
 template <typename... Ts> void log_info(const std::string& msg, Ts&&... args) { log(LogSeverity::Info, msg, std::forward<Ts>(args)...); }
