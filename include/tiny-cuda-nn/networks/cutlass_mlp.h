@@ -66,6 +66,28 @@ public:
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override;
 
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		GradientMode param_gradients_mode = GradientMode::Overwrite
+	) override;
+
+	bool prepare_backward_variables(
+		cudaStream_t stream,
+		const std::vector<GPUMatrix<T>>& output,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>& backward_output_tmp,
+		std::vector<GPUMatrix<T>>& dL1dp,
+		std::vector<GPUMatrix<T>>& dL1doutput,
+		bool use_inference_params
+	);
+
 	void set_params_impl(T* params, T* inference_params, T* gradients) override;
 	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override;
 
