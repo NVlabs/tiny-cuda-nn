@@ -225,15 +225,26 @@ bool cuda_supports_virtual_memory(int device) {
 	return supports_vmm != 0;
 }
 
+std::unordered_map<int, cudaDeviceProp>& cuda_device_properties() {
+	static auto* cuda_device_props = new std::unordered_map<int, cudaDeviceProp>{};
+	return *cuda_device_props;
+}
+
+const cudaDeviceProp& cuda_get_device_properties(int device) {
+	if (cuda_device_properties().count(device) == 0) {
+		auto& props = cuda_device_properties()[device];
+		CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
+	}
+
+	return cuda_device_properties().at(device);
+}
+
 std::string cuda_device_name(int device) {
-	cudaDeviceProp props;
-	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
-	return props.name;
+	return cuda_get_device_properties(device).name;
 }
 
 uint32_t cuda_compute_capability(int device) {
-	cudaDeviceProp props;
-	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
+	const auto& props = cuda_get_device_properties(device);
 	return props.major * 10 + props.minor;
 }
 
@@ -255,15 +266,11 @@ uint32_t cuda_supported_compute_capability(int device) {
 }
 
 size_t cuda_max_shmem(int device) {
-	cudaDeviceProp props;
-	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
-	return props.sharedMemPerBlockOptin;
+	return cuda_get_device_properties(device).sharedMemPerBlockOptin;
 }
 
 uint32_t cuda_max_registers(int device) {
-	cudaDeviceProp props;
-	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
-	return (uint32_t)props.regsPerBlock;
+	return (uint32_t)cuda_get_device_properties(device).regsPerBlock;
 }
 
 size_t cuda_memory_granularity(int device) {
