@@ -98,10 +98,10 @@ sudo apt-get install build-essential git
 ```
 
 We also recommend installing [CUDA](https://developer.nvidia.com/cuda-toolkit) in `/usr/local/` and adding the CUDA installation to your PATH.
-For example, if you have CUDA 11.4, add the following to your `~/.bashrc`
+For example, if you have CUDA 12.6.3, add the following to your `~/.bashrc`
 ```sh
-export PATH="/usr/local/cuda-11.4/bin:$PATH"
-export LD_LIBRARY_PATH="/usr/local/cuda-11.4/lib64:$LD_LIBRARY_PATH"
+export PATH="/usr/local/cuda-12.6.3/bin:$PATH"
+export LD_LIBRARY_PATH="/usr/local/cuda-12.6.3/lib64:$LD_LIBRARY_PATH"
 ```
 
 
