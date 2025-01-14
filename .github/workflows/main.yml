@@ -16,11 +16,35 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            cuda: 12.6
+            cuda: "12.6"
             arch: 89
           - os: ubuntu-24.04
             cuda: "12.5"
             arch: 86
+          - os: ubuntu-22.04
+            cuda: "11.8"
+            arch: 89
+          - os: ubuntu-22.04
+            cuda: "11.7"
+            arch: 89
+          - os: ubuntu-20.04
+            cuda: "11.3"
+            arch: 86
+          - os: ubuntu-20.04
+            cuda: "11.3"
+            arch: 75
+          - os: ubuntu-20.04
+            cuda: "11.3"
+            arch: 70
+          - os: ubuntu-20.04
+            cuda: "11.3"
+            arch: 61
+          - os: ubuntu-20.04
+            cuda: "11.3"
+            arch: 53
+          - os: ubuntu-20.04
+            cuda: "11.3"
+            arch: 37
     env:
       build_dir: "build"
       config: "Release"
@@ -56,12 +80,36 @@ jobs:
             visual_studio: "Visual Studio 17 2022"
             cuda: "12.5.0"
             arch: 86
+          - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
+            cuda: "11.5.1"
+            arch: 86
+          - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
+            cuda: "11.5.1"
+            arch: 75
+          - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
+            cuda: "11.5.1"
+            arch: 70
+          - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
+            cuda: "11.5.1"
+            arch: 61
+          - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
+            cuda: "11.5.1"
+            arch: 53
+          - os: windows-2019
+            visual_studio: "Visual Studio 16 2019"
+            cuda: "11.5.1"
+            arch: 37
     env:
       build_dir: "build"
       config: "Release"
       TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Install CUDA
