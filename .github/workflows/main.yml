@@ -15,27 +15,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-22.04
-            cuda: "11.7"
+          - os: ubuntu-24.04
+            cuda: 12.6
             arch: 89
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-24.04
+            cuda: "12.5"
             arch: 86
-          - os: ubuntu-20.04
-            cuda: "11.3"
-            arch: 75
-          - os: ubuntu-20.04
-            cuda: "11.3"
-            arch: 70
-          - os: ubuntu-20.04
-            cuda: "11.3"
-            arch: 61
-          - os: ubuntu-20.04
-            cuda: "11.3"
-            arch: 53
-          - os: ubuntu-20.04
-            cuda: "11.3"
-            arch: 37
     env:
       build_dir: "build"
       config: "Release"
@@ -43,7 +28,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install cmake gcc g++
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Install CUDA
@@ -63,36 +48,20 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
+          - os: windows-2025
+            visual_studio: "Visual Studio Enterprise 2022"
+            cuda: "12.6.3"
+            arch: 89
+          - os: windows-2025
+            visual_studio: "Visual Studio Enterprise 2022"
+            cuda: "12.5.0"
             arch: 86
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 75
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 70
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 61
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 53
-          - os: windows-2019
-            visual_studio: "Visual Studio 16 2019"
-            cuda: "11.5.1"
-            arch: 37
     env:
       build_dir: "build"
       config: "Release"
       TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Install CUDA
