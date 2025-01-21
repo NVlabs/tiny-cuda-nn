@@ -26,8 +26,10 @@ def max_supported_compute_capability(cuda_version):
 		return 80
 	elif cuda_version < parse_version("11.8"):
 		return 86
-	else:
+	elif cuda_version < parse_version("12.8"):
 		return 90
+	else:
+		return 120
 
 # Find version of tinycudann by scraping CMakeLists.txt
 with open(os.path.join(ROOT_DIR, "CMakeLists.txt"), "r") as cmakelists:

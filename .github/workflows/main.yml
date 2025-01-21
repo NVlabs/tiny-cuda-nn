@@ -16,6 +16,12 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
+            cuda: "12.8"
+            arch: 120
+          - os: ubuntu-24.04
+            cuda: "12.8"
+            arch: 100
+          - os: ubuntu-24.04
             cuda: "12.6"
             arch: 89
           - os: ubuntu-24.04
@@ -72,6 +78,10 @@ jobs:
     strategy:
       matrix:
         include:
+          - os: windows-2025
+            visual_studio: "Visual Studio 17 2022"
+            cuda: "12.8.0"
+            arch: 120
           - os: windows-2025
             visual_studio: "Visual Studio 17 2022"
             cuda: "12.6.3"
