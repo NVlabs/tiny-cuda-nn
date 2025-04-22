@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -77,9 +77,6 @@ template <typename T>
 void register_loss(const std::string& name, const std::function<Loss<T>*(const json&)>& factory) {
 	register_loss(loss_factories<T>(), name, factory);
 }
-
-template void register_loss<float>(const std::string& name, const std::function<Loss<float>*(const json&)>& factory);
-template void register_loss<__half>(const std::string& name, const std::function<Loss<__half>*(const json&)>& factory);
 
 template <typename T>
 Loss<T>* create_loss(const json& loss) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -69,5 +69,118 @@ void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const ui
 template void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const float* in, float* out);
 template void trim_and_cast_from(cudaStream_t stream, const MatrixLayout layout, const uint32_t num_elements, const uint32_t input_width, const uint32_t output_width, const __half* in, float* out);
 
+std::unique_ptr<CudaRtcKernel> generate_kernel(
+	const std::string& kernel_name,
+	const std::string& device_function,
+	const std::string& T,
+	const std::string& PARAMS_T,
+	const std::string& COMPUTE_T,
+	uint32_t n_dims_in,
+	uint32_t n_fwd_ctx_bytes
+) {
+	return std::make_unique<CudaRtcKernel>(kernel_name, dfmt(0, R"(
+			{DEVICE_FUNCTION}
+
+			__global__ void {KERNEL_NAME}(const uint32_t num_elements, MatrixView<const {T}> data_in, MatrixView<{COMPUTE_T}> data_out, const {PARAMS_T}* __restrict__ params{FWD_CTX_PARAM}) {{
+				{FWD_CTX_ADVANCE}const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+
+				auto input = data_in.col<{N_DIMS_IN}>(i);
+				auto output = eval_model(input, params, {FWD_CTX_ARG});
+				if (data_out) {{
+					data_out.set_col(i, output);
+				}}
+			}}
+		)",
+		"DEVICE_FUNCTION"_a = device_function,
+		"KERNEL_NAME"_a = kernel_name,
+		"T"_a = T,
+		"PARAMS_T"_a = PARAMS_T,
+		"COMPUTE_T"_a = COMPUTE_T,
+		"N_DIMS_IN"_a = n_dims_in,
+		"FWD_CTX_PARAM"_a = n_fwd_ctx_bytes ? ", uint8_t* __restrict__ fwd_ctx" : "",
+		"FWD_CTX_ADVANCE"_a = n_fwd_ctx_bytes ? fmt::format("fwd_ctx += ((threadIdx.x / WARP_SIZE) * WARP_SIZE + blockIdx.x * blockDim.x) * {};\n", n_fwd_ctx_bytes) : "",
+		"FWD_CTX_ARG"_a = n_fwd_ctx_bytes ? "fwd_ctx" : "nullptr"
+	));
+}
+
+std::unique_ptr<CudaRtcKernel> generate_backward_kernel(
+	const std::string& kernel_name,
+	const std::string& device_function,
+	const std::string& T,
+	const std::string& PARAMS_T,
+	const std::string& COMPUTE_T,
+	uint32_t n_dims_in,
+	uint32_t n_dims_out,
+	uint32_t n_fwd_ctx_bytes
+) {
+	return std::make_unique<CudaRtcKernel>(kernel_name, dfmt(0, R"(
+			{DEVICE_FUNCTION}
+
+			__global__ void {KERNEL_NAME}(const uint32_t num_elements, MatrixView<const {COMPUTE_T}> data_dL_dy, MatrixView<{T}> data_dL_dx, const {PARAMS_T}* __restrict__ params, const uint8_t* __restrict__ fwd_ctx, {PARAMS_T}* __restrict__ dL_dparams) {{
+				fwd_ctx += ((threadIdx.x / WARP_SIZE) * WARP_SIZE + blockIdx.x * blockDim.x) * {N_FWD_CTX_BYTES};
+				const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+
+				auto dL_dy = data_dL_dy.col<{N_DIMS_OUT}>(i);
+
+				auto dL_dx = tvec<{T}, {N_DIMS_IN}>::zero();
+				backward_eval_model(dL_dy, params, fwd_ctx, dL_dparams, data_dL_dx ? &dL_dx : nullptr);
+				if (data_dL_dx) {{
+					data_dL_dx.set_col(i, dL_dx);
+				}}
+			}}
+		)",
+		"DEVICE_FUNCTION"_a = device_function,
+		"KERNEL_NAME"_a = kernel_name,
+		"T"_a = T,
+		"PARAMS_T"_a = PARAMS_T,
+		"COMPUTE_T"_a = COMPUTE_T,
+		"N_DIMS_IN"_a = n_dims_in,
+		"N_DIMS_OUT"_a = n_dims_out,
+		"N_FWD_CTX_BYTES"_a = n_fwd_ctx_bytes
+	));
+}
+
+std::unique_ptr<CudaRtcKernel> generate_backward_backward_input_kernel(
+	const std::string& kernel_name,
+	const std::string& device_function,
+	const std::string& T,
+	const std::string& PARAMS_T,
+	const std::string& COMPUTE_T,
+	uint32_t n_dims_in,
+	uint32_t n_dims_out,
+	uint32_t n_fwd_ctx_bytes
+) {
+	return std::make_unique<CudaRtcKernel>(kernel_name, dfmt(0, R"(
+			{DEVICE_FUNCTION}
+
+			__global__ void {KERNEL_NAME}(const uint32_t num_elements, MatrixView<const {T}> data_dL_ddLdx, MatrixView<const {COMPUTE_T}> data_dL_dy, MatrixView<{T}> data_dL_dx, MatrixView<{COMPUTE_T}> data_dL_ddLdy, const {PARAMS_T}* __restrict__ params, const uint8_t* __restrict__ fwd_ctx, {PARAMS_T}* __restrict__ dL_dparams) {{
+				fwd_ctx += ((threadIdx.x / WARP_SIZE) * WARP_SIZE + blockIdx.x * blockDim.x) * {N_FWD_CTX_BYTES};
+				const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+
+				auto dL_ddLdx = data_dL_ddLdx.col<{N_DIMS_IN}>(i);
+				auto dL_dy = data_dL_dy.col<{N_DIMS_OUT}>(i);
+
+				auto dL_dx = tvec<{T}, {N_DIMS_IN}>::zero();
+				auto dL_ddLdy = tvec<{COMPUTE_T}, {N_DIMS_OUT}>::zero();
+
+				backward_backward_input_eval_model(dL_ddLdx, dL_dy, params, fwd_ctx, dL_dparams, data_dL_dx ? &dL_dx : nullptr, data_dL_ddLdy ? &dL_ddLdy : nullptr); 
+				if (data_dL_dx) {{
+					data_dL_dx.set_col(i, dL_dx); 
+				}}
+				if (data_dL_ddLdy) {{
+					data_dL_ddLdy.set_col(i, dL_ddLdy); 
+				}}
+			}}
+		)", 
+		"DEVICE_FUNCTION"_a = device_function,
+		"KERNEL_NAME"_a = kernel_name,
+		"T"_a = T,
+		"PARAMS_T"_a = PARAMS_T,
+		"COMPUTE_T"_a = COMPUTE_T,
+		"N_DIMS_IN"_a = n_dims_in,
+		"N_DIMS_OUT"_a = n_dims_out,
+		"N_FWD_CTX_BYTES"_a = n_fwd_ctx_bytes
+	)); 
+}
 
 }

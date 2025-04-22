@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -260,6 +260,8 @@ public:
 	nlohmann::json hyperparams() const { return m_module->hyperparams(); }
 	std::string name() const { return m_module->name(); }
 
+	bool jit_fusion() const { return m_module->jit_fusion(); }
+	void set_jit_fusion(bool val) { m_module->set_jit_fusion(val); }
 
 private:
 	std::unique_ptr<tcnn::cpp::Module> m_module;
@@ -301,6 +303,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 	m.def("has_networks", &tcnn::cpp::has_networks);
 	m.def("preferred_precision", &tcnn::cpp::preferred_precision);
 
+	m.def("supports_jit_fusion", &tcnn::cpp::supports_jit_fusion, py::arg("device")=-1);
+	m.def("rtc_set_cache_dir", &tcnn::cpp::rtc_set_cache_dir);
+	m.def("rtc_set_include_dir", &tcnn::cpp::rtc_set_include_dir);
+
 	m.def("set_log_callback", &tcnn::cpp::set_log_callback);
 
 	// Encapsulates an abstract context of an operation
@@ -325,6 +331,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 		.def("output_precision", &Module::output_precision)
 		.def("hyperparams", &Module::hyperparams)
 		.def("name", &Module::name)
+		.def_property("jit_fusion", &Module::jit_fusion, &Module::set_jit_fusion)
 		;
 
 #if !defined(TCNN_NO_NETWORKS)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -115,6 +115,7 @@ public:
 		m_n_output_dims = m_n_dims_to_encode * m_n_frequencies;
 	}
 
+#if !defined(TCNN_NO_FWD_BWD)
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
@@ -170,6 +171,7 @@ public:
 			dL_dinput->view()
 		);
 	}
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
@@ -205,6 +207,72 @@ public:
 			{"otype", "TriangleWave"},
 			{"n_frequencies", m_n_frequencies},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		std::ostringstream body;
+		body << dfmt(1, R"(
+				if (fwd_ctx) {{
+					input.to_array((float*)fwd_ctx);
+				}}
+
+				{VEC_OUT} result;
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t i = 0; i < {N_DIMS}; ++i) {{
+					TCNN_PRAGMA_UNROLL
+					for (int k = 0; k < {N_FREQUENCIES}; ++k) {{
+						float x = scalbnf(input[i], k-1) + k * 0.25f;
+						result[i * {N_FREQUENCIES} + k] = ({T})(fabsf(x - floorf(x) - 0.5f) * 4.0f - 1.0f);
+					}}
+				}};
+			)",
+			"VEC_OUT"_a = this->generate_vec_out(),
+			"N_DIMS"_a = this->input_width(),
+			"N_FREQUENCIES"_a = m_n_frequencies,
+			"T"_a = type_to_string<T>()
+		) << "\n" << dfmt(1, R"(
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t i = {N_OUT}; i < {N_PADDED_OUT}; ++i) {{
+					result[i] = ({T})1.0f;
+				}}
+				return result;
+			)",
+			"N_OUT"_a = m_n_output_dims,
+			"N_PADDED_OUT"_a = this->padded_output_width(),
+			"T"_a = type_to_string<T>()
+		);
+
+		return this->generate_device_function_from_body(name, body.str());
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		return this->generate_backward_device_function_from_body(name, dfmt(1, R"(
+				if (!dL_dx) {{
+					return;
+				}}
+
+				{VEC_IN} input((float*)fwd_ctx), result(0.0f);
+
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t i = 0; i < {N_DIMS}; ++i) {{
+					TCNN_PRAGMA_UNROLL
+					for (int k = 0; k < {N_FREQUENCIES}; ++k) {{
+						float x = scalbnf(input[i], k-1) + k * 0.25f;
+						float deriv = scalbnf((int)floorf(x * 2.0f) % 2 == 0 ? -1.0f : 1.0f, k+1);
+						result[i] += (float)dL_dy[i * {N_FREQUENCIES} + k] * deriv;
+					}}
+				}};
+
+				*dL_dx = result;
+			)",
+			"VEC_IN"_a = this->generate_vec_in(),
+			"N_DIMS"_a = this->input_width(),
+			"N_FREQUENCIES"_a = m_n_frequencies
+		));
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		return this->input_width() * sizeof(float);
 	}
 
 private:

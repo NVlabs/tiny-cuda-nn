@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -106,6 +106,8 @@ template <typename T>
 class GPUMatrixDynamic : public GPUMatrixBase {
 public:
 	using Type = T;
+	using View = MatrixView<T>;
+	using ConstView = MatrixView<const T>;
 
 	// Owning its memory as a GPUMemory<T>
 	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM)
@@ -174,7 +176,7 @@ public:
 			m_arena_allocation.reset(); // reset is called explicitly to ensure memory is freed before being allocated
 			m_arena_allocation = std::make_shared<GPUMemoryArena::Allocation>(allocate_workspace(stream, rows * cols * sizeof(T)));
 			m_data = (T*)m_arena_allocation->data();
-		} else if (m_malloc_allocation) {
+		} else if (m_malloc_allocation || !data()) {
 			m_malloc_allocation.reset(); // reset is called explicitly to ensure memory is freed before being allocated
 			m_malloc_allocation = std::make_shared<GPUMemory<uint8_t>>(rows * cols * sizeof(T));
 			m_data = (T*)m_malloc_allocation->data();
@@ -221,8 +223,12 @@ public:
 		return slice(0, rows(), 0, cols());
 	}
 
-	MatrixView<T> view() const {
+	View view() const {
 		return {data(), layout() == CM ? 1u : stride(), layout() == CM ? stride() : 1u};
+	}
+
+	ConstView const_view() const {
+		return view();
 	}
 
 	uint32_t rows() const { return m_rows; }

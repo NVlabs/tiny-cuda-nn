@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -211,6 +211,7 @@ public:
 		}
 	}
 
+#if !defined(TCNN_NO_FWD_BWD)
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
@@ -352,6 +353,7 @@ public:
 			output_offset += output_width;
 		}
 	}
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
@@ -444,6 +446,138 @@ public:
 			{"otype", "Composite"},
 			{"nested", nested}
 		};
+	}
+
+	std::string generate_nested_name(const std::string& name, size_t i) const {
+		return fmt::format("{}_{}_{}", name, i, to_snake_case(m_nested[i]->name()));
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		std::ostringstream preamble;
+		for (size_t i = 0; i < m_nested.size(); ++i) {
+			preamble << m_nested[i]->generate_device_function(generate_nested_name(name, i)) << "\n\n";
+		}
+
+		std::ostringstream body;
+		body << fmt::format("	{} result;\n", this->generate_vec_out());
+
+		size_t output_offset = 0;
+		size_t params_offset = 0;
+		size_t fwd_ctx_offset = 0;
+
+		switch (m_reduction_type) {
+			case ReductionType::Concatenation:
+				for (size_t i = 0; i < m_nested.size(); ++i) {
+					body << fmt::format(
+						"	result.slice<{OUTPUT_OFFSET}, {OUTPUT_WIDTH}>() = {NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, fwd_ctx ? fwd_ctx + WARP_SIZE * {FWD_CTX_OFFSET} : nullptr);\n",
+						"OUTPUT_WIDTH"_a = m_nested[i]->output_width(),
+						"OUTPUT_OFFSET"_a = output_offset,
+						"NESTED"_a = generate_nested_name(name, i),
+						"INPUT_WIDTH"_a = m_nested[i]->input_width(),
+						"INPUT_OFFSET"_a = m_dims_to_encode_begin[i],
+						"PARAMS_OFFSET"_a = params_offset,
+						"FWD_CTX_OFFSET"_a = fwd_ctx_offset
+					);
+
+					output_offset += m_nested[i]->output_width();
+					params_offset += m_nested[i]->n_params();
+					fwd_ctx_offset += m_nested[i]->device_function_fwd_ctx_bytes();
+				}
+				break;
+			default:
+				for (size_t i = 0; i < m_nested.size(); ++i) {
+					body << fmt::format(
+						"	result {OP}= {NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, fwd_ctx ? fwd_ctx + WARP_SIZE * {FWD_CTX_OFFSET} : nullptr);\n",
+						"OP"_a = (m_reduction_type == ReductionType::Sum ? "+" : "*"),
+						"NESTED"_a = generate_nested_name(name, i),
+						"INPUT_WIDTH"_a = m_nested[i]->input_width(),
+						"INPUT_OFFSET"_a = m_dims_to_encode_begin[i],
+						"PARAMS_OFFSET"_a = params_offset,
+						"FWD_CTX_OFFSET"_a = fwd_ctx_offset
+					);
+
+					params_offset += m_nested[i]->n_params();
+					fwd_ctx_offset += m_nested[i]->device_function_fwd_ctx_bytes();
+				}
+				break;
+		}
+
+		body << "	return result;";
+
+		return fmt::format("{}{}", preamble.str(), this->generate_device_function_from_body(name, body.str()));
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		std::ostringstream preamble;
+		for (size_t i = 0; i < m_nested.size(); ++i) {
+			preamble << m_nested[i]->generate_backward_device_function(generate_nested_name(name, i), n_threads) << "\n\n";
+		}
+
+		std::ostringstream body;
+		body << "	if (!dL_dx && !dL_dparams) { return; }\n";
+
+		size_t output_offset = 0;
+		size_t params_offset = 0;
+		size_t fwd_ctx_offset = 0;
+
+		switch (m_reduction_type) {
+			case ReductionType::Concatenation:
+				for (size_t i = 0; i < m_nested.size(); ++i) {
+					body << fmt::format(
+						"	{NESTED}(dL_dy.slice<{OUTPUT_OFFSET}, {OUTPUT_WIDTH}>(), params + {PARAMS_OFFSET}, fwd_ctx + WARP_SIZE * {FWD_CTX_OFFSET}, dL_dparams ? dL_dparams + {PARAMS_OFFSET} : nullptr, dL_dx ? &dL_dx->slice<{INPUT_OFFSET}, {INPUT_WIDTH}>() : nullptr);\n",
+						"OUTPUT_WIDTH"_a = m_nested[i]->output_width(),
+						"OUTPUT_OFFSET"_a = output_offset,
+						"NESTED"_a = generate_nested_name(name, i),
+						"INPUT_WIDTH"_a = m_nested[i]->input_width(),
+						"INPUT_OFFSET"_a = m_dims_to_encode_begin[i],
+						"PARAMS_OFFSET"_a = params_offset,
+						"FWD_CTX_OFFSET"_a = fwd_ctx_offset
+					);
+
+					output_offset += m_nested[i]->output_width();
+					params_offset += m_nested[i]->n_params();
+					fwd_ctx_offset += m_nested[i]->device_function_fwd_ctx_bytes();
+				}
+				break;
+			default:
+				for (size_t i = 0; i < m_nested.size(); ++i) {
+					body << fmt::format(
+						"	result = result {OP} {NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, fwd_ctx +  WARP_SIZE * {FWD_CTX_OFFSET});\n",
+						"OP"_a = (m_reduction_type == ReductionType::Sum ? "+" : "*"),
+						"NESTED"_a = generate_nested_name(name, i),
+						"INPUT_WIDTH"_a = m_nested[i]->input_width(),
+						"INPUT_OFFSET"_a = m_dims_to_encode_begin[i],
+						"PARAMS_OFFSET"_a = params_offset,
+						"FWD_CTX_OFFSET"_a = fwd_ctx_offset
+					);
+
+					params_offset += m_nested[i]->n_params();
+					fwd_ctx_offset += m_nested[i]->device_function_fwd_ctx_bytes();
+				}
+				break;
+		}
+
+		return fmt::format("{}{}", preamble.str(), this->generate_backward_device_function_from_body(name, body.str()));
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		uint32_t total = 0;
+		for (const auto& nested : m_nested) {
+			total += nested->device_function_fwd_ctx_bytes();
+		}
+		return total;
+	}
+
+	bool device_function_fwd_ctx_aligned_per_element() const override {
+		return false;
+	}
+
+	uint32_t backward_device_function_shmem_bytes(uint32_t n_threads, GradientMode param_gradients_mode) const override {
+		uint32_t result = 0;
+		for (const auto& nested : m_nested) {
+			result = std::max(result, nested->backward_device_function_shmem_bytes(n_threads, param_gradients_mode));
+		}
+		return result;
 	}
 
 private:

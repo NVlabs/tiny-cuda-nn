@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -56,7 +56,7 @@ void set_log_callback(const std::function<void(LogSeverity, const std::string&)>
 
 template <typename... Ts>
 void log(LogSeverity severity, const std::string& msg, Ts&&... args) {
-	log_callback()(severity, fmt::format(fmt::runtime(msg), std::forward<Ts>(args)...));
+	log_callback()(severity, fmt::format(msg, std::forward<Ts>(args)...));
 }
 
 template <typename... Ts> void log_info(const std::string& msg, Ts&&... args) { log(LogSeverity::Info, msg, std::forward<Ts>(args)...); }
@@ -107,6 +107,26 @@ void set_verbose(bool verbose);
 		cudaError_t _result = x; \
 		if (_result != cudaSuccess) \
 			log_error(FILE_LINE " " #x " failed: {}", cudaGetErrorString(_result)); \
+	} while(0)
+
+/// Checks the result of optixXXXXXX call and throws an error on failure
+#define OPTIX_CHECK_THROW(x)                                                                                 \
+	do {                                                                                                     \
+		OptixResult _result = x;                                                                                 \
+		if (_result != OPTIX_SUCCESS) {                                                                          \
+			throw std::runtime_error(std::string("Optix call '" #x "' failed."));                            \
+		}                                                                                                    \
+	} while(0)
+
+/// Checks the result of a optixXXXXXX call and throws an error with a log message on failure
+#define OPTIX_CHECK_THROW_LOG(x)                                                                                                                          \
+	do {                                                                                                                                                  \
+		OptixResult _result = x;                                                                                                                              \
+		const size_t sizeof_log_returned = sizeof_log;                                                                                                    \
+		sizeof_log = sizeof( log ); /* reset sizeof_log for future calls */                                                                               \
+		if (_result != OPTIX_SUCCESS) {                                                                                                                       \
+			throw std::runtime_error(std::string("Optix call '" #x "' failed. Log:\n") + log + (sizeof_log_returned == sizeof_log ? "" : "<truncated>")); \
+		}                                                                                                                                                 \
 	} while(0)
 
 //////////////////////////////
@@ -216,6 +236,8 @@ size_t hash_combine(std::size_t seed, const T& v) {
 	return rotl(seed, std::numeric_limits<size_t>::digits / 3) ^ distribute(std::hash<T>{}(v));
 }
 
+std::string generate_device_code_preamble();
+
 std::string to_snake_case(const std::string& str);
 
 std::vector<std::string> split(const std::string& text, const std::string& delim);
@@ -231,6 +253,58 @@ std::string join(const T& components, const std::string& delim) {
 	}
 
 	return s.str();
+}
+
+template <typename... Ts>
+std::string dfmt(uint32_t indent, const std::string& format, Ts&&... args) {
+	// Trim empty lines at the beginning and end of format string.
+	// Also re-indent the format string `indent` deep.
+	uint32_t input_indent = std::numeric_limits<uint32_t>::max();
+	uint32_t n_empty_leading = 0, n_empty_trailing = 0;
+	bool leading = true;
+
+	std::vector<std::string> lines = split(format, "\n");
+	for (const auto& line : lines) {
+		bool empty = true;
+		uint32_t line_indent = 0;
+		for (uint32_t i = 0; i < line.length(); ++i) {
+			if (empty && line[i] == '\t') {
+				line_indent = i+1;
+			} else {
+				empty = false;
+				break;
+			}
+		}
+
+		if (empty) {
+			if (leading) {
+				++n_empty_leading;
+			}
+			++n_empty_trailing;
+			continue;
+		}
+
+		n_empty_trailing = 0;
+
+		leading = false;
+		input_indent = std::min(input_indent, line_indent);
+	}
+
+	if (input_indent == std::numeric_limits<uint32_t>::max()) {
+		return "";
+	}
+
+	lines.erase(lines.end() - n_empty_trailing, lines.end());
+	lines.erase(lines.begin(), lines.begin() + n_empty_leading);
+
+	for (auto& line : lines) {
+		if (line.length() >= input_indent) {
+			line = line.substr(input_indent);
+			line = line.insert(0, indent, '\t');
+		}
+	}
+
+	return fmt::format(join(lines, "\n"), std::forward<Ts>(args)...);
 }
 
 std::string to_lower(std::string str);

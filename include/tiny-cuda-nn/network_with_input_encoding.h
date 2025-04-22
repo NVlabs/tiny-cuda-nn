@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -176,6 +176,79 @@ public:
 			{"encoding", m_encoding->hyperparams()},
 			{"network", m_network->hyperparams()},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		std::string encoding = name + "_encoding";
+		std::string network = name + "_network";
+
+		std::ostringstream preamble;
+		preamble
+			<< m_network->generate_device_function(network) << "\n\n"
+			<< m_encoding->generate_device_function(encoding) << "\n\n"
+			;
+
+		std::string body = dfmt(1, R"(
+				return {MLP}({ENC}(input, params + {ENC_PARAMS_OFFSET}, fwd_ctx ? fwd_ctx + WARP_SIZE * {ENC_FWD_CTX_OFFSET} : nullptr), params, fwd_ctx);
+			)",
+			"ENC"_a = encoding,
+			"ENC_PARAMS_OFFSET"_a = m_encoding->params() - this->params(),
+			"ENC_FWD_CTX_OFFSET"_a = m_network->device_function_fwd_ctx_bytes(),
+			"MLP"_a = network
+		);
+
+		return fmt::format("{}{}", preamble.str(), this->generate_device_function_from_body(name, body));
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		std::string encoding = name + "_encoding";
+		std::string network = name + "_network";
+
+		std::ostringstream preamble;
+		preamble
+			<< m_network->generate_backward_device_function(network, n_threads) << "\n\n"
+			<< m_encoding->generate_backward_device_function(encoding, n_threads) << "\n\n"
+			;
+
+		std::string body = dfmt(1, R"(
+				bool requires_encoding_bwd = {ENC_N_PARAMS} != 0 || dL_dx;
+				{ENC_VEC_OUT} dL_denc;
+				{MLP}(dL_dy, params, fwd_ctx, dL_dparams, requires_encoding_bwd ? &dL_denc : nullptr);
+				if (requires_encoding_bwd) {{
+					{ENC}(dL_denc, params + {ENC_PARAMS_OFFSET}, fwd_ctx + WARP_SIZE * {ENC_FWD_CTX_OFFSET}, dL_dparams ? dL_dparams + {ENC_PARAMS_OFFSET} : nullptr, dL_dx);
+				}}
+			)",
+			"ENC"_a = encoding,
+			"ENC_VEC_OUT"_a = m_encoding->generate_vec_out(),
+			"ENC_N_PARAMS"_a = m_encoding->n_params(),
+			"ENC_PARAMS_OFFSET"_a = m_encoding->params() - this->params(),
+			"ENC_FWD_CTX_OFFSET"_a = m_network->device_function_fwd_ctx_bytes(),
+			"MLP"_a = network
+		);
+
+		return fmt::format("{}{}", preamble.str(), this->generate_backward_device_function_from_body(name, body));
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		return m_network->device_function_fwd_ctx_bytes() + m_encoding->device_function_fwd_ctx_bytes();
+	}
+
+	bool device_function_fwd_ctx_aligned_per_element() const override {
+		return false;
+	}
+
+	uint32_t backward_device_function_shmem_bytes(uint32_t n_threads, GradientMode param_gradients_mode) const override {
+		return std::max(m_network->backward_device_function_shmem_bytes(n_threads, param_gradients_mode), m_encoding->backward_device_function_shmem_bytes(n_threads, param_gradients_mode));
+	}
+
+	void convert_params_to_jit_layout(cudaStream_t stream, bool use_inference_params) override {
+		m_network->convert_params_to_jit_layout(stream, use_inference_params);
+		m_encoding->convert_params_to_jit_layout(stream, use_inference_params);
+	}
+
+	void convert_params_from_jit_layout(cudaStream_t stream, bool use_inference_params) override {
+		m_network->convert_params_from_jit_layout(stream, use_inference_params);
+		m_encoding->convert_params_from_jit_layout(stream, use_inference_params);
 	}
 
 private:

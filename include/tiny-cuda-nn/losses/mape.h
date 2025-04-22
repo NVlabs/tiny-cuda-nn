@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -116,6 +116,19 @@ public:
 		return {
 			{"otype", "Mape"},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name, uint32_t n_dims) const override {
+		return this->generate_device_function_from_body(name, n_dims, dfmt(1, R"(
+				auto diff = vec<{N_DIMS}>(prediction) - target;
+				auto scale = (1.0f / (float)n_elements) / (abs(target) + 1e-2f) / pdf;
+				if (value) {{
+					*value = abs(diff) * scale;
+				}}
+				return loss_scale * copysign(scale, diff);
+			)",
+			"N_DIMS"_a = n_dims
+		));
 	}
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -31,6 +31,7 @@
 #include <tiny-cuda-nn/cpp_api.h>
 #include <tiny-cuda-nn/encoding.h>
 #include <tiny-cuda-nn/multi_stream.h>
+#include <tiny-cuda-nn/rtc_kernel.h>
 
 #if !defined(TCNN_NO_NETWORKS)
 #include <tiny-cuda-nn/network_with_input_encoding.h>
@@ -58,6 +59,12 @@ float default_loss_scale(Precision p) {
 
 template <typename T> constexpr Precision precision() { return std::is_same<T, float>::value ? Precision::Fp32 : Precision::Fp16; }
 Precision preferred_precision() { return precision<network_precision_t>(); }
+
+bool supports_jit_fusion(int device) { return device < 0 ? tcnn::supports_jit_fusion() : tcnn::supports_jit_fusion(device); }
+
+void rtc_set_cache_dir(const std::string& dir) { tcnn::rtc_set_cache_dir(dir); }
+void rtc_set_include_dir(const std::string& dir) { tcnn::rtc_set_include_dir(dir); }
+
 void set_log_callback(const std::function<void(LogSeverity, const std::string&)>& callback) {
 	tcnn::set_log_callback([callback](tcnn::LogSeverity severity, const std::string& msg) { callback((LogSeverity)severity, msg); });
 }
@@ -138,6 +145,8 @@ public:
 	json hyperparams() const override { return m_model->hyperparams(); }
 	std::string name() const override { return m_model->name(); }
 
+	bool jit_fusion() const { return m_model->jit_fusion(); }
+	void set_jit_fusion(bool val) { m_model->set_jit_fusion(val); }
 
 private:
 	std::shared_ptr<tcnn::DifferentiableObject<float, T, T>> m_model;

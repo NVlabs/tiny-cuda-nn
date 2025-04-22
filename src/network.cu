@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -27,6 +27,7 @@
  *  @brief  API interface of a neural network implementation
  */
 
+#include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/network.h>
 
@@ -34,7 +35,9 @@
 
 #if TCNN_MIN_GPU_ARCH > 70
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
+#include <tiny-cuda-nn/mma.h>
 #endif
+
 
 namespace tcnn {
 
@@ -145,4 +148,264 @@ std::vector<std::string> builtin_networks() {
 		"CutlassMLP",
 	};
 }
+
+template <>
+std::unique_ptr<CudaRtcKernel> generate_mlp_convert_params_to_jit_layout_kernel<float>(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t n_hidden) {
+	throw std::runtime_error{"FP32 MLP device code generation not supported."};
+}
+
+template <>
+std::unique_ptr<CudaRtcKernel> generate_mlp_convert_params_to_jit_layout_kernel<__half>(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t n_hidden) {
+	return std::make_unique<CudaRtcKernel>("mlp_convert_params_to_jit_layout", dfmt(0, R"(
+			__global__ void mlp_convert_params_to_jit_layout({T}* __restrict__ params) {{
+				if ({N_HIDDEN} == 0) {{
+					auto mat = mma_mat<{N_DIMS_IN}, {N_DIMS_OUT}>::from_linear_memory(params);
+					mat.into_native_memory(params);
+					return;
+				}}
+
+				if (blockIdx.x == 0) {{
+					auto first_mat = mma_mat<{N_DIMS_IN}, {N_DIMS_HIDDEN}>::from_linear_memory(params);
+					first_mat.into_native_memory(params);
+				}} else if (blockIdx.x == 1) {{
+					params += {N_DIMS_IN} * {N_DIMS_HIDDEN} + ({N_HIDDEN} - 1) * {N_DIMS_HIDDEN} * {N_DIMS_HIDDEN};
+					auto last_mat = mma_mat<{N_DIMS_HIDDEN}, {N_DIMS_OUT}>::from_linear_memory(params);
+					last_mat.into_native_memory(params);
+				}} else {{
+					params += {N_DIMS_IN} * {N_DIMS_HIDDEN} + (blockIdx.x - 2) * {N_DIMS_HIDDEN} * {N_DIMS_HIDDEN};
+					auto hidden_mat = mma_mat<{N_DIMS_HIDDEN}, {N_DIMS_HIDDEN}>::from_linear_memory(params);
+					hidden_mat.into_native_memory(params);
+				}}
+			}}
+		)",
+		"T"_a = type_to_string<__half>(),
+		"N_DIMS_IN"_a = input_width,
+		"N_DIMS_HIDDEN"_a = width,
+		"N_DIMS_OUT"_a = padded_output_width,
+		"N_HIDDEN"_a = n_hidden
+	));
+}
+
+template <>
+std::unique_ptr<CudaRtcKernel> generate_mlp_convert_params_from_jit_layout_kernel<float>(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t n_hidden) {
+	throw std::runtime_error{"FP32 MLP device code generation not supported."};
+}
+
+template <>
+std::unique_ptr<CudaRtcKernel> generate_mlp_convert_params_from_jit_layout_kernel<__half>(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t n_hidden) {
+	return std::make_unique<CudaRtcKernel>("mlp_convert_params_from_jit_layout", dfmt(0, R"(
+			__global__ void mlp_convert_params_from_jit_layout({T}* __restrict__ params) {{
+				if ({N_HIDDEN} == 0) {{
+					auto mat = mma_mat<{N_DIMS_IN}, {N_DIMS_OUT}>::from_native_memory(params);
+					mat.into_linear_memory(params);
+					return;
+				}}
+
+				if (blockIdx.x == 0) {{
+					auto first_mat = mma_mat<{N_DIMS_IN}, {N_DIMS_HIDDEN}>::from_native_memory(params);
+					first_mat.into_linear_memory(params);
+				}} else if (blockIdx.x == 1) {{
+					params += {N_DIMS_IN} * {N_DIMS_HIDDEN} + ({N_HIDDEN} - 1) * {N_DIMS_HIDDEN} * {N_DIMS_HIDDEN};
+					auto last_mat = mma_mat<{N_DIMS_HIDDEN}, {N_DIMS_OUT}>::from_native_memory(params);
+					last_mat.into_linear_memory(params);
+				}} else {{
+					params += {N_DIMS_IN} * {N_DIMS_HIDDEN} + (blockIdx.x - 2) * {N_DIMS_HIDDEN} * {N_DIMS_HIDDEN};
+					auto hidden_mat = mma_mat<{N_DIMS_HIDDEN}, {N_DIMS_HIDDEN}>::from_native_memory(params);
+					hidden_mat.into_linear_memory(params);
+				}}
+			}}
+		)",
+		"T"_a = type_to_string<__half>(),
+		"N_DIMS_IN"_a = input_width,
+		"N_DIMS_HIDDEN"_a = width,
+		"N_DIMS_OUT"_a = padded_output_width,
+		"N_HIDDEN"_a = n_hidden
+	));
+}
+
+template <>
+std::string generate_mlp_device_code<float>(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation) {
+	throw std::runtime_error{"FP32 MLP device code generation not supported."};
+}
+
+template <>
+std::string generate_mlp_device_code<__half>(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation) {
+	std::string output_activation_body = output_activation == Activation::None ? "" : dfmt(1, R"(
+			if (fwd_ctx) {{
+				out.into_native_memory(({T}*)fwd_ctx);
+			}}
+
+			out.activate<Activation::{ACT_OUT}>();
+		)",
+		"T"_a = type_to_string<__half>(),
+		"ACT_OUT"_a = to_string(output_activation)
+	);
+
+	if (n_hidden == 0) {
+		return dfmt(1, R"(
+				mma_vec<{N_DIMS_IN}> in{{input}};
+
+				if (fwd_ctx) {{
+					in.into_native_memory(({T}*)fwd_ctx);
+					fwd_ctx += in.M * in.N * sizeof({T});
+				}}
+
+				auto mat = mma_mat<{N_DIMS_IN}, {N_PADDED_DIMS_OUT}>::from_native_memory(params);
+				auto out = in * mat;
+				{OUTPUT_ACTIVATION_BODY}
+
+				return out.vec<{N_DIMS_OUT}>();
+			)",
+			"T"_a = type_to_string<__half>(),
+			"N_DIMS_IN"_a = input_width,
+			"N_PADDED_DIMS_OUT"_a = padded_output_width,
+			"N_DIMS_OUT"_a = output_width,
+			"OUTPUT_ACTIVATION_BODY"_a = output_activation_body
+		);
+	}
+
+	return dfmt(1, R"(
+			mma_vec<{N_DIMS_IN}> in{{input}};
+			if (fwd_ctx) {{
+				in.into_native_memory(({T}*)fwd_ctx);
+				fwd_ctx += 32 * sizeof({T}) * {N_DIMS_IN};
+			}}
+
+			auto first_mat = mma_mat<{N_DIMS_IN}, {N_DIMS_HIDDEN}>::from_native_memory(params);
+			params += {N_DIMS_IN} * {N_DIMS_HIDDEN};
+
+			auto hidden = in * first_mat;
+			hidden.activate<Activation::{ACT}>();
+
+			if (fwd_ctx) {{
+				hidden.into_native_memory(({T}*)fwd_ctx);
+				fwd_ctx += 32 * sizeof({T}) * {N_DIMS_HIDDEN};
+			}}
+
+			TCNN_PRAGMA_UNROLL
+			for (uint32_t i = 0; i < {N_HIDDEN_MATMULS}; ++i) {{
+				auto hidden_mat = mma_mat<{N_DIMS_HIDDEN}, {N_DIMS_HIDDEN}>::from_native_memory(params);
+				params += {N_DIMS_HIDDEN} * {N_DIMS_HIDDEN};
+				hidden = hidden * hidden_mat;
+				hidden.activate<Activation::{ACT}>();
+
+				if (fwd_ctx) {{
+					hidden.into_native_memory(({T}*)fwd_ctx);
+					fwd_ctx += 32 * sizeof({T}) * {N_DIMS_HIDDEN};
+				}}
+			}}
+
+			auto last_mat = mma_mat<{N_DIMS_HIDDEN}, {N_PADDED_DIMS_OUT}>::from_native_memory(params);
+			auto out = hidden * last_mat;
+			{OUTPUT_ACTIVATION_BODY}
+
+			return out.vec<{N_DIMS_OUT}>();
+		)",
+		"T"_a = type_to_string<__half>(),
+		"N_DIMS_IN"_a = input_width,
+		"N_DIMS_HIDDEN"_a = width,
+		"N_PADDED_DIMS_OUT"_a = padded_output_width,
+		"N_DIMS_OUT"_a = output_width,
+		"N_HIDDEN_MATMULS"_a = n_hidden-1,
+		"ACT"_a = to_string(activation),
+		"OUTPUT_ACTIVATION_BODY"_a = output_activation_body
+	);
+}
+
+template <>
+std::string generate_backward_mlp_device_code<float>(uint32_t n_threads, uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation) {
+	throw std::runtime_error{"FP32 MLP device code generation not supported."};
+}
+
+template <>
+std::string generate_backward_mlp_device_code<__half>(uint32_t n_threads, uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation) {
+	std::string output_activation_body = output_activation == Activation::None ? "" : dfmt(1, R"(
+			auto out = mma_vec<{N_PADDED_DIMS_OUT}>::from_native_memory(({T}*)fwd_ctx + 32 * ({N_DIMS_IN} + {N_HIDDEN} * {N_DIMS_HIDDEN}));
+			out_grad.activate_bwd<Activation::{ACT_OUT}>(out);
+		)",
+		"T"_a = type_to_string<__half>(),
+		"N_DIMS_IN"_a = input_width,
+		"N_HIDDEN"_a = n_hidden,
+		"N_DIMS_HIDDEN"_a = width,
+		"N_PADDED_DIMS_OUT"_a = padded_output_width,
+		"ACT_OUT"_a = to_string(output_activation)
+	);
+
+	if (n_hidden == 0) {
+		return dfmt(1, R"(
+				mma_vec<{N_PADDED_DIMS_OUT}> out_grad{{dL_dy}};
+				{OUTPUT_ACTIVATION_BODY}
+
+				auto in = mma_vec<{N_DIMS_IN}>::from_native_memory(({T}*)fwd_ctx);
+				if (dL_dparams) {{
+					outer_product(out_grad, in).sum_into_linear_global_memory_hierarchical<{N_THREADS}>(dL_dparams);
+				}}
+
+				if (!dL_dx) {{
+					return;
+				}}
+
+				auto mat = mma_mat<{N_DIMS_IN}, {N_PADDED_DIMS_OUT}>::from_native_memory(params);
+				auto in_grad = out_grad * mat.transpose();
+				*dL_dx = in_grad.vec<{N_DIMS_IN}>();
+			)",
+			"T"_a = type_to_string<__half>(),
+			"N_DIMS_IN"_a = input_width,
+			"N_PADDED_DIMS_OUT"_a = padded_output_width,
+			"N_THREADS"_a = n_threads,
+			"OUTPUT_ACTIVATION_BODY"_a = output_activation_body
+		);
+	}
+
+	return dfmt(1, R"(
+			mma_vec<{N_PADDED_DIMS_OUT}> out_grad{{dL_dy}};
+			{OUTPUT_ACTIVATION_BODY}
+
+			auto hidden = mma_vec<{N_DIMS_HIDDEN}>::from_native_memory(({T}*)fwd_ctx + 32 * ({N_DIMS_IN} + {N_HIDDEN_MATMULS} * {N_DIMS_HIDDEN}));
+			if (dL_dparams) {{
+				outer_product(out_grad, hidden).sum_into_linear_global_memory_hierarchical<{N_THREADS}>(dL_dparams + {N_DIMS_HIDDEN} * ({N_DIMS_IN} + {N_HIDDEN_MATMULS} * {N_DIMS_HIDDEN}));
+			}}
+
+			auto out_mat = mma_mat<{N_DIMS_HIDDEN}, {N_PADDED_DIMS_OUT}>::from_native_memory(params + {N_DIMS_HIDDEN} * ({N_DIMS_IN} + {N_HIDDEN_MATMULS} * {N_DIMS_HIDDEN}));
+			auto hidden_grad = out_grad * out_mat.transpose();
+			hidden_grad.activate_bwd<Activation::{ACT}>(hidden);
+
+			TCNN_PRAGMA_UNROLL
+			for (int i = {N_HIDDEN_MATMULS}-1; i >= 0; --i) {{
+				hidden = mma_vec<{N_DIMS_HIDDEN}>::from_native_memory(({T}*)fwd_ctx + 32 * ({N_DIMS_IN} + i * {N_DIMS_HIDDEN}));
+				if (dL_dparams) {{
+					outer_product(hidden_grad, hidden).sum_into_linear_global_memory_hierarchical<{N_THREADS}>(dL_dparams + {N_DIMS_HIDDEN} * ({N_DIMS_IN} + i * {N_DIMS_HIDDEN}));
+				}}
+
+				auto hidden_mat = mma_mat<{N_DIMS_HIDDEN}, {N_DIMS_HIDDEN}>::from_native_memory(params + {N_DIMS_HIDDEN} * ({N_DIMS_IN} + i * {N_DIMS_HIDDEN}));
+				hidden_grad = hidden_grad * hidden_mat.transpose();
+				hidden_grad.activate_bwd<Activation::{ACT}>(hidden);
+			}}
+
+			auto in = mma_vec<{N_DIMS_IN}>::from_native_memory(({T}*)fwd_ctx);
+			if (dL_dparams) {{
+				outer_product(hidden_grad, in).sum_into_linear_global_memory_hierarchical<{N_THREADS}>(dL_dparams);
+			}}
+
+			if (!dL_dx) {{
+				return;
+			}}
+
+			auto in_mat = mma_mat<{N_DIMS_IN}, {N_DIMS_HIDDEN}>::from_native_memory(params);
+			auto in_grad = hidden_grad * in_mat.transpose();
+			*dL_dx = in_grad.vec<{N_DIMS_IN}>();
+		)",
+		"T"_a = type_to_string<__half>(),
+		"N_DIMS_IN"_a = input_width,
+		"N_DIMS_OUT"_a = output_width,
+		"N_PADDED_DIMS_OUT"_a = padded_output_width,
+		"N_DIMS_OUT"_a = output_width,
+		"N_HIDDEN_MATMULS"_a = n_hidden-1,
+		"N_DIMS_HIDDEN"_a = width,
+		"N_THREADS"_a = n_threads,
+		"ACT"_a = to_string(activation),
+		"OUTPUT_ACTIVATION_BODY"_a = output_activation_body
+	);
+}
+
 }

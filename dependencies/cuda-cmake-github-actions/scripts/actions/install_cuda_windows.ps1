@@ -45,8 +45,11 @@ $VISUAL_STUDIO_MIN_CUDA = @{
 $CUDA_PACKAGES_IN = @(
     "nvcc";
     "visual_studio_integration";
+	"cublas";
     "cublas_dev";
+	"curand";
     "curand_dev";
+	"nvrtc";
     "nvrtc_dev";
     "cudart";
 )

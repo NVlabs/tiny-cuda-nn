@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -64,9 +64,9 @@ __global__ void kernel_sh(
 
 	sh_enc<T, MatrixView<T>>(
 		degree,
-		data_in(0, i) * 2.f - 1.f,
-		data_in(1, i) * 2.f - 1.f,
-		data_in(2, i) * 2.f - 1.f,
+		data_in(0u, i) * 2.f - 1.f,
+		data_in(1u, i) * 2.f - 1.f,
+		data_in(2u, i) * 2.f - 1.f,
 		data_out
 	);
 }
@@ -87,9 +87,9 @@ __global__ void kernel_sh_backward(
 
 	vec3 d = sh_enc_grad<T, MatrixView<const T>>(
 		degree,
-		data_in(0, i) * 2.f - 1.f,
-		data_in(1, i) * 2.f - 1.f,
-		data_in(2, i) * 2.f - 1.f,
+		data_in(0u, i) * 2.f - 1.f,
+		data_in(1u, i) * 2.f - 1.f,
+		data_in(2u, i) * 2.f - 1.f,
 		dL_dy
 	);
 
@@ -119,6 +119,7 @@ public:
 		}
 	}
 
+#if !defined(TCNN_NO_FWD_BWD)
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
@@ -164,6 +165,7 @@ public:
 			dL_dinput->view()
 		);
 	}
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
@@ -199,6 +201,52 @@ public:
 			{"otype", "SphericalHarmonics"},
 			{"degree", m_degree},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		std::ostringstream body;
+		body << dfmt(1, R"(
+				vec3 d = 2.0f * input - 1.0f;
+				if (fwd_ctx) {{
+					d.to_array((float*)fwd_ctx);
+				}}
+
+				{VEC_OUT} result;
+				sh_enc<{T}, {VEC_OUT}>({DEGREE}, d[0], d[1], d[2], result);
+			)",
+			"VEC_OUT"_a = this->generate_vec_out(),
+			"DEGREE"_a = m_degree,
+			"T"_a = type_to_string<T>()
+		) << "\n" << dfmt(1, R"(
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t i = {N_OUT}; i < {N_PADDED_OUT}; ++i) {{
+					result[i] = ({T})1.0f;
+				}}
+				return result;
+			)",
+			"N_OUT"_a = m_n_output_dims,
+			"N_PADDED_OUT"_a = this->padded_output_width(),
+			"T"_a = type_to_string<T>()
+		);
+
+		return this->generate_device_function_from_body(name, body.str());
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		return this->generate_backward_device_function_from_body(name, dfmt(1, R"(
+				if (dL_dx) {{
+					vec3 d((float*)fwd_ctx);
+					*dL_dx = 2.0f * sh_enc_grad<{T}, {VEC_OUT}>({DEGREE}, d[0], d[1], d[2], dL_dy);
+				}}
+			)",
+			"VEC_OUT"_a = this->generate_vec_out(),
+			"DEGREE"_a = m_degree,
+			"T"_a = type_to_string<T>()
+		));
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		return this->input_width() * sizeof(float);
 	}
 
 private:

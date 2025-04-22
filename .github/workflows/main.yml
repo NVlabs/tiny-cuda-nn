@@ -32,9 +32,6 @@ jobs:
             arch: 89
           - os: ubuntu-22.04
             cuda: "11.7"
-            arch: 89
-          - os: ubuntu-22.04
-            cuda: "11.7"
             arch: 86
           - os: ubuntu-22.04
             cuda: "11.7"
@@ -67,7 +64,7 @@ jobs:
         run: ./dependencies/cuda-cmake-github-actions/scripts/actions/install_cuda_ubuntu.sh
         shell: bash
       - name: CMake
-        run: cmake . -B ${{ env.build_dir }} -DCMAKE_BUILD_TYPE=${{ env.config }}
+        run: cmake . -B ${{ env.build_dir }} -DCMAKE_BUILD_TYPE=${{ env.config }} -DTCNN_BUILD_TESTS=1
       - name: Build
         working-directory: ${{ env.build_dir }}
         run: cmake --build . --target all --verbose -j `nproc`
@@ -121,7 +118,7 @@ jobs:
         shell: powershell
         run: .\dependencies\cuda-cmake-github-actions\scripts\actions\install_cuda_windows.ps1
       - name: CMake
-        run: cmake . -B ${{ env.build_dir }} -G "${{ matrix.visual_studio }}" -A x64
+        run: cmake . -B ${{ env.build_dir }} -G "${{ matrix.visual_studio }}" -A x64 -DTCNN_BUILD_TESTS=1
       - name: Build
         working-directory: ${{ env.build_dir }}
         run: cmake --build . --config ${{ env.config }} --target ALL_BUILD --verbose

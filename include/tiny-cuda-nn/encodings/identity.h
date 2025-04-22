@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -92,6 +92,7 @@ public:
 		m_n_output_dims = m_n_dims_to_encode;
 	}
 
+#if !defined(TCNN_NO_FWD_BWD)
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
@@ -138,6 +139,7 @@ public:
 			dL_dinput->view()
 		);
 	}
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
@@ -174,6 +176,39 @@ public:
 			{"scale", m_scale},
 			{"offset", m_offset},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		return this->generate_device_function_from_body(name, dfmt(1, R"(
+				{VEC_OUT} result = fma(input, (float){SCALE}, (float){OFFSET});
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t i = {N_OUT}; i < {N_PADDED_OUT}; ++i) {{
+					result[i] = ({T})1.0f;
+				}}
+				return result;
+			)",
+			"VEC_OUT"_a = this->generate_vec_out(),
+			"SCALE"_a = m_scale,
+			"OFFSET"_a = m_offset,
+			"N_OUT"_a = m_n_output_dims,
+			"N_PADDED_OUT"_a = this->padded_output_width(),
+			"T"_a = type_to_string<T>()
+		));
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		return this->generate_backward_device_function_from_body(name, dfmt(1, R"(
+				if (dL_dx) {{
+					*dL_dx = {VEC_IN}(dL_dy) * (float){SCALE};
+				}}
+			)",
+			"VEC_IN"_a = this->generate_vec_in(),
+			"SCALE"_a = m_scale
+		));
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		return 0;
 	}
 
 private:

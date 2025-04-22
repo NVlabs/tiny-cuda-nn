@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -114,6 +114,16 @@ public:
 			{"otype", "ConstantGradient"},
 			{"value", m_constant_gradient},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name, uint32_t n_dims) const override {
+		return this->generate_device_function_from_body(name, n_dims, dfmt(1, R"(
+				if (value) {{ *value = 0.0f; }}
+				return vec<{N_DIMS}>({VAL}) * loss_scale / pdf;
+			)",
+			"N_DIMS"_a = m_constant_gradient.size(),
+			"VAL"_a = join(m_constant_gradient, ", ")
+		));
 	}
 
 private:

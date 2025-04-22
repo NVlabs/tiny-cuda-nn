@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -182,6 +182,7 @@ template <typename T> TCNN_HOST_DEVICE T copysign(T a, T b) { return std::copysi
 template <typename T> TCNN_HOST_DEVICE T sign(T a) { return std::copysign((T)1, a); }
 template <typename T> TCNN_HOST_DEVICE T mix(T a, T b, T c) { return a * ((T)1 - c) + b * c; }
 template <typename T> TCNN_HOST_DEVICE T floor(T a) { return std::floor(a); }
+template <typename T> TCNN_HOST_DEVICE T round(T a) { return std::round(a); }
 template <typename T> TCNN_HOST_DEVICE T ceil(T a) { return std::ceil(a); }
 template <typename T> TCNN_HOST_DEVICE T abs(T a) { return std::abs(a); }
 template <typename T> TCNN_HOST_DEVICE T distance(T a, T b) { return std::abs(a - b); }
@@ -278,6 +279,7 @@ CWISE_OP(mix, TVEC, a[i] * ((T)1 - c) + b[i] * c, const TVEC& a, const TVEC& b, 
 
 CWISE_OP(operator-, TVEC, -a[i], const TVEC& a)
 CWISE_OP(floor, TVEC, floor(a[i]), const TVEC& a)
+CWISE_OP(round, TVEC, round(a[i]), const TVEC& a)
 CWISE_OP(ceil, TVEC, ceil(a[i]), const TVEC& a)
 CWISE_OP(abs, TVEC, abs(a[i]), const TVEC& a)
 CWISE_OP(sin, TVEC, sin(a[i]), const TVEC& a)
@@ -298,7 +300,7 @@ CWISE_OP(isfinite, BVEC, isfinite(a[i]), const TVEC& a)
 
 #if defined(__CUDACC__)
 inline TCNN_DEVICE void atomic_add_gmem_float(float* addr, float in) {
-#if TCNN_MIN_GPU_ARCH >= 70
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
 	int in_int = *((int*)&in);
 	asm ("red.relaxed.gpu.global.add.f32 [%0], %1;" :: "l"(addr), "r"(in_int));
 #else
@@ -322,9 +324,9 @@ TCNN_DEVICE void atomic_add_gmem(float* dst, const tvec<float, N, A>& a) {
 	}
 }
 
-#if TCNN_MIN_GPU_ARCH >= 60
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
 inline TCNN_DEVICE void atomic_add_gmem_h2(half2* addr, half2 in) {
-#if TCNN_MIN_GPU_ARCH >= 70
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
 	int in_int = *((int*)&in);
 	asm ("red.relaxed.gpu.global.add.noftz.f16x2 [%0], %1;" :: "l"(addr), "r"(in_int));
 #else
@@ -353,7 +355,7 @@ TCNN_DEVICE void atomic_add_gmem(__half* dst, const tvec<__half, N, A>& a) {
 #undef CWISE_OP
 
 // __half2 specializations for aligned vectors with 2*N fp16 coefficients.
-#if defined(__CUDACC__) && TCNN_MIN_GPU_ARCH >= 60
+#if defined(__CUDACC__) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600
 
 #define HVEC tvec<__half, N, A>
 #define HALF_CWISE_OP(operation, type_result, expr, ...) \
@@ -502,8 +504,13 @@ DEF_NON_TEMPLATED_VECTOR_TYPES(bvec, bool)
 DEF_NON_TEMPLATED_VECTOR_TYPES(vec, float)
 DEF_NON_TEMPLATED_VECTOR_TYPES(dvec, double)
 DEF_NON_TEMPLATED_VECTOR_TYPES(ivec, int)
-DEF_NON_TEMPLATED_VECTOR_TYPES(uvec, uint32_t)
+DEF_NON_TEMPLATED_VECTOR_TYPES(uvec, unsigned int)
+DEF_NON_TEMPLATED_VECTOR_TYPES(i32vec, int32_t)
+DEF_NON_TEMPLATED_VECTOR_TYPES(u32vec, uint32_t)
+DEF_NON_TEMPLATED_VECTOR_TYPES(i16vec, int16_t)
 DEF_NON_TEMPLATED_VECTOR_TYPES(u16vec, uint16_t)
+DEF_NON_TEMPLATED_VECTOR_TYPES(i8vec, int8_t)
+DEF_NON_TEMPLATED_VECTOR_TYPES(u8vec, uint8_t)
 #if defined(__CUDACC__)
 DEF_NON_TEMPLATED_VECTOR_TYPES(hvec, __half)
 #endif
@@ -968,13 +975,19 @@ TCNN_HOST_DEVICE tmat<T, N, N> mat_exp(const tmat<T, N, N>& m) {
 	return result;
 }
 
-template <typename T>
-TCNN_HOST_DEVICE tmat<T, 3, 3> orthogonalize(const tmat<T, 3, 3>& m) {
+template <typename T, uint32_t N>
+TCNN_HOST_DEVICE tmat<T, N, N> orthogonalize(const tmat<T, N, N>& m) {
 	// Iteration to bring an almost orthogonal matrix nearer to its closest
 	// orthogonal matrix. This can be run multiple times until convergence
 	// is measured or, alternatively, once per frame on something like a
 	// camera matrix to ensure it does not degenerate over time.
 	return (T)1.5f * m - (T)0.5f * (m * transpose(m) * m);
+}
+
+template <typename T>
+TCNN_HOST_DEVICE tmat<T, 4, 3> orthogonalize(const tmat<T, 4, 3>& m) {
+	auto rot = orthogonalize(tmat<T, 3, 3>{m});
+	return tmat<T, 4, 3>{rot[0], rot[1], rot[2], m[3]};
 }
 
 template <typename T>
