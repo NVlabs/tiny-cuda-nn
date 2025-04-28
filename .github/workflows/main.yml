@@ -33,23 +33,23 @@ jobs:
           - os: ubuntu-22.04
             cuda: "11.7"
             arch: 89
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 86
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 75
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 70
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 61
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 53
-          - os: ubuntu-20.04
-            cuda: "11.3"
+          - os: ubuntu-22.04
+            cuda: "11.7"
             arch: 37
     env:
       build_dir: "build"
