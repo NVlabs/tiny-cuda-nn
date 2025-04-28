@@ -171,11 +171,13 @@ public:
 	void resize(uint32_t rows, uint32_t cols) {
 		if (m_arena_allocation) {
 			cudaStream_t stream = m_arena_allocation->stream();
-			m_arena_allocation.reset();
+			m_arena_allocation.reset(); // reset is called explicitly to ensure memory is freed before being allocated
 			m_arena_allocation = std::make_shared<GPUMemoryArena::Allocation>(allocate_workspace(stream, rows * cols * sizeof(T)));
+			m_data = (T*)m_arena_allocation->data();
 		} else if (m_malloc_allocation) {
-			m_malloc_allocation.reset();
+			m_malloc_allocation.reset(); // reset is called explicitly to ensure memory is freed before being allocated
 			m_malloc_allocation = std::make_shared<GPUMemory<uint8_t>>(rows * cols * sizeof(T));
+			m_data = (T*)m_malloc_allocation->data();
 		} else {
 			throw std::runtime_error{"GPUMatrix::resize is not permitted when the underlying memory is not owned. Use GPUMatrix::set instead."};
 		}
