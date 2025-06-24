@@ -692,11 +692,31 @@ __device__ uint32_t grid_index(const GridType grid_type, const uint32_t hashmap_
 	uint32_t stride = 1;
 	uint32_t index = 0;
 
-	// The second part of the loop condition is needed to avoid integer overflows in finer levels.
-	TCNN_PRAGMA_UNROLL
-	for (uint32_t dim = 0; dim < N_DIMS && stride <= hashmap_size; ++dim) {
-		index += pos_grid[dim] * stride;
-		stride *= grid_resolution;
+	// Maximum grid resolution for each possible value of N_DIMS that does not cause overflow. The table is used to efficiently avoid
+	// overflow when calculating the index in very fine hash grids.
+	constexpr uint32_t MAX_BASES[] = {
+		0x0,
+		0xFFFFFFFF,
+		0xFFFF,
+		0x659,
+		0xFF,
+		0x54,
+		0x28,
+		0x17,
+		0xF,
+		0xB,
+		0x9,
+	};
+	static_assert(N_DIMS <= sizeof(MAX_BASES), "grid_index can only be used for N_DIMS <= 10");
+
+	if (grid_resolution <= MAX_BASES[N_DIMS]) {
+		TCNN_PRAGMA_UNROLL
+		for (uint32_t dim = 0; dim < N_DIMS; ++dim) {
+			index += pos_grid[dim] * stride;
+			stride *= grid_resolution;
+		}
+	} else {
+		stride = 0xFFFFFFFF;
 	}
 
 	if (grid_type == GridType::Hash && hashmap_size < stride) {
