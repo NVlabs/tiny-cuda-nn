@@ -177,7 +177,7 @@ if nvcc_path is None:
 else:
 	cuda_include_dir = os.path.join(os.path.dirname(os.path.dirname(nvcc_path)), "include")
 
-	cuda_headers = glob(f"{cuda_include_dir}/cuda_fp16*")
+	cuda_headers = glob(f"{cuda_include_dir}/cuda_fp16*") + glob(f"{cuda_include_dir}/vector*")
 	tcnn_headers = glob(f"{root_dir}/include/tiny-cuda-nn/*", recursive=True)
 	pcg32_headers = glob(f"{root_dir}/dependencies/pcg32/*")
 
