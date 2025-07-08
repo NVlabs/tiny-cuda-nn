@@ -66,10 +66,75 @@ GPUMatrix<float> inference_outputs(n_output_dims, batch_size);
 model.network->inference(inference_inputs, inference_outputs);
 ```
 
-**Important**: enabling JIT fusion is a new, optional feature with tiny-cuda-nn v2.0 and later.
-It is recommended to *always* enable it for a performance boost of 1.5x to 2.5x, depending on the model and GPU.
+## JIT fusion
+
+JIT fusion is a new, optional feature with tiny-cuda-nn v2.0 and later.
+It is recommended to *always* enable [automatic JIT fusion](#automatic-jit-fusion) for a performance boost of 1.5x to 2.5x, depending on the model and GPU.
 Newer GPUs exhibit larger speedups.
 Please [open an issue](https://github.com/NVlabs/tiny-cuda-nn/issues) if you encounter a slowdown or other problems with JIT fusion enabled.
+
+Even larger speed-ups are possible when applications integrate more tightly with JIT fusion.
+For example, [Instant NGP](https://github.com/nvlabs/instant-ngp) achieves a 5x speedup by fusing the entire NeRF ray marcher into a single kernel.
+See [manual JIT fusion](#manual-jit-fusion) for details on how to accomplish this.
+
+### Automatic JIT fusion
+
+To enable JIT fusion, set the `jit_fusion` property of your model to `true`.
+All future uses of the model, whether inference or training, will then use JIT mode.
+Note that if there is an error during JIT compilation, a warning will be emitted and JIT compilation mode automatically turned off.
+Your code will still run using the tiny-cuda-nn 1.X code path.
+
+```cpp
+auto model = tcnn::create_from_config(...);
+model->set_jit_fusion(tcnn::supports_jit_fusion()); // Enable JIT if the system supports it
+```
+
+```python
+import tinycudann as tcnn
+
+model = tcnn.NetworkWithInputEncoding(...) # Or any other tcnn model
+model.jit_fusion = tcnn.supports_jit_fusion() # Enable JIT if the system supports it
+```
+
+### Manual JIT fusion
+
+JIT fusion works by converting a given tiny-cuda-nn model to a CUDA device function and then compiling it into a kernel using CUDA's runtime compilation (RTC) feature.
+
+To integrate a tiny-cuda-nn model with a larger kernel in your app, you need to
+1. turn your kernel into a string,
+2. prepend the tiny-cuda-nn model's device function,
+3. pass the result to tiny-cuda-nn's runtime compilation API.
+
+Here is an example that implements a minimal kernel using a tiny-cuda-nn model with 32 input dimensions and 16 output dimensions:
+```cpp
+#include <tiny-cuda-nn/rtc_kernel.h>
+
+auto model = tcnn::create_from_config(32 /* input dims */, 16 /* output dims */, ...);
+auto fused_kernel = tcnn::CudaRtcKernel(
+    "your_kernel",
+    fmt::format(R"
+        {MODEL_DEVICE_FUNCTION}
+        __global__ void your_kernel(...) {
+            // Get input to model from either registers or memory.
+            tcnn::hvec<32> input = ...;
+            // Call tiny-cuda-nn model. All 32 threads of the warp must be active here.
+            tcnn::hvec<16> output = model_fun(nerf_in, params); 
+            // Do something with the model output.
+        }",
+        fmt::arg("MODEL_DEVICE_FUNCTION", model->generate_device_function("model_fun")),
+    )
+);
+
+uint32_t blocks = 1;
+uint32_t threads = 128; // Must be multiple of 32 for neural networks to work.
+uint32_t shmem_size = 0; // Can be any size that your_kernel needs.
+cudaStream_t stream = nullptr; // Can be any stream.
+fused_kernel.launch(blocks, threads, shmem_size, stream, ... /* params of your_kernel */);
+```
+
+And here is Instant NGP's NeRF integration with the JIT compiler for reference:
+- [src/testbed_nerf.cu](https://github.com/NVlabs/instant-ngp/blob/d6bbefb0b68e6322711b518eac7f9ab4c1cc7b1e/src/testbed_nerf.cu#L1931)
+- [include/neural-graphics-primitives/fused_kernels/render_nerf.cuh](https://github.com/NVlabs/instant-ngp/blob/master/include/neural-graphics-primitives/fused_kernels/render_nerf.cuh)
 
 
 ## Example: learning a 2D image
