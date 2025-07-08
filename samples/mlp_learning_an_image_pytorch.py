@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification, are permitted
 # provided that the following conditions are met:
@@ -112,7 +112,13 @@ if __name__ == "__main__":
 	n_channels = image.data.shape[2]
 
 	model = tcnn.NetworkWithInputEncoding(n_input_dims=2, n_output_dims=n_channels, encoding_config=config["encoding"], network_config=config["network"]).to(device)
+	model.jit_fusion = tcnn.supports_jit_fusion()
 	print(model)
+
+	if model.jit_fusion:
+		print("JIT fusion is enabled.")
+	else:
+		print("JIT fusion is unavailable. Must use CUDA 11.8 and a GPU with compute capability 75 or higher.")
 
 	#===================================================================================================
 	# The following is equivalent to the above, but slower. Only use "naked" tcnn.Encoding and

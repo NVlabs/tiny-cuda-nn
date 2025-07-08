@@ -44,6 +44,7 @@ nlohmann::json config = {
 using namespace tcnn;
 
 auto model = create_from_config(n_input_dims, n_output_dims, config);
+model->set_jit_fusion(supports_jit_fusion()); // Optional: accelerate with JIT fusion
 
 // Train the model (batch_size must be a multiple of tcnn::BATCH_SIZE_GRANULARITY)
 GPUMatrix<float> training_batch_inputs(n_input_dims, batch_size);
@@ -64,6 +65,11 @@ generate_inputs(&inference_inputs); // <-- your code
 GPUMatrix<float> inference_outputs(n_output_dims, batch_size);
 model.network->inference(inference_inputs, inference_outputs);
 ```
+
+**Important**: enabling JIT fusion is a new, optional feature with tiny-cuda-nn v2.0 and later.
+It is recommended to *always* enable it for a performance boost of 1.5x to 2.5x, depending on the model and GPU.
+Newer GPUs exhibit larger speedups.
+Please [open an issue](https://github.com/NVlabs/tiny-cuda-nn/issues) if you encounter a slowdown or other problems with JIT fusion enabled.
 
 
 ## Example: learning a 2D image
@@ -161,6 +167,8 @@ model = tcnn.NetworkWithInputEncoding(
 encoding = tcnn.Encoding(n_input_dims, config["encoding"])
 network = tcnn.Network(encoding.n_output_dims, n_output_dims, config["network"])
 model = torch.nn.Sequential(encoding, network)
+
+model.jit_fusion = tcnn.supports_jit_fusion() # Optional: accelerate with JIT fusion
 ```
 
 See `samples/mlp_learning_an_image_pytorch.py` for an example.
@@ -225,7 +233,7 @@ If you use it in your research, we would appreciate a citation via
 	month = {4},
 	title = {{tiny-cuda-nn}},
 	url = {https://github.com/NVlabs/tiny-cuda-nn},
-	version = {1.7},
+	version = {2.0},
 	year = {2021}
 }
 ```

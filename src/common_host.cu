@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -29,7 +29,6 @@
 
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/common_host.h>
-
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
@@ -140,6 +139,8 @@ HashType string_to_hash_type(const std::string& hash_type) {
 		return HashType::ReversedPrime;
 	} else if (equals_case_insensitive(hash_type, "Rng")) {
 		return HashType::Rng;
+	} else if (equals_case_insensitive(hash_type, "BaseConvert")) {
+		return HashType::BaseConvert;
 	}
 
 	throw std::runtime_error{fmt::format("Invalid hash type: {}", hash_type)};
@@ -151,6 +152,7 @@ std::string to_string(HashType hash_type) {
 		case HashType::CoherentPrime: return "CoherentPrime";
 		case HashType::ReversedPrime: return "ReversedPrime";
 		case HashType::Rng: return "Rng";
+		case HashType::BaseConvert: return "BaseConvert";
 		default: throw std::runtime_error{"Invalid hash type."};
 	}
 }
@@ -292,6 +294,15 @@ MemoryInfo cuda_memory_info() {
 	CUDA_CHECK_THROW(cudaMemGetInfo(&info.free, &info.total));
 	info.used = info.total - info.free;
 	return info;
+}
+
+std::string generate_device_code_preamble() {
+	return dfmt(0, R"(
+		#include <tiny-cuda-nn/common_device.h>
+		#include <tiny-cuda-nn/mma.h>
+
+		using namespace tcnn;
+	)");
 }
 
 std::string to_snake_case(const std::string& str) {

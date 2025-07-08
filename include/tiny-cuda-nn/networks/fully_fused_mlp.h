@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -39,11 +39,12 @@
 
 namespace tcnn {
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 class FullyFusedMLP : public Network<T> {
 public:
 	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, Activation activation, Activation output_activation);
 
+#if !defined(TCNN_NO_FWD_BWD)
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
 	std::unique_ptr<Context> forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override;
@@ -58,6 +59,7 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override;
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 	void set_params_impl(T* params, T* inference_params, T* gradients) override;
 	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override;
@@ -144,7 +146,81 @@ public:
 		};
 	}
 
+	std::string generate_device_function(const std::string& name) const override {
+		return this->generate_device_function_from_body(
+			name,
+			generate_mlp_device_code<T>(
+				m_input_width,
+				WIDTH,
+				m_padded_output_width,
+				m_output_width,
+				m_n_hidden_layers,
+				m_activation,
+				m_output_activation
+			)
+		);
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		return this->generate_backward_device_function_from_body(
+			name,
+			generate_backward_mlp_device_code<T>(
+				n_threads,
+				m_input_width,
+				WIDTH,
+				m_padded_output_width,
+				m_output_width,
+				m_n_hidden_layers,
+				m_activation,
+				m_output_activation
+			)
+		);
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		return mlp_device_code_fwd_ctx_bytes<T>(
+			m_input_width,
+			WIDTH,
+			m_padded_output_width,
+			m_output_width,
+			m_n_hidden_layers,
+			m_activation,
+			m_output_activation
+		);
+	}
+
+	bool device_function_fwd_ctx_aligned_per_element() const override {
+		return false;
+	}
+
+	uint32_t backward_device_function_shmem_bytes(uint32_t n_threads, GradientMode param_gradients_mode) const override {
+		return backward_mlp_device_code_shmem_bytes<T>(n_threads, param_gradients_mode, m_input_width, WIDTH, m_padded_output_width);
+	}
+
+	void convert_params_to_jit_layout(cudaStream_t stream, bool use_inference_params) override {
+		if (!m_convert_params_to_jit_layout_kernel) {
+			m_convert_params_to_jit_layout_kernel = generate_mlp_convert_params_to_jit_layout_kernel<T>(
+				m_input_width, m_network_width, m_padded_output_width, m_n_hidden_layers
+			);
+		}
+
+		m_convert_params_to_jit_layout_kernel->launch(m_n_hidden_layers + 1, WARP_SIZE, 0, stream, use_inference_params ? this->inference_params() : this->params());
+	}
+
+	void convert_params_from_jit_layout(cudaStream_t stream, bool use_inference_params) override {
+		if (!m_convert_params_from_jit_layout_kernel) {
+			m_convert_params_from_jit_layout_kernel = generate_mlp_convert_params_from_jit_layout_kernel<T>(
+				m_input_width, m_network_width, m_padded_output_width, m_n_hidden_layers
+			);
+		}
+
+		m_convert_params_from_jit_layout_kernel->launch(m_n_hidden_layers + 1, WARP_SIZE, 0, stream, use_inference_params ? this->inference_params() : this->params());
+	}
+
 private:
+	std::unique_ptr<CudaRtcKernel> m_convert_params_to_jit_layout_kernel;
+	std::unique_ptr<CudaRtcKernel> m_convert_params_from_jit_layout_kernel;
+
 	struct ForwardContext : public Context {
 		std::vector<GPUMatrix<T>> hidden;
 		GPUMemoryArena::Allocation alloc;

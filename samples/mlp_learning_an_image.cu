@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -237,6 +237,13 @@ int main(int argc, char* argv[]) {
 		std::shared_ptr<Loss<precision_t>> loss{create_loss<precision_t>(loss_opts)};
 		std::shared_ptr<Optimizer<precision_t>> optimizer{create_optimizer<precision_t>(optimizer_opts)};
 		std::shared_ptr<NetworkWithInputEncoding<precision_t>> network = std::make_shared<NetworkWithInputEncoding<precision_t>>(n_input_dims, n_output_dims, encoding_opts, network_opts);
+		network->set_jit_fusion(tcnn::supports_jit_fusion());
+
+		if (network->jit_fusion()) {
+			std::cout << "JIT fusion is enabled." << std::endl;
+		} else {
+			std::cout << "JIT fusion is unavailable. Must use CUDA 11.8 and a GPU with compute capability 75 or higher." << std::endl;
+		}
 
 		auto trainer = std::make_shared<Trainer<float, precision_t, precision_t>>(network, optimizer, loss);
 

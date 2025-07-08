@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -126,6 +126,7 @@ bool compute_inference_layer(
 	return compute_layer<CutlassLayer>(stream, true, activation, weights, input, output, output);
 }
 
+#if !defined(TCNN_NO_FWD_BWD)
 template <typename T>
 void CutlassMLP<T>::inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
 	// If there are no hidden layers, the network is just a simple matmul.
@@ -244,7 +245,7 @@ void CutlassMLP<T>::backward_impl(
 
 	const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-	int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
+	uint32_t split_k_factor = batch_size / std::min(1u << 12u, batch_size);
 
 	const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
 
@@ -313,6 +314,7 @@ void CutlassMLP<T>::backward_impl(
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 template <typename T>
 std::unique_ptr<typename CutlassMLP<T>::ForwardContext> CutlassMLP<T>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {

@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 
+import os
+import sys
 import torch
 import torch.nn as nn
 from torch import autograd
 from torch.optim import Adam
 import torch.nn.functional as F
 
-import sys
+SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "scripts")
+sys.path.insert(0, SCRIPTS_DIR)
 
-try:
-	import tinycudann as tcnn
-except ImportError:
-	print("This script requires the tiny-cuda-nn extension for PyTorch.")
-	print("You can install it by running:")
-	print("============================================================")
-	print("tiny-cuda-nn$ cd bindings/torch")
-	print("tiny-cuda-nn/bindings/torch$ python setup.py install")
-	print("============================================================")
-	sys.exit()
+from common import import_tinycudann
+tcnn = import_tinycudann()
 
 class SDF(nn.Module):
 	def __init__(self, hash=True, n_levels=12, log2_hashmap_size=15, base_resolution=16, smoothstep=False) -> None:

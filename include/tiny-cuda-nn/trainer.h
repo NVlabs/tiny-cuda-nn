@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -39,6 +39,7 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/reduce_sum.h>
+#include <tiny-cuda-nn/rtc_kernel.h>
 
 #include <random>
 
@@ -80,9 +81,8 @@ public:
 		m_model->initialize_params(m_rng, m_params_full_precision);
 
 		// initialize_params is only expected to initialize m_params_full_precision. Cast and copy these over!
-		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params=m_params] __device__ (size_t i) {
-			params[i] = (PARAMS_T)params_fp[i];
-		});
+		set_params_full_precision(m_params_full_precision, n_params, true);
+
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
@@ -160,6 +160,97 @@ public:
 		optimizer_step(nullptr, loss_scale);
 	}
 
+	std::unique_ptr<CudaRtcKernel> generate_fused_fwd_bwd_kernel(const std::string& name, uint32_t n_threads, bool fwd_ctx_in_shmem, uint32_t non_fwd_ctx_shmem_bytes, bool has_external_dL_dy) {
+		std::string forward_name = fmt::format("{}_forward", name);
+		std::string backward_name = fmt::format("{}_backward", name);
+		std::string loss_name = fmt::format("{}_loss", name);
+
+		std::string loss_body = has_external_dL_dy ? dfmt(0, R"(
+				auto dL_dy = external_dL_dy.col<{N_DIMS_OUT}>(i);
+			)",
+			"LOSS"_a = loss_name,
+			"N_DIMS_OUT"_a = m_model->output_width(),
+			"COMPUTE_T"_a = type_to_string<COMPUTE_T>()
+		) : dfmt(1, R"(
+				auto target = data_target.col<{N_DIMS_OUT}>(i);
+				vec<{N_DIMS_OUT}> loss;
+
+				auto pdf = data_pdf ? data_pdf.col<{N_DIMS_OUT}>(i) : vec<{N_DIMS_OUT}>::ones();
+				auto dL_dy = {LOSS}(
+					{N_DIMS_OUT} * n_elements,
+					loss_scale,
+					out,
+					target,
+					pdf,
+					&loss
+				);
+
+				if (data_loss) {{
+					data_loss.set_col(i, loss);
+				}}
+			)",
+			"LOSS"_a = loss_name,
+			"N_DIMS_OUT"_a = m_model->output_width()
+		);
+
+		return std::make_unique<CudaRtcKernel>(name, dfmt(0, R"(
+				{FORWARD_DEVICE_FUNCTION}
+
+				{BACKWARD_DEVICE_FUNCTION}
+
+				{LOSS_DEVICE_FUNCTION}
+
+				__global__ void {KERNEL_NAME}(
+					const uint32_t n_elements,
+					const float loss_scale,
+					MatrixView<const {T}> data_in,
+					MatrixView<const float> data_target,
+					MatrixView<const float> data_pdf,
+					MatrixView<const {COMPUTE_T}> external_dL_dy,
+					MatrixView<{T}> data_dL_dx,
+					MatrixView<float> data_loss,
+					const {PARAMS_T}* __restrict__ params,
+					uint8_t* __restrict__ fwd_ctx_gmem,
+					{PARAMS_T}* __restrict__ dL_dparams
+				) {{
+					{FWD_CTX_GMEM}{FWD_CTX_SHMEM}
+					fwd_ctx += previous_multiple(threadIdx.x, WARP_SIZE) * {N_FWD_CTX_BYTES};
+
+					// Here, fwd_ctx is aligned to each _warp_, i.e. every warp
+					// has {N_FWD_CTX_BYTES} bytes of context memory at its
+					// disposal, starting at `fwd_ctx`, and it can order its
+					// accesses of this memory however it wishes.
+
+					const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+
+					auto out = {FORWARD}(data_in.col<{N_DIMS_IN}>(i), params, fwd_ctx);
+
+					{LOSS_BODY}
+
+					auto dL_dx = tvec<{T}, {N_DIMS_IN}>::zero();
+					{BACKWARD}(dL_dy, params, fwd_ctx, dL_dparams, data_dL_dx ? &dL_dx : nullptr);
+					if (data_dL_dx) {{
+						data_dL_dx.set_col(i, dL_dx);
+					}}
+				}}
+			)",
+			"FORWARD_DEVICE_FUNCTION"_a = m_model->generate_device_function(forward_name),
+			"BACKWARD_DEVICE_FUNCTION"_a = m_model->generate_backward_device_function(backward_name, n_threads),
+			"LOSS_DEVICE_FUNCTION"_a = has_external_dL_dy ? "" : m_loss->generate_device_function(loss_name, m_model->output_width()),
+			"KERNEL_NAME"_a = name,
+			"T"_a = type_to_string<T>(),
+			"PARAMS_T"_a = type_to_string<PARAMS_T>(),
+			"COMPUTE_T"_a = type_to_string<COMPUTE_T>(),
+			"FWD_CTX_GMEM"_a = fwd_ctx_in_shmem ? "" : fmt::format("uint8_t* __restrict__ fwd_ctx = fwd_ctx_gmem + blockIdx.x * blockDim.x * {};", m_model->device_function_fwd_ctx_bytes()),
+			"FWD_CTX_SHMEM"_a = fwd_ctx_in_shmem ? fmt::format("extern __shared__ uint8_t fwd_ctx_shmem[]; uint8_t* fwd_ctx = (uint8_t*)fwd_ctx_shmem + {};", non_fwd_ctx_shmem_bytes) : "",
+			"N_FWD_CTX_BYTES"_a = m_model->device_function_fwd_ctx_bytes(),
+			"FORWARD"_a = forward_name,
+			"BACKWARD"_a = backward_name,
+			"LOSS_BODY"_a = loss_body,
+			"N_DIMS_IN"_a = m_model->input_width()
+		));
+	}
+
 	std::unique_ptr<ForwardContext> training_step(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
@@ -173,7 +264,83 @@ public:
 	) {
 		const float loss_scale = default_loss_scale<PARAMS_T>();
 
-		// Execute forward and backward in a CUDA graph for maximum performance.
+		if (m_model->jit_fusion()) {
+			std::string kernel_name = fmt::format("training_step_{}", to_snake_case(m_model->name()));
+			try {
+				// Automatically figure out whether our forward context fits into shmem while still utilizing
+				// a reasonable (4 or more) number of warps. If not, try to find the maximum number of warps
+				// that can handle just the backward reduction fitting into shmem.
+				bool fwd_ctx_in_shmem = true;
+				uint32_t n_warps = 16, n_threads, bwd_reduction_shmem_bytes, shmem_bytes;
+				do {
+					n_warps /= 2;
+					if (n_warps < 4 && fwd_ctx_in_shmem) {
+						n_warps = 8;
+						fwd_ctx_in_shmem = false;
+					}
+
+					n_threads = WARP_SIZE * n_warps;
+					bwd_reduction_shmem_bytes = m_model->backward_device_function_shmem_bytes(n_threads, param_gradients_mode);
+					shmem_bytes = bwd_reduction_shmem_bytes + (fwd_ctx_in_shmem ? m_model->device_function_fwd_ctx_bytes() * n_threads : 0);
+				} while (n_warps > 1 && shmem_bytes > cuda_max_shmem());
+
+				if (shmem_bytes > cuda_max_shmem()) {
+					throw std::runtime_error{"Not enough shmem."};
+				}
+
+				if (!m_jit_fused_kernel) {
+					log_debug("Training JIT: ctx_in_shmem={} shmem={} n_warps={}", fwd_ctx_in_shmem, shmem_bytes, n_warps);
+					m_jit_fused_kernel = generate_fused_fwd_bwd_kernel(kernel_name, n_threads, fwd_ctx_in_shmem, bwd_reduction_shmem_bytes, external_dL_dy);
+				}
+
+				if (m_jit_fused_kernel) {
+					std::unique_ptr<ForwardContext> ctx;
+					ctx = std::make_unique<ForwardContext>();
+					ctx->L = GPUMatrix<float>{m_model->output_width(), input.n(), stream};
+
+					// Only allocate fwd_ctx in global memory if it doesn't fit in shared memory as indicated by `fwd_ctx_in_shmem`
+					GPUMemoryArena::Allocation fwd_ctx_gmem;
+					if (!fwd_ctx_in_shmem) {
+						fwd_ctx_gmem = allocate_workspace(stream, m_model->device_function_fwd_ctx_bytes() * input.n());
+					}
+
+					if (param_gradients_mode == GradientMode::Overwrite) {
+						CUDA_CHECK_THROW(cudaMemsetAsync(m_param_gradients, 0, sizeof(PARAMS_T) * m_model->n_params(), stream));
+					}
+
+					{
+						auto jit_guard = m_model->jit_guard(stream, use_inference_params);
+
+						CHECK_THROW(BATCH_SIZE_GRANULARITY % n_threads == 0);
+						m_jit_fused_kernel->launch(
+							n_blocks_linear(input.n(), n_threads), n_threads, shmem_bytes, stream,
+							input.n(),
+							loss_scale,
+							input.view(),
+							target.view(),
+							data_pdf ? data_pdf->view() : MatrixView<float>{},
+							external_dL_dy ? external_dL_dy->view() : MatrixView<COMPUTE_T>{},
+							dL_dinput ? dL_dinput->view() : MatrixView<T>{},
+							ctx->L.view(),
+							use_inference_params ? m_params_inference : m_params,
+							fwd_ctx_gmem.data(), // nullptr if `fwd_ctx_in_shmem == true`
+							param_gradients_mode == GradientMode::Ignore ? nullptr : m_param_gradients
+						);
+					}
+
+					if (run_optimizer) {
+						CHECK_THROW(!m_model->in_jit_guard());
+						optimizer_step(stream, loss_scale);
+					}
+
+					return ctx;
+				}
+			} catch (const std::runtime_error& e) {
+				m_model->set_jit_fusion(false);
+				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), kernel_name);
+			}
+		}
+
 		std::unique_ptr<ForwardContext> ctx;
 		{
 			// Execute forward and backward in a CUDA graph for maximum performance.
@@ -358,6 +525,8 @@ private:
 	std::unique_ptr<Context> m_training_ctx;
 
 	pcg32 m_rng;
+
+	std::unique_ptr<CudaRtcKernel> m_jit_fused_kernel;
 };
 
 }

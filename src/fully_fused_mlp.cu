@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -44,7 +44,7 @@ void check_shmem_error(cudaError_t error) {
 	}
 }
 
-template <int WIDTH, int N_ITERS, typename OUT_T, bool BACKWARD=false>
+template <uint32_t WIDTH, uint32_t N_ITERS, typename OUT_T, bool BACKWARD=false>
 __device__ void threadblock_layer(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out_intermediate_threadblock_this_layer, const OUT_T* __restrict__ activation_aux = nullptr) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch.
 	//           Can be forward activations or backward activations, depending on caller.
@@ -91,7 +91,7 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 	}
 
 	TCNN_PRAGMA_UNROLL
-	for (int l = 0; l < N_ITERS; ++l) {
+	for (uint32_t l = 0; l < N_ITERS; ++l) {
 		wmma::fill_fragment(result_frag[l], 0.0f);
 
 		TCNN_PRAGMA_UNROLL
@@ -114,7 +114,7 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 	__syncthreads();
 
 	TCNN_PRAGMA_UNROLL
-	for (int l = 0; l < N_ITERS; ++l) {
+	for (uint32_t l = 0; l < N_ITERS; ++l) {
 		wmma::store_matrix_sync(act_shmem + weights_col + l * 16 * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 	}
 
@@ -122,13 +122,13 @@ __device__ void threadblock_layer(Activation activation, __half* __restrict__ ac
 		__syncthreads();
 
 		TCNN_PRAGMA_UNROLL
-		for (int l = 0; l < N_ITERS; ++l) {
+		for (uint32_t l = 0; l < N_ITERS; ++l) {
 			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * l) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * l) * (WIDTH + SKEW)];
 		}
 	}
 }
 
-template <int WIDTH, int N_ITERS>
+template <uint32_t WIDTH, uint32_t N_ITERS>
 __device__ void threadblock_load_input_static(__half* __restrict__ act_shmem, const __half* __restrict__ input_threadblock) {
 	// act_shmem will be filled by the thread block's chunk of input_threadblock
 
@@ -142,12 +142,12 @@ __device__ void threadblock_load_input_static(__half* __restrict__ act_shmem, co
 	const uint32_t row = (8 * li + wi * 8 * 32) / WIDTH;
 
 	TCNN_PRAGMA_UNROLL
-	for (int i = 0; i < N_ITERS; ++i) {
+	for (uint32_t i = 0; i < N_ITERS; ++i) {
 		*(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)] = *(int4*)&input_threadblock[lane_offset + (row + 16 * i) * WIDTH];
 	}
 }
 
-template <int WIDTH, int N_ITERS, Activation ACTIVATION, typename OUTPUT_LAYOUT>
+template <uint32_t WIDTH, uint32_t N_ITERS, Activation ACTIVATION, typename OUTPUT_LAYOUT>
 __global__ void kernel_mlp_fused_backward(
 	const __half* __restrict__ dL_doutput,
 	const __half* __restrict__ weights,
@@ -203,7 +203,7 @@ __global__ void kernel_mlp_fused_backward(
 		wmma::load_matrix_sync(weights_frag, weights + weights_stride * n_hidden_matmuls + weights_col, WIDTH);
 
 		TCNN_PRAGMA_UNROLL
-		for (int l = 0; l < N_ITERS; ++l) {
+		for (uint32_t l = 0; l < N_ITERS; ++l) {
 			wmma::fill_fragment(result_frag[l], 0.0f);
 
 			// Load a chunk of output gradients from shared memory and multiply with previously loaded weights
@@ -228,14 +228,14 @@ __global__ void kernel_mlp_fused_backward(
 		__syncthreads();
 
 		TCNN_PRAGMA_UNROLL
-		for (int l = 0; l < N_ITERS; ++l) {
+		for (uint32_t l = 0; l < N_ITERS; ++l) {
 			wmma::store_matrix_sync(act_shmem + weights_col + (16 * l) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 		}
 
 		__syncthreads();
 
 		TCNN_PRAGMA_UNROLL
-		for (int i = 0; i < N_ITERS; ++i) {
+		for (uint32_t i = 0; i < N_ITERS; ++i) {
 			*(int4*)&out_intermediate[lane_offset + (row + elem_idx + i * 16) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 		}
 	} else {
@@ -258,7 +258,7 @@ __global__ void kernel_mlp_fused_backward(
 	}
 }
 
-template <int WIDTH, typename T, Activation ACTIVATION>
+template <uint32_t WIDTH, typename T, Activation ACTIVATION>
 std::enable_if_t<!std::is_same<__half, T>::value> mlp_fused_backward(
 	cudaStream_t stream,
 	const GPUMatrix<T, RM>& weights_first_layer,
@@ -272,7 +272,7 @@ std::enable_if_t<!std::is_same<__half, T>::value> mlp_fused_backward(
 	throw std::runtime_error{"The fully fused backward pass only supports __half precision."};
 }
 
-template <int WIDTH, typename T, Activation ACTIVATION>
+template <uint32_t WIDTH, typename T, Activation ACTIVATION>
 std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_backward(
 	cudaStream_t stream,
 	const GPUMatrix<T, RM>& weights_first_layer,
@@ -288,7 +288,7 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_backward(
 	constexpr uint32_t SKEW = WIDTH % 16 == 0 ? 8 : 0;
 	constexpr uint32_t N_BLOCKS = WIDTH / 16;
 
-	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
+	const uint32_t N_ITERS = WIDTH >= 256 ? 2 : 8;
 
 	CHECK_THROW(forward.cols() == batch_size);
 	CHECK_THROW(batch_size % (16 * N_ITERS) == 0);
@@ -312,7 +312,7 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_backward(
 	}
 }
 
-template <int WIDTH, int N_ITERS, typename OUT_T, typename INPUT_LAYOUT>
+template <uint32_t WIDTH, uint32_t N_ITERS, typename OUT_T, typename INPUT_LAYOUT>
 __device__ void threadblock_input_layer_forward_dynamic(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ input_threadblock, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out_intermediate_threadblock_this_layer, const uint32_t in_width, const uint32_t batch_size) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch
 	// input_threadblock points to the thread block's chunk of the input batch in global memory
@@ -363,7 +363,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 	}
 
 	TCNN_PRAGMA_UNROLL
-	for (int l = 0; l < N_ITERS; ++l) {
+	for (uint32_t l = 0; l < N_ITERS; ++l) {
 		if (std::is_same<INPUT_LAYOUT, wmma::row_major>::value) {
 			// Load chunk of inputs into shmem.
 			// This is faster than loading it from gmem directly, even though it is only used once.
@@ -404,7 +404,7 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 	}
 
 	TCNN_PRAGMA_UNROLL
-	for (int l = 0; l < N_ITERS; ++l) {
+	for (uint32_t l = 0; l < N_ITERS; ++l) {
 		wmma::store_matrix_sync(act_shmem + weights_col + (16 * l) * (WIDTH + SKEW), result_frag[l], WIDTH + SKEW, wmma::mem_row_major);
 	}
 
@@ -412,13 +412,13 @@ __device__ void threadblock_input_layer_forward_dynamic(Activation activation, _
 		__syncthreads();
 
 		TCNN_PRAGMA_UNROLL
-		for (int i = 0; i < N_ITERS; ++i) {
+		for (uint32_t i = 0; i < N_ITERS; ++i) {
 			*(int4*)&out_intermediate_threadblock_this_layer[lane_offset + (row + 16 * i) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 		}
 	}
 }
 
-template <int WIDTH, int N_ITERS, typename OUT_T>
+template <uint32_t WIDTH, uint32_t N_ITERS, typename OUT_T>
 __device__ void threadblock_last_layer_forward(Activation activation, __half* __restrict__ act_shmem, const __half* __restrict__ weights_this_layer, OUT_T* __restrict__ out, const uint32_t output_stride, const nvcuda::wmma::layout_t output_layout) {
 	// act_shmem contains the intermediate activations (shared memory) of the thread block's chunk of the batch
 	// weights_this_layer points to the weight matrix of the current layer
@@ -475,7 +475,7 @@ __device__ void threadblock_last_layer_forward(Activation activation, __half* __
 	}
 }
 
-template <int WIDTH, int N_ITERS>
+template <uint32_t WIDTH, uint32_t N_ITERS>
 __device__ void threadblock_write_output_static(const __half* __restrict__ act_shmem, __half* __restrict__ output_threadblock) {
 	// output_threadblock will be filled by the thread block's act_shmem
 
@@ -491,12 +491,12 @@ __device__ void threadblock_write_output_static(const __half* __restrict__ act_s
 	__syncthreads();
 
 	TCNN_PRAGMA_UNROLL
-	for (int i = 0; i < N_ITERS; ++i) {
+	for (uint32_t i = 0; i < N_ITERS; ++i) {
 		*(int4*)&output_threadblock[lane_offset + (row + 16 * i) * WIDTH] = *(int4*)&act_shmem[lane_offset + (row + 16 * i) * (WIDTH + SKEW)];
 	}
 }
 
-template <int WIDTH, int N_ITERS, typename OUT_T, Activation ACTIVATION, bool INFERENCE>
+template <uint32_t WIDTH, uint32_t N_ITERS, typename OUT_T, Activation ACTIVATION, bool INFERENCE>
 __global__ void kernel_mlp_fused(const Activation output_activation, const __half* __restrict__ input, const __half* __restrict__ weights, OUT_T* __restrict__ out_intermediate, OUT_T* __restrict__ out, const uint32_t output_stride, const uint32_t batch_size, const uint32_t in_width, const uint32_t out_width, const uint32_t n_hidden_matmuls, const nvcuda::wmma::layout_t input_layout, const nvcuda::wmma::layout_t output_layout) {
 	// `input` points to the input matrix. Can be any width.
 	// `weights` points to the weight matrices (contiguous in memory).
@@ -556,7 +556,7 @@ __global__ void kernel_mlp_fused(const Activation output_activation, const __hal
 	}
 }
 
-template <int WIDTH, typename T, Activation ACTIVATION, bool INFERENCE>
+template <uint32_t WIDTH, typename T, Activation ACTIVATION, bool INFERENCE>
 std::enable_if_t<!std::is_same<__half, T>::value> mlp_fused_forward(
 	cudaStream_t stream,
 	Activation output_activation,
@@ -569,7 +569,7 @@ std::enable_if_t<!std::is_same<__half, T>::value> mlp_fused_forward(
 	throw std::runtime_error{"The fully fused forward pass only supports __half precision."};
 }
 
-template <int WIDTH, typename T, Activation ACTIVATION, bool INFERENCE>
+template <uint32_t WIDTH, typename T, Activation ACTIVATION, bool INFERENCE>
 std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	cudaStream_t stream,
 	Activation output_activation,
@@ -595,7 +595,7 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	CHECK_THROW(!output || output->cols() == batch_size);
 	CHECK_THROW(input.layout() == RM || input.stride() == input.m());
 
-	const int N_ITERS = WIDTH >= 256 ? 2 : 8;
+	const uint32_t N_ITERS = WIDTH >= 256 ? 2 : 8;
 
 	if (batch_size % (16 * N_ITERS) != 0) {
 		throw std::runtime_error{fmt::format("Batch size must be a multiple of {}.", 16 * N_ITERS)};
@@ -632,7 +632,7 @@ std::enable_if_t<std::is_same<__half, T>::value> mlp_fused_forward(
 	);
 }
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 FullyFusedMLP<T, WIDTH>::FullyFusedMLP(
 	uint32_t input_width,
 	uint32_t output_width,
@@ -677,7 +677,8 @@ m_output_activation{output_activation}
 	}
 }
 
-template <typename T, int WIDTH>
+#if !defined(TCNN_NO_FWD_BWD)
+template <typename T, uint32_t WIDTH>
 void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params) {
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
@@ -704,7 +705,7 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream
 	}
 }
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
 	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
@@ -732,7 +733,7 @@ std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward_impl(cudaStream_t stre
 	return forward;
 }
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 void FullyFusedMLP<T, WIDTH>::backward_impl(
 	cudaStream_t stream,
 	const Context& ctx,
@@ -772,7 +773,7 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 
 	const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-	int split_k_factor = batch_size / std::min((uint32_t)(1 << 12), batch_size);
+	uint32_t split_k_factor = batch_size / std::min(1u << 12u, batch_size);
 
 	const GPUMatrixDynamic<T>& tmp_dL_doutput = m_output_activation == Activation::None ? dL_doutput : backward_output_tmp;
 
@@ -834,8 +835,9 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
+#endif // !defined(TCNN_NO_FWD_BWD)
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 std::unique_ptr<typename FullyFusedMLP<T, WIDTH>::ForwardContext> FullyFusedMLP<T, WIDTH>::allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size) {
 	auto forward = std::make_unique<ForwardContext>();
 
@@ -851,7 +853,7 @@ std::unique_ptr<typename FullyFusedMLP<T, WIDTH>::ForwardContext> FullyFusedMLP<
 	return forward;
 }
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 void FullyFusedMLP<T, WIDTH>::set_params_impl(T* params, T* inference_params, T* gradients) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
@@ -862,7 +864,7 @@ void FullyFusedMLP<T, WIDTH>::set_params_impl(T* params, T* inference_params, T*
 	}
 }
 
-template <typename T, int WIDTH>
+template <typename T, uint32_t WIDTH>
 void FullyFusedMLP<T, WIDTH>::initialize_params(pcg32& rnd, float* params_full_precision, float scale) {
 	// Construct weight matrices
 	std::vector<GPUMatrix<float, RM>> weight_matrices_full_precision;

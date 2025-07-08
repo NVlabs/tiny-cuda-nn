@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -64,6 +64,10 @@ private:
 	bool m_managed = false;
 
 public:
+	using Type = T;
+	using View = T*;
+	using ConstView = const T*;
+
 	GPUMemory() {}
 	GPUMemory(size_t size, bool managed = false) : m_managed{managed} {
 		resize(size);
@@ -340,6 +344,9 @@ public:
 		return m_data;
 	}
 
+	View view() const { return data(); }
+	ConstView const_view() const { return view(); }
+
 	bool managed() const {
 		return m_managed;
 	}
@@ -386,40 +393,12 @@ public:
 		return m_size * sizeof(T);
 	}
 
-	size_t bytes() const {
+	size_t n_bytes() const {
 		return get_bytes();
 	}
-};
 
-struct Interval {
-	// Inclusive start, exclusive end
-	size_t start, end;
-
-	bool operator<(const Interval& other) const {
-		// This operator is used to sort non-overlapping intervals. Since intervals
-		// may be empty, the second half of the following expression is required to
-		// resolve ambiguity when `end` of adjacent empty intervals is equal.
-		return end < other.end || (end == other.end && start < other.start);
-	}
-
-	bool overlaps(const Interval& other) const {
-		return !intersect(other).empty();
-	}
-
-	Interval intersect(const Interval& other) const {
-		return {std::max(start, other.start), std::min(end, other.end)};
-	}
-
-	bool valid() const {
-		return end >= start;
-	}
-
-	bool empty() const {
-		return end <= start;
-	}
-
-	size_t size() const {
-		return end - start;
+	size_t bytes() const {
+		return get_bytes();
 	}
 };
 
@@ -514,7 +493,7 @@ public:
 		// Align allocations with the nearest cache line (at least the granularity of the memory allocations)
 		n_bytes = next_multiple(n_bytes, m_alignment);
 
-		Interval* best_candidate = &m_free_intervals.back();
+		Interval<size_t>* best_candidate = &m_free_intervals.back();
 		for (auto& f : m_free_intervals) {
 			if (f.size() >= n_bytes && f.size() < best_candidate->size()) {
 				best_candidate = &f;
@@ -537,7 +516,7 @@ public:
 			throw std::runtime_error{"Attempted to free arena memory that was not allocated."};
 		}
 
-		Interval interval = {start, m_allocated_intervals[start]};
+		Interval<size_t> interval = {start, m_allocated_intervals[start]};
 		m_allocated_intervals.erase(start);
 
 		m_free_intervals.insert(
@@ -666,8 +645,8 @@ private:
 	void merge_adjacent_intervals() {
 		size_t j = 0;
 		for (size_t i = 1; i < m_free_intervals.size(); ++i) {
-			Interval& prev = m_free_intervals[j];
-			Interval& cur = m_free_intervals[i];
+			Interval<size_t>& prev = m_free_intervals[j];
+			Interval<size_t>& cur = m_free_intervals[i];
 
 			if (prev.end == cur.start) {
 				prev.end = cur.end;
@@ -679,7 +658,7 @@ private:
 		m_free_intervals.resize(j+1);
 	}
 
-	std::vector<Interval> m_free_intervals;
+	std::vector<Interval<size_t>> m_free_intervals;
 	std::unordered_map<size_t, size_t> m_allocated_intervals;
 
 	int m_device = 0;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -64,6 +64,7 @@ public:
 	EmptyEncoding(uint32_t n_dims_to_encode)
 	: m_n_dims_to_encode{n_dims_to_encode} {}
 
+#if !defined(TCNN_NO_FWD_BWD)
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
@@ -109,6 +110,7 @@ public:
 			dL_dinput->view()
 		);
 	}
+#endif // !defined(TCNN_NO_FWD_BWD)
 
 	uint32_t input_width() const override {
 		return m_n_dims_to_encode;
@@ -142,6 +144,18 @@ public:
 		return {
 			{"otype", "Empty"},
 		};
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		return this->generate_device_function_from_body(name, "	return {};");
+	}
+
+	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		return this->generate_backward_device_function_from_body(name, "	if (dL_dx) { *dL_dx = {0.0f}; }");
+	}
+
+	uint32_t device_function_fwd_ctx_bytes() const override {
+		return 0;
 	}
 
 private:

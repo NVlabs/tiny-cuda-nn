@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -58,6 +58,30 @@ public:
 	) const {
 		evaluate(nullptr, loss_scale, prediction, target, values, gradients, data_pdf);
 	}
+
+	virtual std::string generate_device_function(const std::string& name, uint32_t n_dims) const {
+		throw std::runtime_error{fmt::format("{}: device code generation is not supported.", this->name())};
+	}
+
+	std::string generate_device_function_from_body(const std::string& name, uint32_t n_dims, const std::string& body) const {
+		return dfmt(0, R"(
+				__device__ auto {NAME}(
+					const uint32_t n_elements,
+					const float loss_scale,
+					const tvec<{T}, {N_DIMS}>& prediction,
+					const vec<{N_DIMS}>& target,
+					const vec<{N_DIMS}>& pdf,
+					vec<{N_DIMS}>* value = nullptr
+				) -> tvec<{T}, {N_DIMS}> {{
+				{BODY}
+				}}
+			)",
+			"NAME"_a = name,
+			"T"_a = type_to_string<T>(),
+			"N_DIMS"_a = n_dims,
+			"BODY"_a = body
+		);
+	}
 };
 
 template <typename T>
@@ -69,8 +93,5 @@ std::unique_ptr<Loss<T>> default_loss(const std::string& name) {
 }
 
 std::vector<std::string> builtin_losses();
-
-template <typename T>
-void register_loss(const std::string& name, const std::function<Loss<T>*(const json&)>& factory);
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -68,6 +68,41 @@ std::vector<std::string> builtin_networks();
 
 std::string select_network(const json& network);
 uint32_t minimum_alignment(const json& network);
+
+template <typename T>
+std::unique_ptr<CudaRtcKernel> generate_mlp_convert_params_to_jit_layout_kernel(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t n_hidden);
+
+template <typename T>
+std::unique_ptr<CudaRtcKernel> generate_mlp_convert_params_from_jit_layout_kernel(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t n_hidden);
+
+template <typename T>
+std::string generate_mlp_device_code(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation);
+
+template <typename T>
+std::string generate_backward_mlp_device_code(uint32_t n_threads, uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation);
+
+template <typename T>
+uint32_t mlp_device_code_fwd_ctx_bytes(uint32_t input_width, uint32_t width, uint32_t padded_output_width, uint32_t output_width, uint32_t n_hidden, Activation activation, Activation output_activation) {
+	return (input_width + width * n_hidden + (output_activation != Activation::None ? padded_output_width : 0)) * sizeof(T);
+}
+
+template <typename T>
+uint32_t backward_mlp_device_code_shmem_bytes(uint32_t n_threads, GradientMode param_gradients_mode, uint32_t input_width, uint32_t width, uint32_t padded_output_width) {
+	if (param_gradients_mode == GradientMode::Ignore) {
+		return 0;
+	}
+
+	uint32_t max_n_bytes = sizeof(T) * std::max(input_width * width, std::max(width * width, width * padded_output_width));
+	if (n_threads % 32 != 0 || n_threads == 0) {
+		throw std::runtime_error{"Backward MLP device code only supports positive multiples of 32 threads."};
+	}
+
+	if (n_threads == 32) {
+		return max_n_bytes;
+	}
+
+	return max_n_bytes * (n_threads / 64);
+}
 
 template <typename T>
 void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* in, T* out) {

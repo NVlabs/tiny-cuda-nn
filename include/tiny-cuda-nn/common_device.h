@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -36,7 +36,12 @@
 
 namespace tcnn {
 
-static constexpr float PI = 3.14159265358979323846f;
+__forceinline__ __device__ unsigned lane_id() {
+	unsigned ret;
+	asm volatile("mov.u32 %0, %laneid;" : "=r"(ret));
+	return ret;
+}
+
 static constexpr float SQRT2 = 1.41421356237309504880f;
 
 __host__ __device__ inline float logistic(const float x) {
@@ -83,6 +88,9 @@ struct VectorFragment {
 	V x;
 };
 
+template <typename T, uint32_t N, size_t A = sizeof(T)>
+using vector_fragment_t = VectorFragment<tvec<T, N, A>>;
+
 template <typename T>
 __host__ __device__ T relu(T val) {
 	return (T)max((float)val, 0.0f);
@@ -99,59 +107,88 @@ inline __host__ __device__ half relu(half val) {
 
 static constexpr float K_ACT = 10.0f;
 
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::None, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	result = frag;
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::ReLU, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = relu((T)frag.x[t]);
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::LeakyReLU, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = frag.x[t] * (T)((T)frag.x[t] > (T)0.0f ? 1.0f : 0.01f);
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Exponential, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = (T)(expf((float)frag.x[t]));
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Sine, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = (T)(sinf((float)frag.x[t]));
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Sigmoid, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = (T)(logistic((float)frag.x[t]));
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Squareplus, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		float x = (float)frag.x[t] * K_ACT;
+		result.x[t] = (T)(0.5f * (x + sqrtf(x * x + 4)) / K_ACT);
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Softplus, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = (T)(logf(expf((float)frag.x[t] * K_ACT) + 1.0f) / K_ACT);
+	}
+}
+
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Tanh, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = (T)(tanhf((float)frag.x[t]));
+	}
+}
+
 template <typename T, typename fragment_t>
 __host__ __device__ void warp_activation(Activation activation, const fragment_t& frag, fragment_t& result) {
 	switch (activation) {
-		case Activation::ReLU:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = relu((T)frag.x[t]);
-			}
-			return;
-		case Activation::LeakyReLU:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)((T)frag.x[t] > (T)0.0f ? 1.0f : 0.01f);
-			}
-			return;
-		case Activation::Exponential:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = (T)(expf((float)frag.x[t]));
-			}
-			return;
-		case Activation::Sine:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = (T)(sinf((float)frag.x[t]));
-			}
-			return;
-		case Activation::Sigmoid:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = (T)(logistic((float)frag.x[t]));
-			}
-			return;
-		case Activation::Squareplus:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				float x = (float)frag.x[t] * K_ACT;
-				result.x[t] = (T)(0.5f * (x + sqrtf(x * x + 4)) / K_ACT);
-			}
-			return;
-		case Activation::Softplus:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = (T)(logf(expf((float)frag.x[t] * K_ACT) + 1.0f) / K_ACT);
-			}
-			return;
-		case Activation::Tanh:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = (T)(tanhf((float)frag.x[t]));
-			}
-			return;
-		case Activation::None: result = frag; return;
+		case Activation::ReLU: warp_activation<T, fragment_t, Activation::ReLU>(frag, result); return;
+		case Activation::LeakyReLU: warp_activation<T, fragment_t, Activation::LeakyReLU>(frag, result); return;
+		case Activation::Exponential: warp_activation<T, fragment_t, Activation::Exponential>(frag, result); return;
+		case Activation::Sine: warp_activation<T, fragment_t, Activation::Sine>(frag, result); return;
+		case Activation::Sigmoid: warp_activation<T, fragment_t, Activation::Sigmoid>(frag, result); return;
+		case Activation::Squareplus: warp_activation<T, fragment_t, Activation::Squareplus>(frag, result); return;
+		case Activation::Softplus: warp_activation<T, fragment_t, Activation::Softplus>(frag, result); return;
+		case Activation::Tanh: warp_activation<T, fragment_t, Activation::Tanh>(frag, result); return;
+		case Activation::None: warp_activation<T, fragment_t, Activation::None>(frag, result); return;
 		default:
 			// Unsupported activation
 			// assert(false); // Commented out due to isolated strange side-effects on Windows
@@ -166,63 +203,109 @@ __host__ __device__ fragment_t warp_activation(Activation activation, const frag
 	return result;
 }
 
+template <Activation activation, typename T, uint32_t N, size_t A = sizeof(T)>
+__host__ __device__ tvec<T, N, A> vec_activation(tvec<T, N, A>& v) {
+	using fragment_t = vector_fragment_t<T, N, A>;
+	warp_activation<T, fragment_t, activation>(*(fragment_t*)&v, *(fragment_t*)&v);
+}
+
+template <typename T, uint32_t N, size_t A = sizeof(T)>
+__host__ __device__ tvec<T, N, A> vec_activation(Activation activation, const tvec<T, N, A>& v) {
+	auto result = warp_activation<T>(activation, vector_fragment_t<T, N, A>{v});
+	return result.x;
+}
+
+template <typename T>
+__host__ __device__ T activation(Activation activation, T val) {
+	return vec_activation(activation, tvec<T, 1>{val})[0];
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::None, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	result = frag;
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::ReLU, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f);
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::LeakyReLU, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f ? 1.0f : 0.01f);
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::Exponential, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = frag.x[t] * (T)(expf(forward_frag_in.x[t]));
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::Sine, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = frag.x[t] * (T)(cosf(forward_frag_in.x[t]));
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::Sigmoid, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		float x = logistic(forward_frag_in.x[t]);
+		result.x[t] = frag.x[t] * (T)(x * (1.0f - x));
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::Squareplus, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		float x = (float)forward_frag_in.x[t] * K_ACT;
+		float y = 0.5f * (x + sqrtf(x * x + 4));
+		result.x[t] = frag.x[t] * (T)(y * y / (y * y + 1));
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::Softplus, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		float tmp = expf((float)forward_frag_in.x[t] * K_ACT);
+		result.x[t] = frag.x[t] * (T)(tmp / (tmp + 1));
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::Tanh, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		float x = tanhf(forward_frag_in.x[t]);
+		result.x[t] = frag.x[t] * (T)(1.0f - x * x);
+	}
+}
+
 template <typename T, typename fragment_t, typename forward_fragment_t>
 __host__ __device__ void warp_activation_backward_in(Activation activation, const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
 	switch (activation) {
-		case Activation::ReLU:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f);
-			}
-			return;
-		case Activation::LeakyReLU:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f ? 1.0f : 0.01f);
-			}
-			return;
-		case Activation::Exponential:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)(expf(forward_frag_in.x[t]));
-			}
-			return;
-		case Activation::Sine:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				result.x[t] = frag.x[t] * (T)(cosf(forward_frag_in.x[t]));
-			}
-			return;
-		case Activation::Sigmoid:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				float x = logistic(forward_frag_in.x[t]);
-				result.x[t] = frag.x[t] * (T)(x * (1.0f - x));
-			}
-			return;
-		case Activation::Squareplus:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				float x = (float)forward_frag_in.x[t] * K_ACT;
-				float y = 0.5f * (x + sqrtf(x * x + 4));
-				result.x[t] = frag.x[t] * (T)(y * y / (y * y + 1));
-			}
-			return;
-		case Activation::Softplus:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				float tmp = expf((float)forward_frag_in.x[t] * K_ACT);
-				result.x[t] = frag.x[t] * (T)(tmp / (tmp + 1));
-			}
-			return;
-		case Activation::Tanh:
-			TCNN_PRAGMA_UNROLL
-			for (int t=0; t < result.num_elements; t++) {
-				float x = tanhf(forward_frag_in.x[t]);
-				result.x[t] = frag.x[t] * (T)(1.0f - x * x);
-			}
-			return;
-		case Activation::None: result = frag; return;
+		case Activation::ReLU: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::ReLU>(frag, forward_frag_in, result); return;
+		case Activation::LeakyReLU: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::LeakyReLU>(frag, forward_frag_in, result); return;
+		case Activation::Exponential: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Exponential>(frag, forward_frag_in, result); return;
+		case Activation::Sine: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Sine>(frag, forward_frag_in, result); return;
+		case Activation::Sigmoid: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Sigmoid>(frag, forward_frag_in, result); return;
+		case Activation::Squareplus: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Squareplus>(frag, forward_frag_in, result); return;
+		case Activation::Softplus: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Softplus>(frag, forward_frag_in, result); return;
+		case Activation::Tanh: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Tanh>(frag, forward_frag_in, result); return;
+		case Activation::None: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::None>(frag, forward_frag_in, result); return;
 		default:
 			// Unsupported activation
 			// assert(false); // Commented out due to isolated strange side-effects on Windows
@@ -235,6 +318,23 @@ __host__ __device__ fragment_t warp_activation_backward_in(Activation activation
 	fragment_t result;
 	warp_activation_backward_in<T>(activation, frag, forward_frag_in, result);
 	return result;
+}
+
+template <Activation activation, typename T, uint32_t N, size_t A = sizeof(T)>
+__host__ __device__ tvec<T, N, A> vec_activation_backward_in(tvec<T, N, A>& v, const tvec<T, N, A>& forward_v_in) {
+	using fragment_t = vector_fragment_t<T, N, A>;
+	warp_activation_backward_in<T, fragment_t, fragment_t, activation>(*(fragment_t*)&v, *(fragment_t*)&forward_v_in, *(fragment_t*)&v);
+}
+
+template <typename T, uint32_t N, size_t A = sizeof(T)>
+__host__ __device__ tvec<T, N, A> vec_activation_backward_in(Activation activation, const tvec<T, N, A>& v, const tvec<T, N, A>& forward_v_in) {
+	auto result = warp_activation_backward_in<T>(activation, vector_fragment_t<T, N, A>{v}, vector_fragment_t<T, N, A>{forward_v_in});
+	return result.x;
+}
+
+template <typename T>
+__host__ __device__ T activation_backward_in(Activation activation, T val, T forward_val_in) {
+	return vec_activation_backward_in(activation, tvec<T, 1>{val}, tvec<T, 1>{forward_val_in})[0];
 }
 
 template <typename T, typename fragment_t, typename forward_fragment_t>
@@ -301,6 +401,17 @@ __host__ __device__ fragment_t warp_activation_backward(Activation activation, c
 	fragment_t result;
 	warp_activation_backward<T>(activation, frag, forward_frag, result);
 	return result;
+}
+
+template <typename T, uint32_t N, size_t A = sizeof(T)>
+__host__ __device__ tvec<T, N, A> vec_activation_backward(Activation activation, const tvec<T, N, A>& v, const tvec<T, N, A>& forward_v) {
+	auto result = warp_activation_backward<T>(activation, vector_fragment_t<T, N, A>{v}, vector_fragment_t<T, N, A>{forward_v});
+	return result.x;
+}
+
+template <typename T>
+__host__ __device__ T activation_backward(Activation activation, T val, T forward_val) {
+	return vec_activation_backward(activation, tvec<T, 1>{val}, tvec<T, 1>{forward_val})[0];
 }
 
 #define IQ_DEFAULT_STATE  0x853c49e6748fea9bULL
@@ -661,6 +772,18 @@ __device__ uint32_t reversed_prime_hash(const uvec<N_DIMS>& pos_grid) {
 }
 
 template <uint32_t N_DIMS>
+__device__ uint32_t base_convert_hash(const uvec<N_DIMS>& pos_grid) {
+	// [Allows for arbitary N_DIMS] A simple base conversion hash, used in permuto-encoding
+	uint32_t k = 0;
+	TCNN_PRAGMA_UNROLL
+	for (uint32_t dim = 0; dim < N_DIMS; ++dim) {
+		k += pos_grid[dim];
+		k *= 2531011;
+	}
+	return k;
+}
+
+template <uint32_t N_DIMS>
 __device__ uint32_t rng_hash(const uvec<N_DIMS>& pos_grid, const uint32_t seed = 1337) {
 	constexpr uint32_t N_BITS_PER_DIM = 64 / N_DIMS;
 	uint64_t step = 0;
@@ -676,7 +799,9 @@ __device__ uint32_t rng_hash(const uvec<N_DIMS>& pos_grid, const uint32_t seed =
 }
 
 template <uint32_t N_DIMS, HashType HASH_TYPE>
-__device__ uint32_t grid_hash(const uvec<N_DIMS>& pos_grid) {
+__device__
+typename std::enable_if<HASH_TYPE!=HashType::BaseConvert, uint32_t>::type
+grid_hash(const uvec<N_DIMS>& pos_grid) {
 	switch (HASH_TYPE) {
 		case HashType::Prime: return prime_hash<N_DIMS>(pos_grid);
 		case HashType::CoherentPrime: return coherent_prime_hash<N_DIMS>(pos_grid);
@@ -685,6 +810,13 @@ __device__ uint32_t grid_hash(const uvec<N_DIMS>& pos_grid) {
 	}
 
 	return 0;
+}
+
+template <uint32_t N_DIMS, HashType HASH_TYPE>
+__device__
+typename std::enable_if<HASH_TYPE==HashType::BaseConvert, uint32_t>::type // Use template partial specialization to prevent static assertion on N_DIMS
+grid_hash(const uvec<N_DIMS>& pos_grid) {
+	return base_convert_hash<N_DIMS>(pos_grid);
 }
 
 template <uint32_t N_DIMS, HashType HASH_TYPE>
@@ -737,8 +869,6 @@ __host__ __device__ inline uint32_t grid_resolution(float scale) {
 	return (uint32_t)ceilf(scale) + 1;
 }
 
-template <typename T, uint32_t N, size_t A = sizeof(T)>
-using vector_fragment_t = VectorFragment<tvec<T, N, A>>;
 
 template <typename T, uint32_t N=1>
 __global__ void kernel_activation(const uint32_t num_elements, const Activation act, const T* in, T* out) {
@@ -907,7 +1037,7 @@ __device__ inline float gaussian_cdf_approx_derivative(const float result, const
 }
 
 __device__ inline float gaussian_pdf(const float x, const float inv_radius) {
-	return inv_radius * rsqrtf(2.0f * PI) * expf(-0.5f * (x * x * inv_radius * inv_radius));
+	return inv_radius * rsqrtf(2.0f * PI()) * expf(-0.5f * (x * x * inv_radius * inv_radius));
 }
 
 __device__ inline float gaussian_pdf_max_1(const float x, const float inv_radius) {
@@ -922,24 +1052,24 @@ __device__ inline float tent_cdf(const float x, const float inv_radius) {
 	return fmaxf(0.0f, fminf(1.0f, x * inv_radius + 0.5f));
 }
 
-__device__ inline float quartic(const float x, const float inv_radius) {
+__host__ __device__ inline float quartic(const float x, const float inv_radius) {
 	const float u = x * inv_radius;
 	const float tmp = fmaxf(1 - u*u, 0.0f);
 	return ((float)15 / 16) * tmp * tmp;
 }
 
-__device__ inline float quartic_cdf_deriv(const float x, const float inv_radius) {
+__host__ __device__ inline float quartic_cdf_deriv(const float x, const float inv_radius) {
 	return quartic(x, inv_radius) * inv_radius;
 }
 
-__device__ inline float quartic_cdf(const float x, const float inv_radius) {
+__host__ __device__ inline float quartic_cdf(const float x, const float inv_radius) {
 	const float u = x * inv_radius;
 	const float u2 = u * u;
 	const float u4 = u2 * u2;
 	return fmaxf(0.0f, fminf(1.0f, ((float)15 / 16) * u * (1 - ((float)2 / 3) * u2 + ((float)1 / 5) * u4) + 0.5f));
 }
 
-__device__ inline uint32_t permute(uint32_t num, uint32_t size) {
+__host__ __device__ inline uint32_t permute(uint32_t num, uint32_t size) {
 	const uint32_t A = 1434869437; // Large prime number
 	const uint32_t B = 2097192037;
 	return ((uint64_t)num * A + B) % size;

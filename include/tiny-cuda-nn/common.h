@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -76,6 +76,11 @@
 #define TCNN_HOST
 #endif
 
+#ifndef TCNN_MIN_GPU_ARCH
+#warning TCNN_MIN_GPU_ARCH was not defined. Using default value 75.
+#define TCNN_MIN_GPU_ARCH 75
+#endif
+
 #include <tiny-cuda-nn/vec.h>
 
 #if defined(__CUDA_ARCH__)
@@ -146,6 +151,7 @@ enum class HashType {
 	CoherentPrime,
 	ReversedPrime,
 	Rng,
+	BaseConvert,
 };
 
 enum class InterpolationType {
@@ -175,6 +181,8 @@ enum class ReductionType {
 //////////////////
 // Misc helpers //
 //////////////////
+
+inline constexpr TCNN_HOST_DEVICE float PI() { return 3.14159265358979323846f; }
 
 template <typename T>
 TCNN_HOST_DEVICE void host_device_swap(T& a, T& b) {
@@ -248,7 +256,7 @@ constexpr TCNN_HOST_DEVICE uint32_t n_blocks_linear(T n_elements, uint32_t n_thr
 template <typename T>
 struct PitchedPtr {
 	TCNN_HOST_DEVICE PitchedPtr() : ptr{nullptr}, stride_in_bytes{sizeof(T)} {}
-	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0, size_t extra_stride_bytes = 0) : ptr{ptr + offset}, stride_in_bytes{(uint32_t)(stride_in_elements * sizeof(T) + extra_stride_bytes)} {}
+	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0, size_t extra_stride_bytes = 0) : ptr{ptr + offset}, stride_in_bytes{stride_in_elements * sizeof(T) + extra_stride_bytes} {}
 
 	template <typename U>
 	TCNN_HOST_DEVICE explicit PitchedPtr(PitchedPtr<U> other) : ptr{(T*)other.ptr}, stride_in_bytes{other.stride_in_bytes} {}
@@ -270,63 +278,84 @@ struct PitchedPtr {
 	}
 
 	T* ptr;
-	uint32_t stride_in_bytes;
+	size_t stride_in_bytes;
 };
 
-template <typename T>
+template <typename T, typename STRIDE_T=uint32_t>
 struct MatrixView {
 	TCNN_HOST_DEVICE MatrixView() : data{nullptr}, stride_i{0}, stride_j{0} {}
-	TCNN_HOST_DEVICE MatrixView(T* data, uint32_t stride_i, uint32_t stride_j) : data{data}, stride_i{stride_i}, stride_j{stride_j} {}
+	TCNN_HOST_DEVICE MatrixView(T* data, STRIDE_T stride_i, STRIDE_T stride_j) : data{data}, stride_i{stride_i}, stride_j{stride_j} {}
 	TCNN_HOST_DEVICE MatrixView(const MatrixView<std::remove_const_t<T>>& other) : data{other.data}, stride_i{other.stride_i}, stride_j{other.stride_j} {}
 
-	TCNN_HOST_DEVICE T& operator()(uint32_t i, uint32_t j = 0) const {
-		return data[i * stride_i + j * stride_j];
+	using signed_index_t = std::make_signed_t<STRIDE_T>;
+	using unsigned_index_t = std::make_unsigned_t<STRIDE_T>;
+
+	// Signed indexing
+	TCNN_HOST_DEVICE T& operator()(signed_index_t i, signed_index_t j = 0) const {
+		return data[i * (std::ptrdiff_t)stride_i + j * (std::ptrdiff_t)stride_j];
 	}
 
-	TCNN_HOST_DEVICE void advance(uint32_t m, uint32_t n) {
-		data = &(*this)(m, n);
+	TCNN_HOST_DEVICE void advance(signed_index_t m, signed_index_t n) {
+		data += m * (std::ptrdiff_t)stride_i + n * (std::ptrdiff_t)stride_j;
 	}
 
-	TCNN_HOST_DEVICE void advance_rows(uint32_t m) {
+	TCNN_HOST_DEVICE void advance_rows(signed_index_t m) {
 		advance(m, 0);
 	}
 
-	TCNN_HOST_DEVICE void advance_cols(uint32_t n) {
+	TCNN_HOST_DEVICE void advance_cols(signed_index_t n) {
 		advance(0, n);
 	}
 
+	// Unsigned indexing
+	TCNN_HOST_DEVICE T& operator()(unsigned_index_t i, unsigned_index_t j = 0) const {
+		return data[i * (size_t)stride_i + j * (size_t)stride_j];
+	}
+
+	TCNN_HOST_DEVICE void advance(unsigned_index_t m, unsigned_index_t n) {
+		data += m * (size_t)stride_i + n * (size_t)stride_j;
+	}
+
+	TCNN_HOST_DEVICE void advance_rows(unsigned_index_t m) {
+		advance(m, (unsigned_index_t)0);
+	}
+
+	TCNN_HOST_DEVICE void advance_cols(unsigned_index_t n) {
+		advance((unsigned_index_t)0, n);
+	}
+
 	template <uint32_t N>
-	TCNN_HOST_DEVICE tvec<std::remove_const_t<T>, N> row(uint32_t m) const {
+	TCNN_HOST_DEVICE tvec<std::remove_const_t<T>, N> row(unsigned_index_t m) const {
 		tvec<std::remove_const_t<T>, N> result;
 		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
+		for (unsigned_index_t i = 0; i < N; ++i) {
 			result[i] = (*this)(m, i);
 		}
 		return result;
 	}
 
 	template <uint32_t N>
-	TCNN_HOST_DEVICE tvec<std::remove_const_t<T>, N> col(uint32_t n) const {
+	TCNN_HOST_DEVICE tvec<std::remove_const_t<T>, N> col(unsigned_index_t n) const {
 		tvec<std::remove_const_t<T>, N> result;
 		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
+		for (unsigned_index_t i = 0; i < N; ++i) {
 			result[i] = (*this)(i, n);
 		}
 		return result;
 	}
 
 	template <typename U, uint32_t N, size_t A>
-	TCNN_HOST_DEVICE void set_row(uint32_t m, const tvec<U, N, A>& val) {
+	TCNN_HOST_DEVICE void set_row(unsigned_index_t m, const tvec<U, N, A>& val) {
 		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
+		for (unsigned_index_t i = 0; i < N; ++i) {
 			(*this)(m, i) = val[i];
 		}
 	}
 
 	template <typename U, uint32_t N, size_t A>
-	TCNN_HOST_DEVICE void set_col(uint32_t n, const tvec<U, N, A>& val) {
+	TCNN_HOST_DEVICE void set_col(unsigned_index_t n, const tvec<U, N, A>& val) {
 		TCNN_PRAGMA_UNROLL
-		for (uint32_t i = 0; i < N; ++i) {
+		for (unsigned_index_t i = 0; i < N; ++i) {
 			(*this)(i, n) = val[i];
 		}
 	}
@@ -336,7 +365,83 @@ struct MatrixView {
 	}
 
 	T* data;
-	uint32_t stride_i, stride_j;
+	STRIDE_T stride_i, stride_j;
 };
+
+template <typename T>
+struct Interval {
+	// Inclusive start, exclusive end
+	T start, end;
+
+	TCNN_HOST_DEVICE bool operator<(const Interval& other) const {
+		// This operator is used to sort non-overlapping intervals. Since intervals
+		// may be empty, the second half of the following expression is required to
+		// resolve ambiguity when `end` of adjacent empty intervals is equal.
+		return end < other.end || (end == other.end && start < other.start);
+	}
+
+	TCNN_HOST_DEVICE bool overlaps(const Interval& other) const {
+		return !intersect(other).empty();
+	}
+
+	TCNN_HOST_DEVICE Interval intersect(const Interval& other) const {
+		return {std::max(start, other.start), std::min(end, other.end)};
+	}
+
+	TCNN_HOST_DEVICE bool valid() const {
+		return end >= start;
+	}
+
+	TCNN_HOST_DEVICE bool empty() const {
+		return end <= start;
+	}
+
+	TCNN_HOST_DEVICE T size() const {
+		return end - start;
+	}
+};
+
+struct Ray {
+	vec3 o;
+	vec3 d;
+
+	TCNN_HOST_DEVICE vec3 operator()(float t) const {
+		return o + t * d;
+	}
+
+	TCNN_HOST_DEVICE void advance(float t) {
+		o += d * t;
+	}
+
+	TCNN_HOST_DEVICE float distance_to(const vec3& p) const {
+		vec3 nearest = p - o;
+		nearest -= d * dot(nearest, d) / length2(d);
+		return length(nearest);
+	}
+
+	TCNN_HOST_DEVICE bool is_valid() const {
+		return d != vec3(0.0f);
+	}
+
+	static TCNN_HOST_DEVICE Ray invalid() {
+		return {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+	}
+};
+
+// Helpful data structure to represent ray-object intersections
+template <typename T>
+struct PayloadAndIdx {
+	T t;
+	int64_t idx;
+
+	// Sort in descending order
+	TCNN_HOST_DEVICE bool operator<(const PayloadAndIdx<T>& other) {
+		return t < other.t;
+	}
+};
+
+using DistAndIdx = PayloadAndIdx<float>;
+using IntervalAndIdx = PayloadAndIdx<Interval<float>>;
+
 
 }

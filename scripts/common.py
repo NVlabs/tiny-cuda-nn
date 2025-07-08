@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification, are permitted
 # provided that the following conditions are met:
@@ -26,8 +26,22 @@ import imageio
 import numpy as np
 import os
 import struct
+import sys
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+def import_tinycudann():
+	try:
+		import tinycudann as tcnn
+		return tcnn
+	except ImportError:
+		print("This script requires the tiny-cuda-nn extension for PyTorch.")
+		print("You can install it by running:")
+		print("============================================================")
+		print("tiny-cuda-nn$ cd bindings/torch")
+		print("tiny-cuda-nn/bindings/torch$ python setup.py install")
+		print("============================================================")
+		sys.exit()
 
 def mse2psnr(x):
 	return -10.*np.log(x)/np.log(10.)

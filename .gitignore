@@ -4,6 +4,7 @@
 __pycache__
 build*
 dist
+rtc
 /.cache
 /.vscode
 /.direnv

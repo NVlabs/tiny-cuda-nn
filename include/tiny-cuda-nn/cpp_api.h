@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -77,6 +77,11 @@ float default_loss_scale(Precision p);
 
 Precision preferred_precision();
 
+bool supports_jit_fusion(int device = -1);
+
+void rtc_set_cache_dir(const std::string& dir);
+void rtc_set_include_dir(const std::string& dir);
+
 void set_log_callback(const std::function<void(LogSeverity, const std::string&)>& callback);
 
 struct Context {
@@ -104,6 +109,9 @@ public:
 
 	virtual json hyperparams() const = 0;
 	virtual std::string name() const = 0;
+
+	virtual bool jit_fusion() const = 0;
+	virtual void set_jit_fusion(bool val) = 0;
 
 private:
 	Precision m_param_precision;
