@@ -69,9 +69,15 @@ model.network->inference(inference_inputs, inference_outputs);
 ## JIT fusion
 
 JIT fusion is a new, optional feature with tiny-cuda-nn v2.0 and later.
-It is recommended to *always* enable [automatic JIT fusion](#automatic-jit-fusion) for a performance boost of 1.5x to 2.5x, depending on the model and GPU.
+It is *almost always* recommended to enable [automatic JIT fusion](#automatic-jit-fusion) for a performance boost of 1.5x to 2.5x, depending on the model and GPU.
 Newer GPUs exhibit larger speedups.
-Please [open an issue](https://github.com/NVlabs/tiny-cuda-nn/issues) if you encounter a slowdown or other problems with JIT fusion enabled.
+
+If your model has very large hash grids (~20 million+ parameters) or MLPs (layer sizes larger than 128 neurons), or when your GPU is an RTX 3000 series or earlier, JIT fusion *can* slow down training.
+Rarely inference, too.
+It this case, it is recommended to try enabling JIT fusion separately for training and inference to measure whether it is faster.
+
+Please [open an issue](https://github.com/NVlabs/tiny-cuda-nn/issues) if you encounter a slowdown in a different situation or other problems with JIT fusion enabled.
+
 
 Even larger speed-ups are possible when applications integrate more tightly with JIT fusion.
 For example, [Instant NGP](https://github.com/nvlabs/instant-ngp) achieves a 5x speedup by fusing the entire NeRF ray marcher into a single kernel.
