@@ -78,11 +78,6 @@ It this case, it is recommended to try enabling JIT fusion separately for traini
 
 Please [open an issue](https://github.com/NVlabs/tiny-cuda-nn/issues) if you encounter a slowdown in a different situation or other problems with JIT fusion enabled.
 
-
-Even larger speed-ups are possible when applications integrate more tightly with JIT fusion.
-For example, [Instant NGP](https://github.com/nvlabs/instant-ngp) achieves a 5x speedup by fusing the entire NeRF ray marcher into a single kernel.
-See [manual JIT fusion](#manual-jit-fusion) for details on how to accomplish this.
-
 ### Automatic JIT fusion
 
 To enable JIT fusion, set the `jit_fusion` property of your model to `true`.
@@ -95,6 +90,9 @@ auto model = tcnn::create_from_config(...);
 model->set_jit_fusion(tcnn::supports_jit_fusion()); // Enable JIT if the system supports it
 ```
 
+JIT fusion can also be enabled via the PyTorch bindings but the speed-up will be lower, particularly during training.
+This is because the JIT compiler does not have access to the whole compute graph and can therefore fuse and optimize less.
+
 ```python
 import tinycudann as tcnn
 
@@ -103,6 +101,9 @@ model.jit_fusion = tcnn.supports_jit_fusion() # Enable JIT if the system support
 ```
 
 ### Manual JIT fusion
+
+Even larger speed-ups are possible when applications integrate more tightly with JIT fusion.
+For example, [Instant NGP](https://github.com/nvlabs/instant-ngp) achieves a 5x speedup by fusing the entire NeRF ray marcher into a single kernel.
 
 JIT fusion works by converting a given tiny-cuda-nn model to a CUDA device function and then compiling it into a kernel using CUDA's runtime compilation (RTC) feature.
 
