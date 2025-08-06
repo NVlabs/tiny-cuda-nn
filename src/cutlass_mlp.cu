@@ -50,7 +50,7 @@ m_output_width{output_width},
 m_n_hidden_layers{n_hidden_layers},
 m_activation{activation},
 m_output_activation{output_activation},
-m_can_fuse_activation{activation != Activation::Sine}
+m_can_fuse_activation{activation != Activation::Sine && activation != Activation::SiLU}
 {
 	m_padded_output_width = next_multiple(m_output_width, REQUIRED_ALIGNMENT());
 
@@ -102,7 +102,7 @@ bool compute_layer(
 	if (!is_inference) {
 		// Never disallow fusing if the caller passes the same output and activation_output buffers... in that case,
 		// invertibility of the activation function may be ignored.
-		can_fuse_activation &= activation != Activation::Sine || &output == &activation_output;
+		can_fuse_activation &= (activation != Activation::Sine && activation != Activation::SiLU) || &output == &activation_output;
 	}
 
 	if (can_fuse_activation) {

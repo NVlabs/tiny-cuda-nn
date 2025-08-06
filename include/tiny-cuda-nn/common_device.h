@@ -128,6 +128,14 @@ __host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& res
 	}
 }
 
+template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::SiLU, int> = 0>
+__host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		result.x[t] = (T)((float)frag.x[t] * logistic((float)frag.x[t]));
+	}
+}
+
 template <typename T, typename fragment_t, Activation activation, std::enable_if_t<activation == Activation::Exponential, int> = 0>
 __host__ __device__ void warp_activation(const fragment_t& frag, fragment_t& result) {
 	TCNN_PRAGMA_UNROLL
@@ -182,6 +190,7 @@ __host__ __device__ void warp_activation(Activation activation, const fragment_t
 	switch (activation) {
 		case Activation::ReLU: warp_activation<T, fragment_t, Activation::ReLU>(frag, result); return;
 		case Activation::LeakyReLU: warp_activation<T, fragment_t, Activation::LeakyReLU>(frag, result); return;
+		case Activation::SiLU: warp_activation<T, fragment_t, Activation::SiLU>(frag, result); return;
 		case Activation::Exponential: warp_activation<T, fragment_t, Activation::Exponential>(frag, result); return;
 		case Activation::Sine: warp_activation<T, fragment_t, Activation::Sine>(frag, result); return;
 		case Activation::Sigmoid: warp_activation<T, fragment_t, Activation::Sigmoid>(frag, result); return;
@@ -238,6 +247,16 @@ __host__ __device__ void warp_activation_backward_in(const fragment_t& frag, con
 	TCNN_PRAGMA_UNROLL
 	for (int t=0; t < result.num_elements; t++) {
 		result.x[t] = frag.x[t] * (T)(forward_frag_in.x[t] > (T)0.0f ? 1.0f : 0.01f);
+	}
+}
+
+template <typename T, typename fragment_t, typename forward_fragment_t, Activation activation, std::enable_if_t<activation == Activation::SiLU, int> = 0>
+__host__ __device__ void warp_activation_backward_in(const fragment_t& frag, const forward_fragment_t& forward_frag_in, fragment_t& result) {
+	TCNN_PRAGMA_UNROLL
+	for (int t=0; t < result.num_elements; t++) {
+		float x = (float)forward_frag_in.x[t];
+		float logistic_x = logistic(x);
+		result.x[t] = frag.x[t] * (T)(logistic_x + x * (logistic_x * (1.0f - logistic_x)));
 	}
 }
 
@@ -299,6 +318,7 @@ __host__ __device__ void warp_activation_backward_in(Activation activation, cons
 	switch (activation) {
 		case Activation::ReLU: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::ReLU>(frag, forward_frag_in, result); return;
 		case Activation::LeakyReLU: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::LeakyReLU>(frag, forward_frag_in, result); return;
+		case Activation::SiLU: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::SiLU>(frag, forward_frag_in, result); return;
 		case Activation::Exponential: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Exponential>(frag, forward_frag_in, result); return;
 		case Activation::Sine: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Sine>(frag, forward_frag_in, result); return;
 		case Activation::Sigmoid: warp_activation_backward_in<T, fragment_t, forward_fragment_t, Activation::Sigmoid>(frag, forward_frag_in, result); return;
@@ -351,6 +371,11 @@ __host__ __device__ void warp_activation_backward(Activation activation, const f
 			for (int t=0; t < result.num_elements; t++) {
 				result.x[t] = frag.x[t] * (T)(forward_frag.x[t] > (T)0.0f ? 1.0f : 0.01f);
 			}
+			return;
+		case Activation::SiLU:
+			// SiLU requires stored pre-activations, which we don't have. We only
+			// write out the post-activations.
+			// assert(false); // Commented out due to isolated strange side-effects on Windows
 			return;
 		case Activation::Exponential:
 			TCNN_PRAGMA_UNROLL
