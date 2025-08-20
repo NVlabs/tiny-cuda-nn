@@ -14,7 +14,9 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 def min_supported_compute_capability(cuda_version):
-	if cuda_version >= parse_version("12.0"):
+	if cuda_version >= parse_version("13.0"):
+		return 75
+	elif cuda_version >= parse_version("12.0"):
 		return 50
 	else:
 		return 20
