@@ -125,6 +125,11 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 	auto start_time = std::chrono::steady_clock::now();
 
 	uint32_t cc = cuda_supported_compute_capability();
+
+	// Strangely, compute capabilities above 90 compile to slower MLP code, even on Blackwell GPUs.
+	// For now, until we figure out how to fix this, we therefore cap the compute capability at 90.
+	cc = min(cc, 90u);
+
 	std::vector<std::string> opts = {
 		fmt::format("--gpu-architecture=compute_{}", cc),
 		fmt::format("-DTCNN_MIN_GPU_ARCH={}", cc),
