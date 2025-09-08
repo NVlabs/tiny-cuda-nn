@@ -399,7 +399,6 @@ std::string generate_backward_mlp_device_code<__half>(uint32_t n_threads, uint32
 		"N_DIMS_IN"_a = input_width,
 		"N_DIMS_OUT"_a = output_width,
 		"N_PADDED_DIMS_OUT"_a = padded_output_width,
-		"N_DIMS_OUT"_a = output_width,
 		"N_HIDDEN_MATMULS"_a = n_hidden-1,
 		"N_DIMS_HIDDEN"_a = width,
 		"N_THREADS"_a = n_threads,
