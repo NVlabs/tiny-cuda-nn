@@ -223,7 +223,7 @@ public:
 			);
 
 			// Padding
-			parallel_for_gpu(stream, input.n() * m_n_to_pad, [out=output->data() + input.n() * m_n_dims_to_encode] __device__ (size_t i) {
+			parallel_for_gpu(stream, input.n() * m_n_to_pad, [out=output->data() + input.n() * m_n_output_dims] __device__ (size_t i) {
 				out[i] = (T)1.0f;
 			});
 		}
