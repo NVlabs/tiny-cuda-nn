@@ -9,6 +9,7 @@
 import gc
 import importlib
 import os
+import tempfile
 import warnings
 
 import torch
@@ -72,6 +73,24 @@ if _C is None:
 
 # _C.set_log_callback(_log)
 
+def rtc_set_cache_dir(dir):
+	if not dir:
+		_C.rtc_set_cache_dir('')
+		return
+
+	if not os.path.isdir(dir):
+		raise OSError(f"Missing RTC cache directory {dir}")
+
+	# check write permission
+	try:
+		with tempfile.TemporaryFile(dir=dir):
+			pass
+	except OSError as err:
+		raise OSError(f"Invalid RTC cache directory {dir}") from err
+
+	# `str` to handle pathlib.Path objects
+	_C.rtc_set_cache_dir(str(dir))
+
 # Set up JIT runtime compilation
 _rtc_dir = os.path.join(os.path.dirname(__file__), "rtc")
 
@@ -79,8 +98,11 @@ _rtc_include_dir = os.path.join(_rtc_dir, "include")
 _C.rtc_set_include_dir(_rtc_include_dir)
 
 _rtc_cache_dir = os.path.join(_rtc_dir, "cache")
-os.makedirs(_rtc_cache_dir, exist_ok=True)
-_C.rtc_set_cache_dir(_rtc_cache_dir)
+try:
+	os.makedirs(_rtc_cache_dir, exist_ok=True)
+	rtc_set_cache_dir(_rtc_cache_dir)
+except OSError:
+	pass
 
 def _torch_precision(tcnn_precision):
 	if tcnn_precision == _C.Precision.Fp16:
