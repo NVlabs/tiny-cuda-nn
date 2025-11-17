@@ -220,6 +220,20 @@ tiny-cuda-nn$ cd bindings/torch
 tiny-cuda-nn/bindings/torch$ python setup.py install
 ```
 
+By default, the extension automatically enables half precision (FP16) on GPUs with good support (Volta, Turing, Ampere, etc.) and disables it on older architectures or those with slow FP16 (e.g., Pascal/GTX 10-series).
+
+If you wish to override this behavior (e.g., to force FP16 on unsupported hardware or disable it for debugging), set the TCNN_HALF_PRECISION environment variable before installation:
+
+Disable FP16: 0
+Enable FP16: 1
+
+Example:
+```sh
+# Linux / macOS (Disable FP16)
+export TCNN_HALF_PRECISION=0
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
 Upon success, you can use __tiny-cuda-nn__ models as in the following example:
 ```py
 import commentjson as json

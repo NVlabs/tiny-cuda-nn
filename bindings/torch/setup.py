@@ -146,6 +146,11 @@ base_definitions = [
 	"-DTCNN_RTC_USE_FAST_MATH",
 ]
 
+if "TCNN_HALF_PRECISION" in os.environ:
+    force_half = os.environ["TCNN_HALF_PRECISION"].lower() in ["1", "true", "on", "yes"]
+    base_definitions.append(f"-DTCNN_HALF_PRECISION={int(force_half)}")
+    print(f"Forcing TCNN_HALF_PRECISION to {'ON' if force_half else 'OFF'}")
+
 base_source_files = [
 	"tinycudann/bindings.cpp",
 	"../../dependencies/fmt/src/format.cc",
