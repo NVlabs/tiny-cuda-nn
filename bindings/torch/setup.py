@@ -147,9 +147,16 @@ base_definitions = [
 ]
 
 if "TCNN_HALF_PRECISION" in os.environ:
-    force_half = os.environ["TCNN_HALF_PRECISION"].lower() in ["1", "true", "on", "yes"]
-    base_definitions.append(f"-DTCNN_HALF_PRECISION={int(force_half)}")
-    print(f"Forcing TCNN_HALF_PRECISION to {'ON' if force_half else 'OFF'}")
+    enable_half = os.environ["TCNN_HALF_PRECISION"].lower() in ["1", "true", "on", "yes"]
+    base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
+    print(f"Forcing TCNN_HALF_PRECISION to {'ON' if enable_half else 'OFF'}")
+else:
+    if min_compute_capability == 61 or min_compute_capability <= 52:
+        enable_half = False
+    else:
+        enable_half = True
+    print(f"Auto-detecting TCNN_HALF_PRECISION: {'ON' if enable_half else 'OFF'} (Arch: {min_compute_capability})")
+base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
 
 base_source_files = [
 	"tinycudann/bindings.cpp",
