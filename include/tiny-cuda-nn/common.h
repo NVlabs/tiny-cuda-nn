@@ -101,7 +101,9 @@ static constexpr bool PARAMS_ALIGNED = false;
 static constexpr bool PARAMS_ALIGNED = true;
 #endif
 
-#define TCNN_HALF_PRECISION (!(TCNN_MIN_GPU_ARCH == 61 || TCNN_MIN_GPU_ARCH <= 52))
+#ifndef TCNN_HALF_PRECISION
+#error "TCNN_HALF_PRECISION is undefined. The build system must define this explicitly."
+#endif
 
 // TCNN has the following behavior depending on GPU arch.
 // Refer to the first row of the table at the following URL for information about
