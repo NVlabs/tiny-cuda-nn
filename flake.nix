@@ -30,10 +30,10 @@
             python3
             stdenv.cc.cc.lib
 
-            cudatoolkit
-            cudaPackages.cuda_cudart
-            cudaPackages.cuda_nvrtc
-            cudaPackages.cuda_nvtx
+            cudaPackages_13.cudatoolkit
+            cudaPackages_13.cuda_cudart
+            cudaPackages_13.cuda_nvrtc
+            cudaPackages_13.cuda_nvtx
           ];
 
           shellHook = ''
