@@ -695,6 +695,7 @@ inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t
 	if (!arena) {
 		arena = std::make_shared<GPUMemoryArena>();
 	}
+
 	return GPUMemoryArena::Allocation{stream, arena->allocate(n_bytes), arena};
 }
 

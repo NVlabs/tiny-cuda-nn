@@ -122,7 +122,7 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 
 	ScopeGuard cleanup_guard{[&]() { clear(); }};
 
-	auto start_time = std::chrono::steady_clock::now();
+	const auto start_time = std::chrono::steady_clock::now();
 
 	uint32_t cc = cuda_supported_compute_capability();
 

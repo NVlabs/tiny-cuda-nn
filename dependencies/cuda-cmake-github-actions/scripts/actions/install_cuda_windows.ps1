@@ -55,7 +55,6 @@ $CUDA_PACKAGES_IN = @(
 	"cudart";
 )
 
-
 ## -------------------
 ## Select CUDA version
 ## -------------------
