@@ -132,6 +132,7 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 
 	std::vector<std::string> opts = {
 		fmt::format("--gpu-architecture=compute_{}", cc),
+		fmt::format("-DTCNN_HALF_PRECISION={}", TCNN_HALF_PRECISION),
 		fmt::format("-DTCNN_MIN_GPU_ARCH={}", cc),
 		"--std=c++14",
 #ifdef TCNN_RTC_USE_FAST_MATH
