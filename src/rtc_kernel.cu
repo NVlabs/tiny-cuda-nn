@@ -178,6 +178,8 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 			{OPTS}
 			*/
 
+			#define TCNN_HALF_PRECISION {TCNN_HALF_PRECISION}
+
 			// NVRTC does not come with the C++ standard library out of the box and
 			// it would be troublesome to bundle it or require users to have it installed
 			// in readily available paths. So we instead include a minimal custom
@@ -190,7 +192,8 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 		"KERNEL_NAME"_a = name,
 		"PREAMBLE"_a = generate_device_code_preamble(),
 		"OPTS"_a = join(opts, "\n"),
-		"KERNEL_CODE"_a = kernel_code
+		"KERNEL_CODE"_a = kernel_code,
+		"TCNN_HALF_PRECISION"_a = TCNN_HALF_PRECISION
 	);
 
 	size_t code_hash = hash_combine(0, complete_code);
