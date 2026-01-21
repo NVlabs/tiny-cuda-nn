@@ -1,0 +1,55 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+    "torch>=1.7",
+    "ninja",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinycudann"
+dynamic = ["version"]
+description = "tiny-cuda-nn extension for PyTorch"
+readme = "../../README.md"
+requires-python = ">=3.7"
+license = {text = "BSD 3-Clause \"New\" or \"Revised\" License"}
+keywords = ["PyTorch", "cutlass", "machine learning", "neural networks", "CUDA"]
+authors = [
+    {name = "Thomas Müller", email = "tmueller@nvidia.com"},
+    {name = "Jacob Munkberg", email = "jmunkberg@nvidia.com"},
+    {name = "Jon Hasselgren", email = "jhasselgren@nvidia.com"},
+    {name = "Or Perel", email = "operel@nvidia.com"},
+]
+maintainers = [
+    {name = "Thomas Müller", email = "tmueller@nvidia.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Homepage = "https://github.com/nvlabs/tiny-cuda-nn"
+Download = "https://github.com/nvlabs/tiny-cuda-nn"
+Repository = "https://github.com/nvlabs/tiny-cuda-nn"
+
+[tool.setuptools]
+packages = ["tinycudann"]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.dynamic]
+version = {attr = "setuptools.config.read_configuration('setup.py')"}
