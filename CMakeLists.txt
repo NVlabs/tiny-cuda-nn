@@ -405,3 +405,7 @@ if (TCNN_BUILD_TESTS)
 	add_subdirectory(tests)
 	list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
 endif()
+
+enable_testing()
+add_subdirectory(test)
+list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
