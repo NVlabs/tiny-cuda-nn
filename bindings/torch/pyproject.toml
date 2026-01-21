@@ -12,6 +12,12 @@ name = "tinycudann"
 dynamic = ["version"]
 description = "tiny-cuda-nn extension for PyTorch"
 requires-python = ">=3.7"
+dependencies = [
+    "setuptools>=49.2.0",
+    "wheel",
+    "torch>=1.7.0",
+    "ninja"
+]
 license = {text = "BSD 3-Clause \"New\" or \"Revised\" License"}
 keywords = ["PyTorch", "cutlass", "machine learning", "neural networks", "CUDA"]
 authors = [
