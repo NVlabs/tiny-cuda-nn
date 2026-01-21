@@ -1,8 +1,8 @@
 [build-system]
 requires = [
-    "setuptools>=42",
+    "setuptools>=49.2.0",
     "wheel",
-    "torch>=1.7",
+    "torch>=1.7.0",
     "ninja",
 ]
 build-backend = "setuptools.build_meta"
@@ -11,7 +11,6 @@ build-backend = "setuptools.build_meta"
 name = "tinycudann"
 dynamic = ["version"]
 description = "tiny-cuda-nn extension for PyTorch"
-readme = "../../README.md"
 requires-python = ">=3.7"
 license = {text = "BSD 3-Clause \"New\" or \"Revised\" License"}
 keywords = ["PyTorch", "cutlass", "machine learning", "neural networks", "CUDA"]
@@ -50,6 +49,3 @@ Repository = "https://github.com/nvlabs/tiny-cuda-nn"
 packages = ["tinycudann"]
 include-package-data = true
 zip-safe = false
-
-[tool.setuptools.dynamic]
-version = {attr = "setuptools.config.read_configuration('setup.py')"}
