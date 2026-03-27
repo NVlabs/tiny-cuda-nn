@@ -161,7 +161,7 @@ producing an image every couple of training steps. Each 1000 steps should take a
 ## Requirements
 
 - An __NVIDIA GPU__; tensor cores increase performance when available. All shown results come from an RTX 3090.
-- A __C++14__ capable compiler. The following choices are recommended and have been tested:
+- A __C++17__ capable compiler. The following choices are recommended and have been tested:
   - __Windows:__ Visual Studio 2019 or 2022
   - __Linux:__ GCC/G++ 8 or higher
 - A recent version of __[CUDA](https://developer.nvidia.com/cuda-toolkit)__. The following choices are recommended and have been tested:
