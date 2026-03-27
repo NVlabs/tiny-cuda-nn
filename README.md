@@ -197,6 +197,11 @@ tiny-cuda-nn$ cmake . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 tiny-cuda-nn$ cmake --build build --config RelWithDebInfo -j
 ```
 
+If you need hash-grid support outside the default 2D-4D range, override the compiled bounds at configure time. For example, to enable 5D hash grids:
+```sh
+tiny-cuda-nn$ cmake . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTCNN_HASH_MAX_DIM=5
+```
+
 If compilation fails inexplicably or takes longer than an hour, you might be running out of memory. Try running the above command without `-j` in that case.
 
 
@@ -232,6 +237,18 @@ Example:
 # Linux / macOS (Disable FP16)
 export TCNN_HALF_PRECISION=0
 pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
+Hash-grid support in the PyTorch extension defaults to 2D-4D. To compile 5D hash grids, set the bounds before installation:
+```sh
+# Linux / macOS
+export TCNN_HASH_MAX_DIM=5
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
+For local installs through `setup.py`, the same override is also available as command-line arguments:
+```sh
+tiny-cuda-nn/bindings/torch$ python setup.py install --hash-max-dim=5
 ```
 
 Upon success, you can use __tiny-cuda-nn__ models as in the following example:

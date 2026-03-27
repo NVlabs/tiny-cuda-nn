@@ -41,6 +41,8 @@ set(TCNN_EXTERNAL_FMT "" CACHE STRING "If non-empty, the `fmt` target is supplie
 
 set(TCNN_CUDA_ARCHITECTURES "" CACHE STRING "Build tiny-cuda-nn for a specific GPU architecture.")
 option(TCNN_LINK_CUDA "Link tiny-cuda-nn to CUDA libraries?" ON)
+set(TCNN_HASH_MIN_DIM 2 CACHE STRING "Lowest hash-grid dimensionality compiled into the library (1-7).")
+set(TCNN_HASH_MAX_DIM 4 CACHE STRING "Highest hash-grid dimensionality compiled into the library (1-7).")
 
 ###############################################################################
 # Build type and C++ compiler setup
@@ -217,11 +219,37 @@ else()
     message(STATUS "TCNN_HALF_PRECISION: OFF")
 endif()
 
+if (NOT TCNN_HASH_MIN_DIM MATCHES "^[0-9]+$")
+	message(FATAL_ERROR "TCNN_HASH_MIN_DIM must be an integer in the range [1, 7].")
+endif()
+
+if (NOT TCNN_HASH_MAX_DIM MATCHES "^[0-9]+$")
+	message(FATAL_ERROR "TCNN_HASH_MAX_DIM must be an integer in the range [1, 7].")
+endif()
+
+if (TCNN_HASH_MIN_DIM LESS 1 OR TCNN_HASH_MIN_DIM GREATER 7)
+	message(FATAL_ERROR "TCNN_HASH_MIN_DIM=${TCNN_HASH_MIN_DIM} is out of range. Valid values are 1 through 7.")
+endif()
+
+if (TCNN_HASH_MAX_DIM LESS 1 OR TCNN_HASH_MAX_DIM GREATER 7)
+	message(FATAL_ERROR "TCNN_HASH_MAX_DIM=${TCNN_HASH_MAX_DIM} is out of range. Valid values are 1 through 7.")
+endif()
+
+if (TCNN_HASH_MIN_DIM GREATER TCNN_HASH_MAX_DIM)
+	message(FATAL_ERROR "TCNN_HASH_MIN_DIM=${TCNN_HASH_MIN_DIM} must not exceed TCNN_HASH_MAX_DIM=${TCNN_HASH_MAX_DIM}.")
+endif()
+
+list(APPEND TCNN_DEFINITIONS -DTCNN_HASH_MIN_DIM=${TCNN_HASH_MIN_DIM})
+list(APPEND TCNN_DEFINITIONS -DTCNN_HASH_MAX_DIM=${TCNN_HASH_MAX_DIM})
+message(STATUS "TCNN hash-grid dimensions: ${TCNN_HASH_MIN_DIM}-${TCNN_HASH_MAX_DIM}")
+
 message(STATUS "Targeting CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 if (TCNN_HAS_PARENT)
 	set(TCNN_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES} PARENT_SCOPE)
 	set(TCNN_CUDA_VERSION ${CUDA_VERSION} PARENT_SCOPE)
 	set(TCNN_HALF_PRECISION ${TCNN_HALF_PRECISION} PARENT_SCOPE)
+	set(TCNN_HASH_MIN_DIM ${TCNN_HASH_MIN_DIM} PARENT_SCOPE)
+	set(TCNN_HASH_MAX_DIM ${TCNN_HASH_MAX_DIM} PARENT_SCOPE)
 endif()
 
 if (MIN_GPU_ARCH LESS_EQUAL 70)

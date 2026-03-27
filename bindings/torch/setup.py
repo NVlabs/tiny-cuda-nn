@@ -33,6 +33,41 @@ def max_supported_compute_capability(cuda_version):
 	else:
 		return 120
 
+def pop_arg_value(name):
+	prefix = f"{name}="
+	for i, arg in enumerate(sys.argv):
+		if arg.startswith(prefix):
+			value = arg[len(prefix):]
+			del sys.argv[i]
+			return value
+
+	if name in sys.argv:
+		index = sys.argv.index(name)
+		if index + 1 >= len(sys.argv):
+			raise RuntimeError(f"Missing value for {name}")
+
+		value = sys.argv[index + 1]
+		del sys.argv[index:index + 2]
+		return value
+
+	return None
+
+def get_int_setting(arg_name, env_name, default):
+	arg_value = pop_arg_value(arg_name)
+	env_value = os.environ.get(env_name)
+
+	if arg_value is not None and env_value is not None:
+		raise RuntimeError(f"Specify only one of {arg_name} or {env_name}.")
+
+	value = env_value if env_value is not None else arg_value
+	if value is None:
+		return default, "default"
+
+	try:
+		return int(value), env_name if env_value is not None else arg_name
+	except ValueError as exc:
+		raise RuntimeError(f"{env_name} must be an integer.") from exc
+
 # Find version of tinycudann by scraping CMakeLists.txt
 with open(os.path.join(ROOT_DIR, "CMakeLists.txt"), "r") as cmakelists:
 	for line in cmakelists.readlines():
@@ -59,6 +94,23 @@ if "--no-networks" in sys.argv:
 	include_networks = False
 	sys.argv.remove("--no-networks")
 	print("Building >> without << neural networks (just the input encodings)")
+
+hash_min_dim, hash_min_dim_source = get_int_setting("--hash-min-dim", "TCNN_HASH_MIN_DIM", 2)
+hash_max_dim, hash_max_dim_source = get_int_setting("--hash-max-dim", "TCNN_HASH_MAX_DIM", 4)
+
+if hash_min_dim < 1 or hash_min_dim > 7:
+	raise RuntimeError(f"TCNN_HASH_MIN_DIM={hash_min_dim} is out of range. Valid values are 1 through 7.")
+
+if hash_max_dim < 1 or hash_max_dim > 7:
+	raise RuntimeError(f"TCNN_HASH_MAX_DIM={hash_max_dim} is out of range. Valid values are 1 through 7.")
+
+if hash_min_dim > hash_max_dim:
+	raise RuntimeError(f"TCNN_HASH_MIN_DIM={hash_min_dim} must not exceed TCNN_HASH_MAX_DIM={hash_max_dim}.")
+
+if hash_min_dim_source != "default" or hash_max_dim_source != "default":
+	print(f"Overriding hash-grid support to dimensions {hash_min_dim}-{hash_max_dim}")
+else:
+	print(f"Compiling hash-grid support for dimensions {hash_min_dim}-{hash_max_dim}")
 
 if os.name == "nt":
 	def find_cl_path():
@@ -144,6 +196,8 @@ base_definitions = [
 	"-DTCNN_PARAMS_UNALIGNED",
 	"-DTCNN_RTC",
 	"-DTCNN_RTC_USE_FAST_MATH",
+	f"-DTCNN_HASH_MIN_DIM={hash_min_dim}",
+	f"-DTCNN_HASH_MAX_DIM={hash_max_dim}",
 ]
 
 if "TCNN_HALF_PRECISION" in os.environ:

@@ -81,15 +81,29 @@
 #define TCNN_MIN_GPU_ARCH 75
 #endif
 
+#ifndef TCNN_HASH_MIN_DIM
+#define TCNN_HASH_MIN_DIM 2
+#endif
+
+#ifndef TCNN_HASH_MAX_DIM
+#define TCNN_HASH_MAX_DIM 4
+#endif
+
 #include <tiny-cuda-nn/vec.h>
 
 #if defined(__CUDA_ARCH__)
 static_assert(__CUDA_ARCH__ >= TCNN_MIN_GPU_ARCH * 10, "MIN_GPU_ARCH=" STR(TCNN_MIN_GPU_ARCH) "0 must bound __CUDA_ARCH__=" STR(__CUDA_ARCH__) " from below, but doesn't.");
 #endif
 
+static_assert(TCNN_HASH_MIN_DIM >= 1 && TCNN_HASH_MIN_DIM <= 7, "TCNN_HASH_MIN_DIM must be in the range [1, 7].");
+static_assert(TCNN_HASH_MAX_DIM >= 1 && TCNN_HASH_MAX_DIM <= 7, "TCNN_HASH_MAX_DIM must be in the range [1, 7].");
+static_assert(TCNN_HASH_MIN_DIM <= TCNN_HASH_MAX_DIM, "TCNN_HASH_MIN_DIM must not exceed TCNN_HASH_MAX_DIM.");
+
 namespace tcnn {
 
 static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
+static constexpr uint32_t HASH_GRID_MIN_DIM = TCNN_HASH_MIN_DIM;
+static constexpr uint32_t HASH_GRID_MAX_DIM = TCNN_HASH_MAX_DIM;
 
 // When TCNN managed its model parameters, they are always aligned,
 // which yields performance benefits in practice. However, parameters

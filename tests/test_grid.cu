@@ -90,3 +90,33 @@ TEST_CASE("GridEncoding sanity checks", "[encoding]") {
 	std::vector<float> result_host(output.n_elements());
 	CUDA_CHECK_THROW(cudaMemcpy(result_host.data(), output.data(), output.n_bytes(), cudaMemcpyDeviceToHost));
 }
+
+TEST_CASE("GridEncoding respects configured hash-grid dimension bounds", "[encoding]") {
+	tcnn_test_setup();
+
+	const char* config = R"({
+		"otype": "HashGrid",
+		"base_resolution": 16,
+		"log2_hashmap_size": 14,
+		"n_features_per_level": 2,
+		"n_levels": 4,
+		"per_level_scale": 1.5
+	})";
+
+	nlohmann::json config_json = nlohmann::json::parse(config);
+
+	std::unique_ptr<MultiLevelEncoding<float>> supported{
+		dynamic_cast<MultiLevelEncoding<float>*>(create_encoding<float>(TCNN_HASH_MAX_DIM, config_json))
+	};
+
+	REQUIRE(supported);
+	REQUIRE(supported->n_pos_dims() == TCNN_HASH_MAX_DIM);
+
+#if TCNN_HASH_MIN_DIM > 1
+	REQUIRE_THROWS_AS(create_encoding<float>(TCNN_HASH_MIN_DIM - 1, config_json), std::runtime_error);
+#endif
+
+#if TCNN_HASH_MAX_DIM < 7
+	REQUIRE_THROWS_AS(create_encoding<float>(TCNN_HASH_MAX_DIM + 1, config_json), std::runtime_error);
+#endif
+}

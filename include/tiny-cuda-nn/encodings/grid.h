@@ -1754,16 +1754,29 @@ create_grid_encoding_templated_2(uint32_t n_dims_to_encode, const json& encoding
 	grid_type, \
 	fixed_point_pos,
 
-	// If higher-dimensional hash encodings are desired, corresponding switch cases can be added
 	switch (n_dims_to_encode) {
-		// case 1: return new GridEncodingTemplated<T, 1, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#if TCNN_HASH_MIN_DIM <= 1 && TCNN_HASH_MAX_DIM >= 1
+		case 1: return new GridEncodingTemplated<T, 1, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#endif
+#if TCNN_HASH_MIN_DIM <= 2 && TCNN_HASH_MAX_DIM >= 2
 		case 2: return new GridEncodingTemplated<T, 2, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#endif
+#if TCNN_HASH_MIN_DIM <= 3 && TCNN_HASH_MAX_DIM >= 3
 		case 3: return new GridEncodingTemplated<T, 3, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#endif
+#if TCNN_HASH_MIN_DIM <= 4 && TCNN_HASH_MAX_DIM >= 4
 		case 4: return new GridEncodingTemplated<T, 4, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
-		// case 5: return new GridEncodingTemplated<T, 5, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
-		// case 6: return new GridEncodingTemplated<T, 6, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
-		// case 7: return new GridEncodingTemplated<T, 7, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
-		default: throw std::runtime_error{"GridEncoding: number of input dims must be 2 or 3."};
+#endif
+#if TCNN_HASH_MIN_DIM <= 5 && TCNN_HASH_MAX_DIM >= 5
+		case 5: return new GridEncodingTemplated<T, 5, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#endif
+#if TCNN_HASH_MIN_DIM <= 6 && TCNN_HASH_MAX_DIM >= 6
+		case 6: return new GridEncodingTemplated<T, 6, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#endif
+#if TCNN_HASH_MIN_DIM <= 7 && TCNN_HASH_MAX_DIM >= 7
+		case 7: return new GridEncodingTemplated<T, 7, N_FEATURES_PER_LEVEL, HASH_TYPE>{ TCNN_GRID_PARAMS };
+#endif
+		default: throw std::runtime_error{"GridEncoding: number of input dims must be between " STR(TCNN_HASH_MIN_DIM) " and " STR(TCNN_HASH_MAX_DIM) " for this build."};
 	}
 #undef TCNN_GRID_PARAMS
 }
