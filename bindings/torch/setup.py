@@ -2,16 +2,55 @@ import os
 
 import re
 from setuptools import setup
-from pkg_resources import parse_version
+from packaging.version import parse as parse_version
 import subprocess
 import shutil
 import sys
 import torch
 from glob import glob
+
+if "CUDA_HOME" not in os.environ and "CUDA_PATH" in os.environ:
+	os.environ["CUDA_HOME"] = os.environ["CUDA_PATH"]
+
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+
+HELP_FLAGS = {
+	"-h",
+	"--help",
+	"--help-commands",
+	"--name",
+	"--version",
+	"--fullname",
+	"--author",
+	"--author-email",
+	"--maintainer",
+	"--maintainer-email",
+	"--contact",
+	"--contact-email",
+	"--url",
+	"--license",
+	"--description",
+	"--long-description",
+	"--platforms",
+	"--classifiers",
+	"--keywords",
+	"--provides",
+	"--requires",
+	"--obsoletes",
+}
+BUILD_COMMANDS = {
+	"bdist",
+	"bdist_egg",
+	"bdist_wheel",
+	"build",
+	"build_ext",
+	"develop",
+	"editable_wheel",
+	"install",
+}
 
 def min_supported_compute_capability(cuda_version):
 	if cuda_version >= parse_version("13.0"):
@@ -33,6 +72,31 @@ def max_supported_compute_capability(cuda_version):
 	else:
 		return 120
 
+def should_build_extensions(argv):
+	if any(arg in HELP_FLAGS for arg in argv[1:]):
+		return False
+
+	commands = [arg for arg in argv[1:] if arg and not arg.startswith("-")]
+	return any(command in BUILD_COMMANDS or command.startswith("bdist_") for command in commands)
+
+def detect_compute_capabilities():
+	if "TCNN_CUDA_ARCHITECTURES" in os.environ and os.environ["TCNN_CUDA_ARCHITECTURES"]:
+		compute_capabilities = [int(x) for x in os.environ["TCNN_CUDA_ARCHITECTURES"].replace(";", ",").split(",")]
+		print(f"Obtained compute capabilities {compute_capabilities} from environment variable TCNN_CUDA_ARCHITECTURES")
+		return compute_capabilities
+
+	if torch.cuda.is_available():
+		major, minor = torch.cuda.get_device_capability()
+		compute_capabilities = [major * 10 + minor]
+		print(f"Obtained compute capability {compute_capabilities[0]} from PyTorch")
+		return compute_capabilities
+
+	raise EnvironmentError(
+		"Unknown compute capability for extension build. "
+		"Specify TCNN_CUDA_ARCHITECTURES manually (for example, 86 for RTX 30xx GPUs) "
+		"or install PyTorch with CUDA support so the target GPU can be detected automatically."
+	)
+
 # Find version of tinycudann by scraping CMakeLists.txt
 with open(os.path.join(ROOT_DIR, "CMakeLists.txt"), "r") as cmakelists:
 	for line in cmakelists.readlines():
@@ -41,18 +105,14 @@ with open(os.path.join(ROOT_DIR, "CMakeLists.txt"), "r") as cmakelists:
 			break
 
 print(f"Building PyTorch extension for tiny-cuda-nn version {VERSION}")
+build_extensions = should_build_extensions(sys.argv)
 
 ext_modules = []
-
-if "TCNN_CUDA_ARCHITECTURES" in os.environ and os.environ["TCNN_CUDA_ARCHITECTURES"]:
-	compute_capabilities = [int(x) for x in os.environ["TCNN_CUDA_ARCHITECTURES"].replace(";", ",").split(",")]
-	print(f"Obtained compute capabilities {compute_capabilities} from environment variable TCNN_CUDA_ARCHITECTURES")
-elif torch.cuda.is_available():
-	major, minor = torch.cuda.get_device_capability()
-	compute_capabilities = [major * 10 + minor]
-	print(f"Obtained compute capability {compute_capabilities[0]} from PyTorch")
+if build_extensions:
+	compute_capabilities = detect_compute_capabilities()
 else:
-	raise EnvironmentError("Unknown compute capability. Specify the target compute capabilities in the TCNN_CUDA_ARCHITECTURES environment variable or install PyTorch with the CUDA backend to detect it automatically.")
+	print("Skipping GPU architecture detection for metadata-only setup command.")
+	compute_capabilities = []
 
 include_networks = True
 if "--no-networks" in sys.argv:
@@ -60,7 +120,7 @@ if "--no-networks" in sys.argv:
 	sys.argv.remove("--no-networks")
 	print("Building >> without << neural networks (just the input encodings)")
 
-if os.name == "nt":
+if build_extensions and os.name == "nt":
 	def find_cl_path():
 		import glob
 		for executable in ["Program Files (x86)", "Program Files"]:
@@ -84,7 +144,7 @@ if os.name == "nt":
 cpp_standard = 14
 
 # Get CUDA version and make sure the targeted compute capability is compatible
-if os.system("nvcc --version") == 0:
+if build_extensions and os.system("nvcc --version") == 0:
 	nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode()
 	cuda_version = re.search(r"release (\S+),", nvcc_out)
 
@@ -105,31 +165,6 @@ if os.system("nvcc --version") == 0:
 			print(f"WARNING: Compute capabilities {compute_capabilities} are not all supported by the installed CUDA version {cuda_version}. Targeting {supported_compute_capabilities} instead.")
 			compute_capabilities = supported_compute_capabilities
 
-min_compute_capability = min(compute_capabilities)
-
-print(f"Targeting C++ standard {cpp_standard}")
-
-base_nvcc_flags = [
-	f"-std=c++{cpp_standard}",
-	"--extended-lambda",
-	"--use_fast_math",
-	"--expt-relaxed-constexpr",
-	# The following definitions must be undefined
-	# since TCNN requires half-precision operation.
-	"-U__CUDA_NO_HALF_OPERATORS__",
-	"-U__CUDA_NO_HALF_CONVERSIONS__",
-	"-U__CUDA_NO_HALF2_OPERATORS__",
-]
-
-if os.name == "posix":
-	base_cflags = [f"-std=c++{cpp_standard}"]
-	base_nvcc_flags += [
-		"-Xcompiler=-Wno-float-conversion",
-		"-Xcompiler=-fno-strict-aliasing",
-	]
-elif os.name == "nt":
-	base_cflags = [f"/std:c++{cpp_standard}"]
-
 
 # Some containers set this to contain old architectures that won't compile. We only need the one installed in the machine.
 os.environ["TORCH_CUDA_ARCH_LIST"] = ""
@@ -137,45 +172,6 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = ""
 # List of sources.
 bindings_dir = os.path.dirname(__file__)
 root_dir = os.path.abspath(os.path.join(bindings_dir, "../.."))
-
-base_definitions = [
-	# PyTorch-supplied parameters may be unaligned. TCNN must be made aware of this such that
-	# it does not optimize for aligned memory accesses.
-	"-DTCNN_PARAMS_UNALIGNED",
-	"-DTCNN_RTC",
-	"-DTCNN_RTC_USE_FAST_MATH",
-]
-
-if "TCNN_HALF_PRECISION" in os.environ:
-    enable_half = os.environ["TCNN_HALF_PRECISION"].lower() in ["1", "true", "on", "yes"]
-    base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
-    print(f"Forcing TCNN_HALF_PRECISION to {'ON' if enable_half else 'OFF'}")
-else:
-    if min_compute_capability == 61 or min_compute_capability <= 52:
-        enable_half = False
-    else:
-        enable_half = True
-    print(f"Auto-detecting TCNN_HALF_PRECISION: {'ON' if enable_half else 'OFF'} (Arch: {min_compute_capability})")
-base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
-
-base_source_files = [
-	"tinycudann/bindings.cpp",
-	"../../dependencies/fmt/src/format.cc",
-	"../../dependencies/fmt/src/os.cc",
-	"../../src/cpp_api.cu",
-	"../../src/common_host.cu",
-	"../../src/encoding.cu",
-	"../../src/object.cu",
-	"../../src/rtc_kernel.cu",
-]
-
-if include_networks:
-	base_source_files += [
-		"../../src/network.cu",
-		"../../src/cutlass_mlp.cu",
-	]
-else:
-	base_definitions.append("-DTCNN_NO_NETWORKS")
 
 # Copy headers required by RTC at runtime
 rtc_dir = os.path.join(bindings_dir, "tinycudann", "rtc")
@@ -186,9 +182,9 @@ os.makedirs(rtc_include_dir, exist_ok=True)
 os.makedirs(rtc_cache_dir, exist_ok=True)
 
 nvcc_path = shutil.which("nvcc")
-if nvcc_path is None:
+if build_extensions and nvcc_path is None:
 	print(f"WARNING: could not find CUDA include directory. JIT compilation will not be supported.")
-else:
+if nvcc_path is not None:
 	cuda_include_dir = os.path.join(os.path.dirname(os.path.dirname(nvcc_path)), "include")
 
 	cuda_headers = glob(f"{cuda_include_dir}/cuda_fp16*") + glob(f"{cuda_include_dir}/vector*")
@@ -207,34 +203,102 @@ else:
 	copy_files(f"{root_dir}/include", tcnn_headers)
 	copy_files(f"{root_dir}/dependencies", pcg32_headers)
 
-def make_extension(compute_capability):
-	nvcc_flags = base_nvcc_flags + [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"]]
-	definitions = base_definitions + [f"-DTCNN_MIN_GPU_ARCH={compute_capability}"]
+cmdclass = {}
 
-	if include_networks and compute_capability > 70:
-		source_files = base_source_files + ["../../src/fully_fused_mlp.cu"]
+if build_extensions:
+	min_compute_capability = min(compute_capabilities)
+
+	print(f"Targeting C++ standard {cpp_standard}")
+
+	base_nvcc_flags = [
+		f"-std=c++{cpp_standard}",
+		"--extended-lambda",
+		"--use_fast_math",
+		"--expt-relaxed-constexpr",
+		# The following definitions must be undefined
+		# since TCNN requires half-precision operation.
+		"-U__CUDA_NO_HALF_OPERATORS__",
+		"-U__CUDA_NO_HALF_CONVERSIONS__",
+		"-U__CUDA_NO_HALF2_OPERATORS__",
+	]
+
+	if os.name == "posix":
+		base_cflags = [f"-std=c++{cpp_standard}"]
+		base_nvcc_flags += [
+			"-Xcompiler=-Wno-float-conversion",
+			"-Xcompiler=-fno-strict-aliasing",
+		]
+	elif os.name == "nt":
+		base_cflags = [f"/std:c++{cpp_standard}"]
+
+	base_definitions = [
+		# PyTorch-supplied parameters may be unaligned. TCNN must be made aware of this such that
+		# it does not optimize for aligned memory accesses.
+		"-DTCNN_PARAMS_UNALIGNED",
+		"-DTCNN_RTC",
+		"-DTCNN_RTC_USE_FAST_MATH",
+	]
+
+	if "TCNN_HALF_PRECISION" in os.environ:
+		enable_half = os.environ["TCNN_HALF_PRECISION"].lower() in ["1", "true", "on", "yes"]
+		base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
+		print(f"Forcing TCNN_HALF_PRECISION to {'ON' if enable_half else 'OFF'}")
 	else:
-		source_files = base_source_files
+		if min_compute_capability == 61 or min_compute_capability <= 52:
+			enable_half = False
+		else:
+			enable_half = True
+		print(f"Auto-detecting TCNN_HALF_PRECISION: {'ON' if enable_half else 'OFF'} (Arch: {min_compute_capability})")
+	base_definitions.append(f"-DTCNN_HALF_PRECISION={int(enable_half)}")
 
-	nvcc_flags = nvcc_flags + definitions
-	cflags = base_cflags + definitions
+	base_source_files = [
+		"tinycudann/bindings.cpp",
+		"../../dependencies/fmt/src/format.cc",
+		"../../dependencies/fmt/src/os.cc",
+		"../../src/cpp_api.cu",
+		"../../src/common_host.cu",
+		"../../src/encoding.cu",
+		"../../src/object.cu",
+		"../../src/rtc_kernel.cu",
+	]
 
-	ext = CUDAExtension(
-		name=f"tinycudann_bindings._{compute_capability}_C",
-		sources=source_files,
-		include_dirs=[
-			f"{root_dir}/include",
-			f"{root_dir}/dependencies",
-			f"{root_dir}/dependencies/cutlass/include",
-			f"{root_dir}/dependencies/cutlass/tools/util/include",
-			f"{root_dir}/dependencies/fmt/include",
-		],
-		extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
-		libraries=["cuda", "nvrtc"],
-	)
-	return ext
+	if include_networks:
+		base_source_files += [
+			"../../src/network.cu",
+			"../../src/cutlass_mlp.cu",
+		]
+	else:
+		base_definitions.append("-DTCNN_NO_NETWORKS")
 
-ext_modules = [make_extension(comp) for comp in compute_capabilities]
+	def make_extension(compute_capability):
+		nvcc_flags = base_nvcc_flags + [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"]]
+		definitions = base_definitions + [f"-DTCNN_MIN_GPU_ARCH={compute_capability}"]
+
+		if include_networks and compute_capability > 70:
+			source_files = base_source_files + ["../../src/fully_fused_mlp.cu"]
+		else:
+			source_files = base_source_files
+
+		nvcc_flags = nvcc_flags + definitions
+		cflags = base_cflags + definitions
+
+		ext = CUDAExtension(
+			name=f"tinycudann_bindings._{compute_capability}_C",
+			sources=source_files,
+			include_dirs=[
+				f"{root_dir}/include",
+				f"{root_dir}/dependencies",
+				f"{root_dir}/dependencies/cutlass/include",
+				f"{root_dir}/dependencies/cutlass/tools/util/include",
+				f"{root_dir}/dependencies/fmt/include",
+			],
+			extra_compile_args={"cxx": cflags, "nvcc": nvcc_flags},
+			libraries=["cuda", "nvrtc"],
+		)
+		return ext
+
+	ext_modules = [make_extension(comp) for comp in compute_capabilities]
+	cmdclass = {"build_ext": BuildExtension}
 
 def package_files(directory):
 	paths = []
@@ -273,5 +337,5 @@ setup(
 	include_package_data=True,
 	zip_safe=False,
 	ext_modules=ext_modules,
-	cmdclass={"build_ext": BuildExtension}
+	cmdclass=cmdclass
 )
