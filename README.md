@@ -214,6 +214,12 @@ Begin by setting up a Python 3.X environment with a recent, CUDA-enabled version
 pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
 ```
 
+On headless, shared, or CPU-only Python environments, PyTorch may be unable to detect a target GPU during installation. In that case, set `TCNN_CUDA_ARCHITECTURES` explicitly before invoking `pip`, for example:
+```sh
+export TCNN_CUDA_ARCHITECTURES=86
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
 Alternatively, if you would like to install from a local clone of __tiny-cuda-nn__, invoke
 ```sh
 tiny-cuda-nn$ cd bindings/torch
