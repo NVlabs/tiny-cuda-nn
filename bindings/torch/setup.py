@@ -81,7 +81,7 @@ if os.name == "nt":
 		# won't try to activate a developer command prompt a second time.
 		os.environ["DISTUTILS_USE_SDK"] = "1"
 
-cpp_standard = 14
+cpp_standard = 17
 
 # Get CUDA version and make sure the targeted compute capability is compatible
 if os.system("nvcc --version") == 0:
