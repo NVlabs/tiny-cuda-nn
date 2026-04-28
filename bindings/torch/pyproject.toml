@@ -1,0 +1,30 @@
+[build-system]
+requires = [
+    "setuptools>=49.2.0",
+    "wheel",
+    "torch>=2.7.0",
+    "ninja",
+    "packaging",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinycudann"
+dynamic = ["version"]
+readme = ""
+description = "tiny-cuda-nn extension for PyTorch"
+requires-python = ">=3.7"
+license = "BSD-3-Clause"
+dependencies = [
+    "torch>=1.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nvlabs/tiny-cuda-nn"
+Download = "https://github.com/nvlabs/tiny-cuda-nn"
+Repository = "https://github.com/nvlabs/tiny-cuda-nn"
+
+[tool.setuptools]
+packages = ["tinycudann"]
+include-package-data = true
+zip-safe = false
