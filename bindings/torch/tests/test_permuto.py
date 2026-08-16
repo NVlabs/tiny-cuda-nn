@@ -250,6 +250,36 @@ class TestPermuto(unittest.TestCase):
 				)
 				self.assertEqual(torch.count_nonzero(actual_output_gradient[output_width:]).item(), 0)
 
+	def test_empty_batch_backward(self) -> None:
+		module = tcnn.NetworkWithInputEncoding(
+			n_input_dims=6,
+			n_output_dims=16,
+			encoding_config=ENCODING_CONFIG,
+			network_config=NETWORK_CONFIG,
+			seed=42,
+		)
+		module.jit_fusion = False
+		inputs = torch.empty((0, 6), device="cuda", requires_grad=True)
+
+		output = module(inputs)
+		output.sum().backward()
+		torch.cuda.synchronize()
+
+		self.assertEqual(output.shape, (0, 16))
+		self.assertEqual(output.dtype, module.dtype)
+		self.assertEqual(output.device, inputs.device)
+		self.assertTrue(output.requires_grad)
+		self.assertIsNotNone(inputs.grad)
+		self.assertEqual(inputs.grad.shape, inputs.shape)
+		self.assertIsNotNone(module.params.grad)
+		self.assertEqual(module.params.grad.shape, module.params.shape)
+		self.assertEqual(torch.count_nonzero(module.params.grad).item(), 0)
+
+		module.params.requires_grad_(False)
+		inference_output = module(inputs.detach())
+		torch.cuda.synchronize()
+		self.assertEqual(inference_output.shape, output.shape)
+
 	def test_upstream_double_gradient_without_parameter_or_input_result(self) -> None:
 		module = tcnn.Encoding(
 			n_input_dims=5,
