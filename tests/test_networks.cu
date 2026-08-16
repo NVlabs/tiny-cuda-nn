@@ -32,6 +32,7 @@
  #include "test_common.h"
 
 #include <tiny-cuda-nn/network.h>
+#include <tiny-cuda-nn/network_with_input_encoding.h>
 
 using namespace tcnn;
 
@@ -181,4 +182,39 @@ TEST_CASE("FullyFusedMLP non-JIT double backward", "[network][double-backward]")
 	network->backward_backward_input(*ctx, empty_input, empty_input, empty_output_gradient, nullptr, nullptr, false, GradientMode::Overwrite);
 	const auto empty_gradients = read_gradients();
 	REQUIRE(std::all_of(empty_gradients.begin(), empty_gradients.end(), [](T value) { return (float)value == 0.0f; }));
+}
+
+TEST_CASE("NetworkWithInputEncoding empty-batch activations", "[network]") {
+	using T = network_precision_t;
+
+	tcnn_test_setup();
+	if (MIN_GPU_ARCH <= 70) {
+		return;
+	}
+
+	json encoding = {
+		{"otype", "HashGrid"},
+	};
+	json network_config = {
+		{"otype", "FullyFusedMLP"},
+		{"activation", "ReLU"},
+		{"output_activation", "None"},
+		{"n_neurons", 64},
+		{"n_hidden_layers", 2},
+	};
+
+	auto network = std::make_shared<NetworkWithInputEncoding<T>>(3, 16, encoding, network_config);
+	std::shared_ptr<Optimizer<T>> optimizer{create_optimizer<T>(json::object())};
+	std::shared_ptr<Loss<T>> loss{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(network, optimizer, loss);
+
+	GPUMatrix<float> empty_input{network->input_width(), 0};
+	auto ctx = network->forward(empty_input);
+	for (uint32_t layer = 0; layer < network->num_forward_activations(); ++layer) {
+		CAPTURE(layer);
+		REQUIRE(network->forward_activations(*ctx, layer).first == nullptr);
+
+		GPUMatrix<float> visualization{network->width(layer), 0};
+		network->visualize_activation(nullptr, layer, 0, empty_input, visualization);
+	}
 }

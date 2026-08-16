@@ -58,6 +58,10 @@ public:
 	virtual ~NetworkWithInputEncoding() { }
 
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override {
+		if (input.n() == 0) {
+			return;
+		}
+
 		GPUMatrixDynamic<T> network_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		m_encoding->inference_mixed_precision(stream, input, network_input, use_inference_params);
 		m_network->inference_mixed_precision(stream, network_input, output, use_inference_params);
@@ -72,6 +76,9 @@ public:
 		uint32_t batch_size = input.n();
 
 		auto forward = std::make_unique<ForwardContext>();
+		if (batch_size == 0) {
+			return forward;
+		}
 
 		forward->network_input = GPUMatrixDynamic<T>{m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		forward->encoding_ctx = m_encoding->forward(stream, input, &forward->network_input, use_inference_params, prepare_input_gradients);
@@ -90,6 +97,13 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
+		if (input.n() == 0) {
+			if (param_gradients_mode == GradientMode::Overwrite && n_params() > 0) {
+				CUDA_CHECK_THROW(cudaMemsetAsync(this->gradients(), 0, n_params() * sizeof(T), stream));
+			}
+			return;
+		}
+
 		GPUMatrixDynamic<T> dL_dnetwork_input;
 		if (m_encoding->n_params() > 0 || dL_dinput) {
 			dL_dnetwork_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
@@ -227,6 +241,11 @@ public:
 
 	std::pair<const T*, MatrixLayout> forward_activations(const Context& ctx, uint32_t layer) const override {
 		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+		// An empty batch has no network context and no activations, so the layout is never read.
+		if (layer > 0 && !forward.network_ctx) {
+			return {nullptr, CM};
+		}
+
 		return layer == 0 ? std::make_pair<const T*, MatrixLayout>(forward.network_input.data(), m_encoding->preferred_output_layout()) : m_network->forward_activations(*forward.network_ctx, layer - 1);
 	}
 
