@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -85,6 +85,26 @@ __global__ void identity_backward(
 }
 
 template <typename T>
+__global__ void identity_backward_backward_input(
+	const uint32_t num_outputs,
+	const uint32_t num_to_encode,
+	const uint32_t num_to_pad,
+	const float scale,
+	MatrixView<const float> dL_ddLdx,
+	MatrixView<T> dL_ddLdy)
+{
+	const uint32_t encoded_index = threadIdx.x + blockIdx.x * blockDim.x;
+	if (encoded_index >= num_outputs) return;
+
+	const uint32_t fan_out = num_to_encode + num_to_pad;
+	const uint32_t i = encoded_index / fan_out;
+	const uint32_t j = encoded_index - i * fan_out;
+
+	// Padded outputs are constant and do not contribute to dL_dx.
+	dL_ddLdy(j, i) = j < num_to_encode ? (T)(dL_ddLdx(j, i) * scale) : (T)0.0f;
+}
+
+template <typename T>
 class IdentityEncoding : public Encoding<T> {
 public:
 	IdentityEncoding(uint32_t n_dims_to_encode, float scale = 1.0f, float offset = 0.0f)
@@ -138,6 +158,36 @@ public:
 			dL_doutput.view(),
 			dL_dinput->view()
 		);
+	}
+
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<float>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		GradientMode param_gradients_mode = GradientMode::Overwrite
+	) override {
+		if (dL_ddLdoutput) {
+			linear_kernel(identity_backward_backward_input<T>, 0, stream,
+				input.n() * padded_output_width(),
+				m_n_dims_to_encode,
+				m_n_to_pad,
+				m_scale,
+				dL_ddLdinput.view(),
+				dL_ddLdoutput->view()
+			);
+		}
+
+		// The encoding is linear, so its input Hessian is zero.
+		if (dL_dinput) {
+			parallel_for_gpu(stream, input.n() * m_n_dims_to_encode, [n_dims=m_n_dims_to_encode, dL_dx=dL_dinput->view()] __device__ (size_t index) {
+				dL_dx((uint32_t)(index % n_dims), (uint32_t)(index / n_dims)) = 0.0f;
+			});
+		}
 	}
 #endif // !defined(TCNN_NO_FWD_BWD)
 
