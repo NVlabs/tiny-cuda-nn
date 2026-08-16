@@ -219,21 +219,22 @@ public:
 		}
 
 		torch::Tensor dL_dinput;
-		if (input.requires_grad()) {
+		bool input_requires_grad = input.requires_grad() && !m_bwdbwd_no_input_grad;
+		if (input_requires_grad) {
 			dL_dinput = torch::zeros({ batch_size, n_input_dims() }, torch::TensorOptions().dtype(torch::kFloat32).device(device));
 		}
 
-		if (dL_doutput.requires_grad() || params.requires_grad()) {
+		if (dL_doutput.requires_grad() || params.requires_grad() || input_requires_grad) {
 			m_module->backward_backward_input(
 				stream,
 				ctx,
 				batch_size,
 				dL_ddLdinput.data_ptr<float>(),
 				input.data_ptr<float>(),
-				(params.requires_grad() || input.requires_grad() ) ? void_data_ptr(dL_doutput) : nullptr,
+				void_data_ptr(dL_doutput),
 				params.requires_grad() ? void_data_ptr(dL_dparams) : nullptr,
 				dL_doutput.requires_grad() ? void_data_ptr(dL_ddLdoutput) : nullptr,
-				input.requires_grad() ? dL_dinput.data_ptr<float>() : nullptr,
+				input_requires_grad ? dL_dinput.data_ptr<float>() : nullptr,
 				void_data_ptr(params)
 			);
 		}
@@ -263,8 +264,12 @@ public:
 	bool jit_fusion() const { return m_module->jit_fusion(); }
 	void set_jit_fusion(bool val) { m_module->set_jit_fusion(val); }
 
+	bool backward_backward_input_no_input_grad() const { return m_bwdbwd_no_input_grad; }
+	void set_backward_backward_input_no_input_grad(bool val) { m_bwdbwd_no_input_grad = val; }
+
 private:
 	std::unique_ptr<tcnn::cpp::Module> m_module;
+	bool m_bwdbwd_no_input_grad = false;
 };
 
 #if !defined(TCNN_NO_NETWORKS)
@@ -332,6 +337,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 		.def("hyperparams", &Module::hyperparams)
 		.def("name", &Module::name)
 		.def_property("jit_fusion", &Module::jit_fusion, &Module::set_jit_fusion)
+		.def_property("backward_backward_input_no_input_grad", &Module::backward_backward_input_no_input_grad, &Module::set_backward_backward_input_no_input_grad)
 		;
 
 #if !defined(TCNN_NO_NETWORKS)

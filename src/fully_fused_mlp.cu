@@ -835,6 +835,57 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
+
+template <typename T, uint32_t WIDTH>
+void FullyFusedMLP<T, WIDTH>::backward_backward_input_impl(
+	cudaStream_t stream,
+	const Context& ctx,
+	const GPUMatrixDynamic<T>&,
+	const GPUMatrixDynamic<T>& dL_ddLdinput,
+	const GPUMatrixDynamic<T>& dL_doutput,
+	GPUMatrixDynamic<T>* dL_ddLdoutput,
+	GPUMatrixDynamic<T>* dL_dinput,
+	bool use_inference_params,
+	GradientMode param_gradients_mode
+) {
+	if (dL_dinput) {
+		throw std::runtime_error{"FullyFusedMLP non-JIT double backward does not support input Hessians."};
+	}
+
+	if (m_n_hidden_layers != 1 || m_activation != Activation::ReLU || m_output_activation != Activation::None) {
+		throw std::runtime_error{"FullyFusedMLP non-JIT double backward only supports one hidden ReLU layer with no output activation."};
+	}
+
+	if (!dL_ddLdoutput && param_gradients_mode == GradientMode::Ignore) {
+		return;
+	}
+
+	const uint32_t batch_size = dL_ddLdinput.n();
+	if (batch_size == 0) {
+		if (param_gradients_mode == GradientMode::Overwrite) {
+			CUDA_CHECK_THROW(cudaMemsetAsync(this->gradients(), 0, this->n_params() * sizeof(T), stream));
+		}
+		return;
+	}
+
+	const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+	GPUMatrix<T> input_gradient_gradient{m_network_width, batch_size, stream};
+	fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params), dL_ddLdinput, forward.hidden.front(), input_gradient_gradient, Activation::ReLU, true);
+	if (dL_ddLdoutput) {
+		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_params), input_gradient_gradient, *dL_ddLdoutput);
+	}
+	if (param_gradients_mode == GradientMode::Ignore) {
+		return;
+	}
+
+	GPUMatrix<T> hidden_gradient{m_network_width, batch_size, stream};
+	fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), dL_doutput, forward.hidden.front(), hidden_gradient, Activation::ReLU, true);
+
+	const uint32_t split_k_factor = batch_size / std::min(1u << 12u, batch_size);
+	const float gradient_beta = param_gradients_mode == GradientMode::Accumulate ? 1.0f : 0.0f;
+	fc_multiply_split_k<LastLayerK>(stream, dL_doutput, input_gradient_gradient.transposed(), output_gradient_matrix(), split_k_factor, gradient_beta);
+	fc_multiply_split_k<FullLayerK>(stream, hidden_gradient, dL_ddLdinput.transposed(), input_gradient_matrix(), split_k_factor, gradient_beta);
+}
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 template <typename T, uint32_t WIDTH>

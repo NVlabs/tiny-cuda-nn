@@ -59,6 +59,18 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override;
+
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		GradientMode param_gradients_mode = GradientMode::Overwrite
+	) override;
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 	void set_params_impl(T* params, T* inference_params, T* gradients) override;
