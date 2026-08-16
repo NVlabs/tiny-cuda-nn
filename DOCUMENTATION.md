@@ -135,6 +135,150 @@ The number of encoded dimensions is `n_levels * n_features_per_level`.
 }
 ```
 
+### Permuto
+
+`Permuto` is a trainable five-dimensional permutohedral lattice encoding. The
+encoding accepts exactly five input dimensions. Callers must normalize each
+input value to `[0, 1]`. The encoding does not scan device inputs to enforce
+this range.
+
+Each level produces two adjacent output features. Level `l` uses the scale
+`base_scale * per_level_scale^l`. The unpadded output width is
+`2 * n_levels`. An alignment request can add zero-valued padding after these
+features. The encoded features have no fixed value range because the lattice
+entries are trainable parameters.
+
+```text
+[x0, x1, x2, x3, x4]
+           |
+           v
+  levels 0 ... n_levels - 1
+           |
+           v
+[level 0 feature 0, level 0 feature 1, ..., level L feature 1]
+```
+
+```json5
+{
+	"otype": "Permuto",            // Component type.
+	"n_levels": 16,                // Number of levels. Must be in [1, 32].
+	"n_features_per_level": 2,     // Must be 2.
+	"log2_hashmap_size": 19,       // Base-2 logarithm of the entries per level.
+	"base_scale": 16.0,            // Finite scale of level 0.
+	"per_level_scale": 2.0,        // Positive finite scale multiplier.
+	"interpolation": "Linear",      // Must be "Linear".
+	"max_input_grad_dims": 5,      // Leading input dimensions with gradients.
+	"seed": 1337                   // Unsigned seed for per-level lattice shifts.
+}
+```
+
+`log2_hashmap_size` must be a nonnegative integer smaller than 32. The
+parameter count must also fit in an unsigned 32-bit integer. Every derived
+level scale must be finite and safe for the kernel's integer lattice
+coordinates. `max_input_grad_dims` must be in `[0, 5]`.
+`seed` must be an integer in `[0, 2^32 - 1]`.
+
+The flat parameter array contains
+`n_levels * 2^log2_hashmap_size * 2` values. The layout order is level, hashed
+entry, then feature. The two features for one entry are adjacent. Construction,
+`hyperparams()`, and reload preserve this layout. `hyperparams()` includes the
+configured `seed`. Reloading the emitted hyperparameters and the same flat
+parameter array therefore preserves the lattice shifts and learned values.
+`scales_table` and `shifts_table` are diagnostics derived from `seed`,
+`base_scale`, and `per_level_scale`. They do not independently configure the
+lattice. The factory accepts the tables only when they match those behavioral
+fields.
+
+The encoding supports first-order parameter and input gradients. It also
+supports non-JIT double backward for parameter gradients and upstream
+gradients. The input Hessian is zero inside each linear lattice simplex.
+`max_input_grad_dims` applies at both derivative orders. It enables gradients
+only for the leading input dimensions. The remaining input gradients are zero.
+Parameter gradients honor `Overwrite`, `Accumulate`, and `Ignore` at both
+derivative orders.
+
+### MultiLevelEncodingLoD
+
+`MultiLevelEncodingLoD` adds hard per-element level control to `Permuto`. The
+wrapper accepts exactly six input dimensions. The first five values are the
+`Permuto` input. The final value is a level ratio in `[0, 1]`. Callers must
+enforce the ratio range.
+
+```text
+[x0, x1, x2, x3, x4, level_ratio]
+               |             |
+               v             v
+         Permuto input   active-level mask
+               \_____________/
+                      |
+                      v
+             hard-masked features
+```
+
+```json5
+{
+	"otype": "MultiLevelEncodingLoD",
+	"lod_type": "Hard",           // Optional. "Hard" is the only mode.
+	"base": {
+		"otype": "Permuto",        // Permuto is the only supported base.
+		"n_levels": 16,
+		"n_features_per_level": 2,
+		"log2_hashmap_size": 19,
+		"base_scale": 16.0,
+		"per_level_scale": 2.0,
+		"interpolation": "Linear",
+		"max_input_grad_dims": 5,
+		"seed": 1337
+	}
+}
+```
+
+For a zero-based level index `level`, the exact active-level predicate is:
+
+```text
+level < level_ratio * n_levels + 1e-3
+```
+
+An inactive level produces zero output features and contributes no parameter
+or position-input gradient. Ratio `0` enables level `0`. Ratio `1` enables all
+levels. The gradient of the level-ratio input is always zero. The wrapper
+otherwise preserves the base encoding's output order, padding, flat parameter
+layout, gradient modes, and serialized hyperparameters.
+
+A nonempty context-only forward is supported when the output pointer is null.
+The wrapper retains the per-element levels and nested base context for a later
+backward call. A zero-element batch is also valid. Empty-batch backward clears
+parameter gradients in `Overwrite` mode and preserves them in `Accumulate` and
+`Ignore` modes.
+
+#### Thread Safety
+
+`MultiLevelEncodingLoD` does not support concurrent host calls on one
+instance. Do not start a call whose device work can overlap earlier work on
+that instance. Use one CUDA stream, or insert and wait for an event dependency
+before another stream accesses the same parameters, gradients, or per-call
+state. Host-call serialization without a device dependency is insufficient.
+This port does not establish a broader host-thread-safety contract for TCNN.
+
+#### Build and JIT Support
+
+`Permuto` and `MultiLevelEncodingLoD` are available only in builds that contain
+the offline forward and backward implementations. A build configured with
+`TCNN_BUILD_NO_FWD_BWD=ON` does not register either encoding type.
+
+These encodings do not provide runtime-compiled CUDA device functions. When
+automatic just-in-time (JIT) fusion attempts to compile a model that contains
+either encoding, tiny-cuda-nn reports the unsupported device function,
+disables JIT fusion, and falls back to the offline implementation. Manual JIT
+device-function generation is unsupported. The no-forward-and-backward build
+cannot use this fallback because the encoding types are not registered.
+
+The non-JIT `NetworkWithInputEncoding` double-backward path currently supports
+the GSplat network shape: one `FullyFusedMLP` hidden layer, `ReLU`, and no output
+activation. That path computes parameter and upstream gradients. It does not
+compute a network input Hessian. Other network shapes report an explicit
+runtime error instead of returning an incomplete second-order result.
+
 ### Identity
 
 Leaves values untouched. Optionally, multiplies each dimension by a scalar and adds an offset.
