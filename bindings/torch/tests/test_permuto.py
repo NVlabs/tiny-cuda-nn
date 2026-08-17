@@ -51,6 +51,27 @@ NETWORK_CONFIG = {
 
 
 class TestPermuto(unittest.TestCase):
+	def test_generalized_permuto_construction(self) -> None:
+		self.assertTrue(torch.cuda.is_available())
+
+		for n_input_dims, n_features_per_level in ((1, 1), (7, 4), (24, 8)):
+			with self.subTest(n_input_dims=n_input_dims, n_features_per_level=n_features_per_level):
+				module = tcnn.Encoding(
+					n_input_dims=n_input_dims,
+					encoding_config={
+						"otype": "Permuto",
+						"n_levels": 2,
+						"n_features_per_level": n_features_per_level,
+						"log2_hashmap_size": 2,
+						"max_input_grad_dims": n_input_dims,
+					},
+					seed=42,
+					dtype=torch.float32,
+				)
+				module.jit_fusion = False
+				self.assertEqual(module.n_output_dims, 2 * n_features_per_level)
+				self.assertEqual(module.params.numel(), 2 * 4 * n_features_per_level)
+
 	def test_first_order_construction_backward_and_optimizer(self) -> None:
 		self.assertTrue(torch.cuda.is_available())
 
