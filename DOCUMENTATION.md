@@ -137,57 +137,71 @@ The number of encoded dimensions is `n_levels * n_features_per_level`.
 
 ### Permuto
 
-`Permuto` is a trainable five-dimensional permutohedral lattice encoding. The
-encoding accepts exactly five input dimensions. Callers must normalize each
-input value to `[0, 1]`. The encoding does not scan device inputs to enforce
-this range.
+`Permuto` is a trainable N-dimensional permutohedral lattice encoding. The
+factory accepts input widths `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`,
+`10`, `12`, `16`, and `24`. The input width passed to the factory is
+authoritative. Callers must normalize each input value to `[0, 1]`. The
+encoding does not scan device inputs to enforce this range.
 
-Each level produces two adjacent output features. Level `l` uses the scale
+Each level produces `n_features_per_level` adjacent output features. The
+supported feature widths are `1`, `2`, `4`, and `8`. Level `l` uses the scale
 `base_scale * per_level_scale^l`. The unpadded output width is
-`2 * n_levels`. An alignment request can add zero-valued padding after these
-features. The encoded features have no fixed value range because the lattice
-entries are trainable parameters.
+`n_levels * n_features_per_level`. An alignment request can add zero-valued
+padding after these features. The required output alignment is
+`n_features_per_level`. The encoded features have no fixed value range because
+the lattice entries are trainable parameters.
 
 ```text
-[x0, x1, x2, x3, x4]
-           |
-           v
-  levels 0 ... n_levels - 1
-           |
-           v
-[level 0 feature 0, level 0 feature 1, ..., level L feature 1]
+[x0, ..., xN-1]
+       |
+       v
+levels 0 ... n_levels - 1
+       |
+       v
+[level 0 feature 0, ..., level L feature F-1]
 ```
 
 ```json5
 {
 	"otype": "Permuto",            // Component type.
 	"n_levels": 16,                // Number of levels. Must be in [1, 32].
-	"n_features_per_level": 2,     // Must be 2.
+	"n_features_per_level": 2,     // Must be 1, 2, 4, or 8.
 	"log2_hashmap_size": 19,       // Base-2 logarithm of the entries per level.
 	"base_scale": 16.0,            // Finite scale of level 0.
 	"per_level_scale": 2.0,        // Positive finite scale multiplier.
-	"interpolation": "Linear",      // Must be "Linear".
+	"interpolation": "Linear",      // Case-insensitive. Must be "Linear".
 	"max_input_grad_dims": 5,      // Leading input dimensions with gradients.
 	"seed": 1337                   // Unsigned seed for per-level lattice shifts.
 }
 ```
 
+`interpolation` accepts only `Linear`, case-insensitively.
 `log2_hashmap_size` must be a nonnegative integer smaller than 32. The
 parameter count must also fit in an unsigned 32-bit integer. Every derived
 level scale must be finite and safe for the kernel's integer lattice
-coordinates. `max_input_grad_dims` must be in `[0, 5]`.
+coordinates. `max_input_grad_dims` defaults to the input width and must not
+exceed that width.
 `seed` must be an integer in `[0, 2^32 - 1]`.
 
 The flat parameter array contains
-`n_levels * 2^log2_hashmap_size * 2` values. The layout order is level, hashed
-entry, then feature. The two features for one entry are adjacent. Construction,
-`hyperparams()`, and reload preserve this layout. `hyperparams()` includes the
-configured `seed`. Reloading the emitted hyperparameters and the same flat
-parameter array therefore preserves the lattice shifts and learned values.
+`n_levels * 2^log2_hashmap_size * n_features_per_level` values. The layout
+order is level, hashed entry, then feature. The features for one entry are
+adjacent. Construction, `hyperparams()`, and reload preserve this layout.
+`hyperparams()` includes the configured `seed`. Reloading the emitted
+hyperparameters and the same flat parameter array therefore preserves the
+lattice shifts and learned values.
 `scales_table` and `shifts_table` are diagnostics derived from `seed`,
 `base_scale`, and `per_level_scale`. They do not independently configure the
 lattice. The factory accepts the tables only when they match those behavioral
-fields.
+fields. Each table contains `n_levels * input_width` values.
+
+`n_features` and `n_grid_features` are aliases for the total unpadded output
+width. Either alias can replace `n_levels`. The aliases are mutually exclusive
+with each other and with `n_levels`. An alias value must be a positive integer
+that is divisible by `n_features_per_level`. `hyperparams()` always emits the
+canonical `n_levels` and `n_features_per_level` fields. It does not emit either
+alias. The factory ignores unrelated compatibility keys, including
+`base_resolution`, `max_resolution`, and a JSON `n_dims_to_encode` field.
 
 The encoding supports first-order parameter and input gradients. It also
 supports non-JIT double backward for parameter gradients and upstream
@@ -200,19 +214,20 @@ derivative orders.
 ### MultiLevelEncodingLoD
 
 `MultiLevelEncodingLoD` adds hard per-element level control to `Permuto`. The
-wrapper accepts exactly six input dimensions. The first five values are the
-`Permuto` input. The final value is a level ratio in `[0, 1]`. Callers must
-enforce the ratio range.
+wrapper accepts one more input dimension than its `Permuto` base. The base can
+use any input width and feature width supported by `Permuto`. The first N
+values are the `Permuto` input. The final value is a level ratio in `[0, 1]`.
+Callers must enforce the ratio range.
 
 ```text
-[x0, x1, x2, x3, x4, level_ratio]
-               |             |
-               v             v
-         Permuto input   active-level mask
-               \_____________/
-                      |
-                      v
-             hard-masked features
+[x0, ..., xN-1, level_ratio]
+          |             |
+          v             v
+    Permuto input   active-level mask
+          \_____________/
+                 |
+                 v
+        hard-masked features
 ```
 
 ```json5

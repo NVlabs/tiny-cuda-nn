@@ -675,7 +675,7 @@ public:
 
 		if (output->layout() == AoS) {
 			// Transpose result (was stored row major due to coalescing)
-			const dim3 threads_transpose = {m_n_levels * N_FEATURES_PER_LEVEL, 8, 1};
+			const dim3 threads_transpose = transpose_threads();
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_encoded_position<T><<<blocks_transpose, threads_transpose, 0, synced_streams.get(0)>>>(
 				num_elements, encoded_positions_soa.data, output->pitched_ptr()
@@ -713,7 +713,7 @@ public:
 			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 
 			// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
-			const dim3 threads_transpose = {m_n_levels * N_FEATURES_PER_LEVEL, 8, 1};
+			const dim3 threads_transpose = transpose_threads();
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_gradients<T>
 				<<<blocks_transpose, threads_transpose, 0, stream>>>(num_elements, (T*)workspace.data(), dL_doutput.pitched_ptr());
@@ -834,7 +834,7 @@ public:
 		GPUMemoryArena::Allocation dL_dy_workspace;
 		if (dL_doutput.layout() == AoS) {
 			dL_dy_workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
-			const dim3 threads_transpose = {m_n_levels * N_FEATURES_PER_LEVEL, 8, 1};
+			const dim3 threads_transpose = transpose_threads();
 			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
 			transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
 				num_elements, (T*)dL_dy_workspace.data(), dL_doutput.pitched_ptr()
@@ -983,6 +983,11 @@ public:
 	}
 
 private:
+	dim3 transpose_threads() const {
+		const uint32_t width = m_n_levels * N_FEATURES_PER_LEVEL;
+		return {width, std::min(8u, 1024u / width), 1};
+	}
+
 	ParamsOffsetTable m_offset_table;
 
 	uint32_t m_n_features;
@@ -1000,17 +1005,63 @@ private:
 	float m_base_scale;
 };
 
-template <typename T> MultiLevelEncoding<T>* create_permuto_encoding(uint32_t n_dims_to_encode, const json& encoding) {
-	if (n_dims_to_encode != 5) {
-		throw std::runtime_error{"PermutoEncoding requires five input dimensions."};
-	}
+struct PermutoFactoryConfig {
+	uint32_t n_features;
+	uint32_t log2_hashmap_size;
+	float base_scale;
+	float per_level_scale;
+	uint32_t max_input_grad_dims;
+	uint32_t seed;
+};
 
-	for (const char* key : {"n_features", "n_grid_features"}) {
-		if (encoding.contains(key)) {
-			throw std::runtime_error{
-				fmt::format("PermutoEncoding: {} is unsupported; configure n_levels and n_features_per_level instead.", key)
-			};
-		}
+template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL>
+std::unique_ptr<MultiLevelEncoding<T>> make_permuto_encoding(const PermutoFactoryConfig& config) {
+	return std::make_unique<PermutoEncodingTemplated<T, N_POS_DIMS, N_FEATURES_PER_LEVEL>>(
+		config.n_features,
+		config.log2_hashmap_size,
+		config.base_scale,
+		config.per_level_scale,
+		config.max_input_grad_dims,
+		config.seed
+	);
+}
+
+template <typename T, uint32_t N_FEATURES_PER_LEVEL>
+std::unique_ptr<MultiLevelEncoding<T>> dispatch_permuto_dimension(uint32_t n_dims_to_encode, const PermutoFactoryConfig& config) {
+	switch (n_dims_to_encode) {
+		case 1: return make_permuto_encoding<T, 1, N_FEATURES_PER_LEVEL>(config);
+		case 2: return make_permuto_encoding<T, 2, N_FEATURES_PER_LEVEL>(config);
+		case 3: return make_permuto_encoding<T, 3, N_FEATURES_PER_LEVEL>(config);
+		case 4: return make_permuto_encoding<T, 4, N_FEATURES_PER_LEVEL>(config);
+		case 5: return make_permuto_encoding<T, 5, N_FEATURES_PER_LEVEL>(config);
+		case 6: return make_permuto_encoding<T, 6, N_FEATURES_PER_LEVEL>(config);
+		case 7: return make_permuto_encoding<T, 7, N_FEATURES_PER_LEVEL>(config);
+		case 8: return make_permuto_encoding<T, 8, N_FEATURES_PER_LEVEL>(config);
+		case 9: return make_permuto_encoding<T, 9, N_FEATURES_PER_LEVEL>(config);
+		case 10: return make_permuto_encoding<T, 10, N_FEATURES_PER_LEVEL>(config);
+		case 12: return make_permuto_encoding<T, 12, N_FEATURES_PER_LEVEL>(config);
+		case 16: return make_permuto_encoding<T, 16, N_FEATURES_PER_LEVEL>(config);
+		case 24: return make_permuto_encoding<T, 24, N_FEATURES_PER_LEVEL>(config);
+		default: throw std::runtime_error{"PermutoEncoding: input dimensions must be one of 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, or 24."};
+	}
+}
+
+template <typename T>
+std::unique_ptr<MultiLevelEncoding<T>> dispatch_permuto_features(
+	uint32_t n_dims_to_encode, uint32_t n_features_per_level, const PermutoFactoryConfig& config
+) {
+	switch (n_features_per_level) {
+		case 1: return dispatch_permuto_dimension<T, 1>(n_dims_to_encode, config);
+		case 2: return dispatch_permuto_dimension<T, 2>(n_dims_to_encode, config);
+		case 4: return dispatch_permuto_dimension<T, 4>(n_dims_to_encode, config);
+		case 8: return dispatch_permuto_dimension<T, 8>(n_dims_to_encode, config);
+		default: throw std::runtime_error{"PermutoEncoding: n_features_per_level must be 1, 2, 4, or 8."};
+	}
+}
+
+template <typename T> MultiLevelEncoding<T>* create_permuto_encoding(uint32_t n_dims_to_encode, const json& encoding) {
+	if (!encoding.is_object()) {
+		throw std::runtime_error{"PermutoEncoding configuration must be an object."};
 	}
 
 	const auto read_nonnegative_integer = [&encoding](const char* key, uint64_t default_value) -> uint64_t {
@@ -1032,8 +1083,8 @@ template <typename T> MultiLevelEncoding<T>* create_permuto_encoding(uint32_t n_
 	};
 
 	const uint64_t n_features_per_level = read_nonnegative_integer("n_features_per_level", 2);
-	if (n_features_per_level != 2) {
-		throw std::runtime_error{"PermutoEncoding requires two features per level."};
+	if (n_features_per_level != 1 && n_features_per_level != 2 && n_features_per_level != 4 && n_features_per_level != 8) {
+		throw std::runtime_error{"PermutoEncoding: n_features_per_level must be 1, 2, 4, or 8."};
 	}
 
 	const uint64_t log2_hashmap_size = read_nonnegative_integer("log2_hashmap_size", 19);
@@ -1041,7 +1092,29 @@ template <typename T> MultiLevelEncoding<T>* create_permuto_encoding(uint32_t n_
 		throw std::runtime_error{"PermutoEncoding log2_hashmap_size is out of range."};
 	}
 
-	const uint64_t n_levels = read_nonnegative_integer("n_levels", 16);
+	const bool has_n_features = encoding.contains("n_features");
+	const bool has_n_grid_features = encoding.contains("n_grid_features");
+	if (has_n_features && has_n_grid_features) {
+		throw std::runtime_error{"PermutoEncoding: n_features and n_grid_features are mutually exclusive."};
+	}
+	if ((has_n_features || has_n_grid_features) && encoding.contains("n_levels")) {
+		throw std::runtime_error{"PermutoEncoding: total feature aliases and n_levels are mutually exclusive."};
+	}
+
+	uint64_t n_levels = 16;
+	if (has_n_features || has_n_grid_features) {
+		const char* key = has_n_features ? "n_features" : "n_grid_features";
+		const uint64_t total_features = read_nonnegative_integer(key, 0);
+		if (total_features == 0) {
+			throw std::runtime_error{fmt::format("PermutoEncoding: {} must be positive.", key)};
+		}
+		if (total_features % n_features_per_level != 0) {
+			throw std::runtime_error{fmt::format("PermutoEncoding: {} must be divisible by n_features_per_level.", key)};
+		}
+		n_levels = total_features / n_features_per_level;
+	} else {
+		n_levels = read_nonnegative_integer("n_levels", 16);
+	}
 	if (n_levels == 0 || n_levels > PERMUTO_MAX_N_LEVELS) {
 		throw std::runtime_error{"PermutoEncoding n_levels is out of range."};
 	}
@@ -1085,15 +1158,15 @@ template <typename T> MultiLevelEncoding<T>* create_permuto_encoding(uint32_t n_
 		throw std::runtime_error{"PermutoEncoding requires linear interpolation."};
 	}
 
-	const uint32_t n_features = static_cast<uint32_t>(n_features_per_level * n_levels);
-	auto result = std::make_unique<PermutoEncodingTemplated<T, 5, 2>>(
-		n_features,
+	const PermutoFactoryConfig config{
+		static_cast<uint32_t>(n_features_per_level * n_levels),
 		static_cast<uint32_t>(log2_hashmap_size),
 		base_scale,
 		per_level_scale,
 		static_cast<uint32_t>(max_input_grad_dims),
-		static_cast<uint32_t>(seed)
-	);
+		static_cast<uint32_t>(seed),
+	};
+	auto result = dispatch_permuto_features<T>(n_dims_to_encode, static_cast<uint32_t>(n_features_per_level), config);
 
 	const json derived = result->hyperparams();
 	for (const char* key : {"scales_table", "shifts_table"}) {
