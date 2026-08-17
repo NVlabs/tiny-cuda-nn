@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -91,6 +91,10 @@ template <typename T>
 class MultiLevelEncoding : public Encoding<T> {
 public:
 	virtual uint32_t n_pos_dims() const = 0;
+	virtual uint32_t n_levels() const {
+		const uint32_t n_offsets = params_offset_table().size;
+		return n_offsets == 0 ? 0 : n_offsets - 1;
+	}
 	virtual uint32_t n_features_per_level() const = 0;
 
 	virtual size_t level_n_params(uint32_t level) const = 0;
