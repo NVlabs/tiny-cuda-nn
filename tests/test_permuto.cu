@@ -23,7 +23,7 @@
  */
 
 /** @file   test_permuto.cu
- *  @brief  Test Permuto and hard level-of-detail encodings.
+ *  @brief  Test Permuto and multilevel level-of-detail encodings.
  */
 
 #include "test_common.h"
@@ -60,6 +60,153 @@ json hard_lod_config(uint32_t n_levels = 16, uint32_t log2_hashmap_size = 19, ui
 		{"base", permuto_config(n_levels, log2_hashmap_size, n_features_per_level)},
 	};
 }
+
+json soft_lod_config(uint32_t n_levels = 16, uint32_t log2_hashmap_size = 19, uint32_t n_features_per_level = 2) {
+	json result = hard_lod_config(n_levels, log2_hashmap_size, n_features_per_level);
+	result["lod_type"] = "Soft";
+	return result;
+}
+
+json grid_config(uint32_t n_levels = 2, uint32_t n_features_per_level = 2) {
+	return {
+		{"otype",                "HashGrid"},
+		{"n_levels",             n_levels            },
+		{"n_features_per_level", n_features_per_level},
+		{"log2_hashmap_size",    4         },
+		{"base_resolution",      4         },
+		{"per_level_scale",      2.0f      },
+		{"interpolation",        "Linear"  },
+	};
+}
+
+json grid_lod_config(const char* lod_type, uint32_t n_levels = 2, uint32_t n_features_per_level = 2) {
+	return {
+		{"otype",    "MultiLevelEncodingLoD"},
+		{"lod_type", lod_type                 },
+		{"base",     grid_config(n_levels, n_features_per_level)},
+	};
+}
+
+class LegacyMultiLevelEncoding : public MultiLevelEncoding<float> {
+public:
+	explicit LegacyMultiLevelEncoding(uint32_t n_offsets) { m_offsets.size = n_offsets; }
+
+#if !defined(TCNN_NO_FWD_BWD)
+	std::unique_ptr<Context> forward_impl(
+		cudaStream_t,
+		const GPUMatrixDynamic<float>&,
+		GPUMatrixDynamic<float>* = nullptr,
+		bool = false,
+		bool = false
+	) override {
+		return std::make_unique<Context>();
+	}
+
+	void backward_impl(
+		cudaStream_t,
+		const Context&,
+		const GPUMatrixDynamic<float>&,
+		const GPUMatrixDynamic<float>&,
+		const GPUMatrixDynamic<float>&,
+		GPUMatrixDynamic<float>* = nullptr,
+		bool = false,
+		GradientMode = GradientMode::Overwrite
+	) override { }
+#endif
+
+	uint32_t input_width() const override { return 1; }
+	uint32_t padded_output_width() const override { return 0; }
+	uint32_t output_width() const override { return 0; }
+	uint32_t required_input_alignment() const override { return 1; }
+	void set_padded_output_width(uint32_t) override { }
+	uint32_t required_output_alignment() const override { return 1; }
+	MatrixLayout preferred_output_layout() const override { return AoS; }
+	uint32_t n_pos_dims() const override { return 1; }
+	uint32_t n_features_per_level() const override { return 1; }
+	size_t level_n_params(uint32_t) const override { return 0; }
+	size_t level_params_offset(uint32_t) const override { return 0; }
+	const ParamsOffsetTable& params_offset_table() const override { return m_offsets; }
+	json hyperparams() const override { return {{"otype", "LegacyMultiLevelEncoding"}}; }
+
+private:
+	ParamsOffsetTable m_offsets;
+};
+
+float soft_lod_weight(float ratio, uint32_t n_levels, uint32_t level) {
+	const float level_f = ratio * n_levels + 1e-3f;
+	if (level_f < 0.0f) {
+		return 0.0f;
+	}
+	if (level_f >= (float)n_levels) {
+		return 1.0f;
+	}
+	const int32_t level_i = (int32_t)std::floor(level_f);
+	if ((int32_t)level < level_i) {
+		return 1.0f;
+	}
+	return (int32_t)level == level_i ? level_f - level_i : 0.0f;
+}
+
+struct GuardedMatrix {
+	GuardedMatrix(uint32_t rows, uint32_t cols, MatrixLayout layout, uint32_t padding, float guard)
+	: rows{rows}, cols{cols}, layout{layout}, stride{(layout == AoS ? rows : cols) + padding}, guard{guard},
+	  storage{(layout == AoS ? cols : rows) * stride}, matrix{storage.data(), rows, cols, layout, stride},
+	  host(storage.size(), guard) { }
+
+	size_t index(uint32_t row, uint32_t col) const {
+		return layout == AoS ? col * stride + row : row * stride + col;
+	}
+
+	void set(uint32_t row, uint32_t col, float value) {
+		host[index(row, col)] = value;
+	}
+
+	float get(uint32_t row, uint32_t col) const {
+		return host[index(row, col)];
+	}
+
+	void upload(cudaStream_t stream) {
+		CUDA_CHECK_THROW(cudaMemcpyAsync(storage.data(), host.data(), storage.get_bytes(), cudaMemcpyHostToDevice, stream));
+	}
+
+	void download(cudaStream_t stream) {
+		CUDA_CHECK_THROW(cudaMemcpyAsync(host.data(), storage.data(), storage.get_bytes(), cudaMemcpyDeviceToHost, stream));
+	}
+
+	void require_matches(const std::vector<float>& contiguous) const {
+		const uint32_t contiguous_stride = layout == AoS ? rows : cols;
+		for (uint32_t row = 0; row < rows; ++row) {
+			for (uint32_t col = 0; col < cols; ++col) {
+				const size_t contiguous_index = layout == AoS ? col * contiguous_stride + row : row * contiguous_stride + col;
+				CAPTURE(row, col);
+				REQUIRE(get(row, col) == Approx(contiguous[contiguous_index]).margin(1e-5f).epsilon(1e-4f));
+			}
+		}
+
+		if (layout == AoS) {
+			for (uint32_t col = 0; col < cols; ++col) {
+				for (uint32_t row = rows; row < stride; ++row) {
+					REQUIRE(host[col * stride + row] == guard);
+				}
+			}
+		} else {
+			for (uint32_t row = 0; row < rows; ++row) {
+				for (uint32_t col = cols; col < stride; ++col) {
+					REQUIRE(host[row * stride + col] == guard);
+				}
+			}
+		}
+	}
+
+	uint32_t rows;
+	uint32_t cols;
+	MatrixLayout layout;
+	uint32_t stride;
+	float guard;
+	GPUMemory<float> storage;
+	GPUMatrixDynamic<float> matrix;
+	std::vector<float> host;
+};
 
 std::vector<float> hard_lod_input(uint32_t batch_size, const std::vector<float>& ratios) {
 	std::vector<float> result(6 * batch_size);
@@ -304,6 +451,7 @@ TEST_CASE("Permuto constructs its supported specialization matrix", "[encoding][
 			REQUIRE(encoding->required_output_alignment() == n_features_per_level);
 			REQUIRE(encoding->n_params() == 8 * n_features_per_level);
 			REQUIRE(multi_level->n_pos_dims() == n_dims);
+			REQUIRE(multi_level->n_levels() == 2);
 			REQUIRE(multi_level->n_features_per_level() == n_features_per_level);
 			REQUIRE(encoding->hyperparams().at("n_levels") == 2);
 		}
@@ -918,13 +1066,16 @@ TEST_CASE("Permuto preserves parameter gradient modes", "[encoding][permuto]") {
 	REQUIRE(ignored == accumulated);
 }
 
-TEST_CASE("Permuto encodings preserve parameter gradients for empty batches", "[encoding][permuto]") {
+TEST_CASE("Multilevel encodings preserve parameter gradients for empty batches", "[encoding][permuto][grid][lod]") {
 	tcnn_test_setup();
 
 	using T = network_precision_t;
 	const std::vector<std::pair<uint32_t, json>> configurations = {
 		{5, permuto_config(2,  4)},
 		{6, hard_lod_config(2, 4)},
+		{6, soft_lod_config(2, 4)},
+		{3, grid_lod_config("Hard")},
+		{3, grid_lod_config("Soft")},
 	};
 	for (const auto& [input_width, config] : configurations) {
 		std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(input_width, config, 16)};
@@ -933,14 +1084,16 @@ TEST_CASE("Permuto encodings preserve parameter gradients for empty batches", "[
 		auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss);
 
 		GPUMatrix<float> input{input_width, 0};
+		GPUMatrix<float> dL_ddLdinput{input_width, 0};
 		GPUMatrix<T> output{encoding->padded_output_width(), 0};
 		GPUMatrix<T> output_gradient{encoding->padded_output_width(), 0};
+		GPUMatrix<T> dL_ddLdoutput{encoding->padded_output_width(), 0};
 		std::vector<T> sentinel(encoding->n_params(), (T)0.5f);
 		std::vector<T> gradients(encoding->n_params());
 
 		for (GradientMode mode : {GradientMode::Overwrite, GradientMode::Accumulate, GradientMode::Ignore}) {
 			CUDA_CHECK_THROW(cudaMemcpy(encoding->gradients(), sentinel.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
-			auto context = encoding->forward(input, &output);
+			auto context = encoding->forward(input, &output, false, true);
 			encoding->backward(*context, input, output, output_gradient, nullptr, false, mode);
 			CUDA_CHECK_THROW(cudaMemcpy(gradients.data(), encoding->gradients(), encoding->n_params() * sizeof(T), cudaMemcpyDeviceToHost));
 
@@ -948,6 +1101,142 @@ TEST_CASE("Permuto encodings preserve parameter gradients for empty batches", "[
 				REQUIRE(std::all_of(gradients.begin(), gradients.end(), [](T value) { return (float)value == 0.0f; }));
 			} else {
 				REQUIRE(gradients == sentinel);
+			}
+
+			CUDA_CHECK_THROW(cudaMemcpy(encoding->gradients(), sentinel.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+			encoding->backward_backward_input(
+				*context, input, dL_ddLdinput, output_gradient, &dL_ddLdoutput, nullptr, false, mode
+			);
+			CUDA_CHECK_THROW(
+				cudaMemcpy(gradients.data(), encoding->gradients(), encoding->n_params() * sizeof(T), cudaMemcpyDeviceToHost)
+			);
+			if (mode == GradientMode::Overwrite) {
+				REQUIRE(std::all_of(gradients.begin(), gradients.end(), [](T value) { return (float)value == 0.0f; }));
+			} else {
+				REQUIRE(gradients == sentinel);
+			}
+		}
+	}
+}
+
+TEST_CASE("Grid-backed LoD forwards parameter gradient modes at both derivative orders", "[encoding][grid][lod]") {
+	tcnn_test_setup();
+
+	using T = float;
+	constexpr uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	for (const char* lod_type : {"Hard", "Soft"}) {
+		CAPTURE(lod_type);
+		std::shared_ptr<Encoding<T>> base{create_encoding<T>(2, grid_config(), 4)};
+		std::shared_ptr<Encoding<T>> wrapped{create_encoding<T>(3, grid_lod_config(lod_type), 4)};
+		auto base_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+		auto wrapped_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+		auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+		auto base_trainer = std::make_shared<Trainer<float, T, T>>(base, base_optimizer, loss);
+		auto wrapped_trainer = std::make_shared<Trainer<float, T, T>>(wrapped, wrapped_optimizer, loss);
+
+		REQUIRE(base->n_params() == wrapped->n_params());
+		std::vector<T> params(base->n_params());
+		for (size_t i = 0; i < params.size(); ++i) {
+			params[i] = (T)(static_cast<int>((i * 19) % 37) - 18) / 64.0f;
+		}
+		CUDA_CHECK_THROW(cudaMemcpy(base->params(), params.data(), base->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(
+			cudaMemcpy(wrapped->params(), params.data(), wrapped->n_params() * sizeof(T), cudaMemcpyHostToDevice)
+		);
+
+		std::vector<float> base_input_host(2 * batch_size);
+		std::vector<float> wrapped_input_host(3 * batch_size);
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			base_input_host[element * 2] = wrapped_input_host[element * 3] = 0.05f + (float)(element % 13) / 20.0f;
+			base_input_host[element * 2 + 1] = wrapped_input_host[element * 3 + 1] =
+				0.1f + (float)((element + 5) % 11) / 16.0f;
+			wrapped_input_host[element * 3 + 2] = 1.0f;
+		}
+
+		GPUMatrix<float> base_input{2, batch_size};
+		GPUMatrix<float> wrapped_input{3, batch_size};
+		GPUMatrix<T> base_output{base->padded_output_width(), batch_size};
+		GPUMatrix<T> wrapped_output{wrapped->padded_output_width(), batch_size};
+		GPUMatrix<T> upstream{base->padded_output_width(), batch_size};
+		GPUMatrix<float> base_second_seed{2, batch_size};
+		GPUMatrix<float> wrapped_second_seed{3, batch_size};
+		GPUMatrix<float> base_input_gradient{2, batch_size};
+		GPUMatrix<float> wrapped_input_gradient{3, batch_size};
+		GPUMatrix<T> base_upstream_gradient{base->padded_output_width(), batch_size};
+		GPUMatrix<T> wrapped_upstream_gradient{wrapped->padded_output_width(), batch_size};
+		CUDA_CHECK_THROW(cudaMemcpy(base_input.data(), base_input_host.data(), base_input.n_bytes(), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(
+			cudaMemcpy(wrapped_input.data(), wrapped_input_host.data(), wrapped_input.n_bytes(), cudaMemcpyHostToDevice)
+		);
+		pcg32 rng{0xdeadbeef};
+		upstream.initialize_uniform(rng, -0.5f, 0.5f);
+		base_second_seed.initialize_uniform(rng, -0.5f, 0.5f);
+		std::vector<float> wrapped_second_seed_host(3 * batch_size, 100.0f);
+		const auto base_second_seed_host = base_second_seed.to_cpu_vector();
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			std::copy_n(base_second_seed_host.data() + element * 2, 2, wrapped_second_seed_host.data() + element * 3);
+		}
+		CUDA_CHECK_THROW(cudaMemcpy(
+			wrapped_second_seed.data(), wrapped_second_seed_host.data(), wrapped_second_seed.n_bytes(), cudaMemcpyHostToDevice
+		));
+
+		auto base_context = base->forward(base_input, &base_output, false, true);
+		auto wrapped_context = wrapped->forward(wrapped_input, &wrapped_output, false, true);
+
+		std::vector<T> sentinel(base->n_params(), 0.25f);
+		std::vector<T> first_overwrite;
+		std::vector<T> second_overwrite;
+		for (bool second_order : {false, true}) {
+			CAPTURE(second_order);
+			std::vector<T>& overwrite = second_order ? second_overwrite : first_overwrite;
+			for (GradientMode mode : {GradientMode::Overwrite, GradientMode::Accumulate, GradientMode::Ignore}) {
+				CAPTURE((int)mode);
+				CUDA_CHECK_THROW(cudaMemcpy(base->gradients(), sentinel.data(), base->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+				CUDA_CHECK_THROW(
+					cudaMemcpy(wrapped->gradients(), sentinel.data(), wrapped->n_params() * sizeof(T), cudaMemcpyHostToDevice)
+				);
+				if (second_order) {
+					base->backward_backward_input(
+						*base_context, base_input, base_second_seed, upstream, &base_upstream_gradient, nullptr, false, mode
+					);
+					wrapped->backward_backward_input(
+						*wrapped_context,
+						wrapped_input,
+						wrapped_second_seed,
+						upstream,
+						&wrapped_upstream_gradient,
+						nullptr,
+						false,
+						mode
+					);
+				} else {
+					base->backward(*base_context, base_input, base_output, upstream, &base_input_gradient, false, mode);
+					wrapped->backward(
+						*wrapped_context, wrapped_input, wrapped_output, upstream, &wrapped_input_gradient, false, mode
+					);
+				}
+
+				std::vector<T> base_gradient(base->n_params());
+				std::vector<T> wrapped_gradient(wrapped->n_params());
+				CUDA_CHECK_THROW(cudaMemcpy(
+					base_gradient.data(), base->gradients(), base->n_params() * sizeof(T), cudaMemcpyDeviceToHost
+				));
+				CUDA_CHECK_THROW(cudaMemcpy(
+					wrapped_gradient.data(), wrapped->gradients(), wrapped->n_params() * sizeof(T), cudaMemcpyDeviceToHost
+				));
+				for (size_t i = 0; i < base_gradient.size(); ++i) {
+					CAPTURE(i);
+					REQUIRE(wrapped_gradient[i] == Approx(base_gradient[i]).margin(1e-5f).epsilon(1e-4f));
+				}
+				if (mode == GradientMode::Overwrite) {
+					overwrite = base_gradient;
+					REQUIRE(std::any_of(overwrite.begin(), overwrite.end(), [](T value) { return value != 0.0f; }));
+				} else {
+					for (size_t i = 0; i < base_gradient.size(); ++i) {
+						const T expected = mode == GradientMode::Accumulate ? sentinel[i] + overwrite[i] : sentinel[i];
+						REQUIRE(base_gradient[i] == Approx(expected).margin(1e-5f).epsilon(1e-4f));
+					}
+				}
 			}
 		}
 	}
@@ -1073,10 +1362,613 @@ TEST_CASE("Permuto honors pitched SoA matrix strides", "[encoding][permuto]") {
 	}
 }
 
-TEST_CASE("Hard LoD rejects soft level selection", "[encoding][permuto][lod]") {
-	json config = hard_lod_config();
-	config["lod_type"] = "Soft";
-	REQUIRE_THROWS_AS(create_encoding<network_precision_t>(6, config, 16), std::runtime_error);
+TEST_CASE("Multilevel LoD honors pitched matrix strides at both derivative orders", "[encoding][permuto][grid][lod]") {
+	tcnn_test_setup();
+
+	using Configuration = std::tuple<const char*, uint32_t, json, MatrixLayout>;
+	const std::vector<Configuration> configurations = {
+		{"soft-permuto-soa", 6, soft_lod_config(2, 3), SoA},
+		{"hard-grid-soa",    3, grid_lod_config("Hard"), SoA},
+		{"hard-wide-grid-aos", 3, grid_lod_config("Hard", 17, 8), AoS},
+		{"soft-wide-grid-aos", 3, grid_lod_config("Soft", 17, 8), AoS},
+	};
+	constexpr uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	constexpr float guard = 0.5f;
+
+	for (const auto& [case_name, input_width, config, layout] : configurations) {
+		CAPTURE(case_name);
+		std::shared_ptr<Encoding<float>> encoding{create_encoding<float>(input_width, config, 8)};
+		auto optimizer = std::shared_ptr<Optimizer<float>>{create_optimizer<float>(json::object())};
+		auto loss = std::shared_ptr<Loss<float>>{create_loss<float>(json::object())};
+		auto trainer = std::make_shared<Trainer<float, float, float>>(encoding, optimizer, loss);
+		const uint32_t output_width = encoding->padded_output_width();
+		const MatrixLayout matrix_layout = layout;
+		const auto contiguous_index = [matrix_layout](uint32_t row, uint32_t col, uint32_t rows, uint32_t cols) {
+			return matrix_layout == AoS ? col * rows + row : row * cols + col;
+		};
+
+		StreamAndEvent caller_stream;
+		const cudaStream_t stream = caller_stream.get();
+		std::vector<float> params(encoding->n_params());
+		for (size_t i = 0; i < params.size(); ++i) {
+			params[i] = (float)(static_cast<int>((i * 19) % 37) - 18) / 64.0f;
+		}
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			encoding->params(), params.data(), params.size() * sizeof(float), cudaMemcpyHostToDevice, stream
+		));
+
+		GPUMatrixDynamic<float> input{input_width, batch_size, layout};
+		std::vector<float> input_host(input.n_elements());
+		GuardedMatrix pitched_input{input_width, batch_size, layout, 5, guard};
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			for (uint32_t dim = 0; dim + 1 < input_width; ++dim) {
+				const float value = 0.05f + (float)((element + dim) % 13) / 20.0f;
+				input_host[contiguous_index(dim, element, input_width, batch_size)] = value;
+				pitched_input.set(dim, element, value);
+			}
+			input_host[contiguous_index(input_width - 1, element, input_width, batch_size)] = 0.75f;
+			pitched_input.set(input_width - 1, element, 0.75f);
+		}
+		CUDA_CHECK_THROW(cudaMemcpyAsync(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice, stream));
+		pitched_input.upload(stream);
+
+		GPUMatrixDynamic<float> contiguous_output{output_width, batch_size, layout};
+		GuardedMatrix pitched_output{output_width, batch_size, layout, 7, guard};
+		pitched_output.upload(stream);
+		auto contiguous_context = encoding->forward(stream, input, &contiguous_output, false, true);
+		auto pitched_context = encoding->forward(stream, pitched_input.matrix, &pitched_output.matrix, false, true);
+		pitched_output.download(stream);
+		CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
+		const auto contiguous_output_host = contiguous_output.to_cpu_vector();
+		pitched_output.require_matches(contiguous_output_host);
+		REQUIRE(std::any_of(
+			contiguous_output_host.begin(), contiguous_output_host.end(), [](float value) { return value != 0.0f; }
+		));
+
+		GPUMatrixDynamic<float> contiguous_upstream{output_width, batch_size, layout};
+		std::vector<float> contiguous_upstream_host(contiguous_upstream.n_elements());
+		GuardedMatrix pitched_upstream{output_width, batch_size, layout, 7, guard};
+		for (uint32_t row = 0; row < output_width; ++row) {
+			for (uint32_t element = 0; element < batch_size; ++element) {
+				const size_t index = contiguous_index(row, element, output_width, batch_size);
+				const float value = (float)(static_cast<int>((index * 13) % 23) - 11) / 32.0f;
+				contiguous_upstream_host[index] = value;
+				pitched_upstream.set(row, element, value);
+			}
+		}
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			contiguous_upstream.data(),
+			contiguous_upstream_host.data(),
+			contiguous_upstream.n_bytes(),
+			cudaMemcpyHostToDevice,
+			stream
+		));
+		pitched_upstream.upload(stream);
+
+		GPUMatrixDynamic<float> contiguous_input_gradient{input_width, batch_size, layout};
+		GuardedMatrix pitched_input_gradient{input_width, batch_size, layout, 5, guard};
+		pitched_input_gradient.upload(stream);
+		encoding->backward(
+			stream,
+			*pitched_context,
+			pitched_input.matrix,
+			pitched_output.matrix,
+			pitched_upstream.matrix,
+			&pitched_input_gradient.matrix,
+			false,
+			GradientMode::Overwrite
+		);
+		std::vector<float> pitched_parameter_gradient(encoding->n_params());
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			pitched_parameter_gradient.data(),
+			encoding->gradients(),
+			encoding->n_params() * sizeof(float),
+			cudaMemcpyDeviceToHost,
+			stream
+		));
+		encoding->backward(
+			stream,
+			*contiguous_context,
+			input,
+			contiguous_output,
+			contiguous_upstream,
+			&contiguous_input_gradient,
+			false,
+			GradientMode::Overwrite
+		);
+		std::vector<float> contiguous_parameter_gradient(encoding->n_params());
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			contiguous_parameter_gradient.data(),
+			encoding->gradients(),
+			encoding->n_params() * sizeof(float),
+			cudaMemcpyDeviceToHost,
+			stream
+		));
+		pitched_input_gradient.download(stream);
+		pitched_upstream.download(stream);
+		CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
+		pitched_input_gradient.require_matches(contiguous_input_gradient.to_cpu_vector());
+		pitched_upstream.require_matches(contiguous_upstream_host);
+		bool found_parameter_gradient = false;
+		for (size_t i = 0; i < pitched_parameter_gradient.size(); ++i) {
+			REQUIRE(
+				pitched_parameter_gradient[i] == Approx(contiguous_parameter_gradient[i]).margin(1e-5f).epsilon(1e-4f)
+			);
+			found_parameter_gradient |= pitched_parameter_gradient[i] != 0.0f;
+		}
+		REQUIRE(found_parameter_gradient);
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			REQUIRE(pitched_input_gradient.get(input_width - 1, element) == 0.0f);
+		}
+
+		GPUMatrixDynamic<float> second_seed{input_width, batch_size, layout};
+		std::vector<float> second_seed_host(second_seed.n_elements());
+		GuardedMatrix pitched_second_seed{input_width, batch_size, layout, 6, guard};
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			for (uint32_t dim = 0; dim + 1 < input_width; ++dim) {
+				const float value = dim == 0 ? 1.0f : (dim == 1 ? -0.25f : 0.125f);
+				second_seed_host[contiguous_index(dim, element, input_width, batch_size)] = value;
+				pitched_second_seed.set(dim, element, value);
+			}
+			second_seed_host[contiguous_index(input_width - 1, element, input_width, batch_size)] = 100.0f;
+			pitched_second_seed.set(input_width - 1, element, 100.0f);
+		}
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			second_seed.data(), second_seed_host.data(), second_seed.n_bytes(), cudaMemcpyHostToDevice, stream
+		));
+		pitched_second_seed.upload(stream);
+
+		GPUMatrixDynamic<float> contiguous_upstream_gradient{output_width, batch_size, layout};
+		GPUMatrixDynamic<float> contiguous_second_input_gradient{input_width, batch_size, layout};
+		GuardedMatrix pitched_upstream_gradient{output_width, batch_size, layout, 7, guard};
+		GuardedMatrix pitched_second_input_gradient{input_width, batch_size, layout, 5, guard};
+		pitched_upstream_gradient.upload(stream);
+		pitched_second_input_gradient.upload(stream);
+		encoding->backward_backward_input(
+			stream,
+			*pitched_context,
+			pitched_input.matrix,
+			pitched_second_seed.matrix,
+			pitched_upstream.matrix,
+			&pitched_upstream_gradient.matrix,
+			&pitched_second_input_gradient.matrix,
+			false,
+			GradientMode::Overwrite
+		);
+		std::vector<float> pitched_second_parameter_gradient(encoding->n_params());
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			pitched_second_parameter_gradient.data(),
+			encoding->gradients(),
+			encoding->n_params() * sizeof(float),
+			cudaMemcpyDeviceToHost,
+			stream
+		));
+		encoding->backward_backward_input(
+			stream,
+			*contiguous_context,
+			input,
+			second_seed,
+			contiguous_upstream,
+			&contiguous_upstream_gradient,
+			&contiguous_second_input_gradient,
+			false,
+			GradientMode::Overwrite
+		);
+		std::vector<float> contiguous_second_parameter_gradient(encoding->n_params());
+		CUDA_CHECK_THROW(cudaMemcpyAsync(
+			contiguous_second_parameter_gradient.data(),
+			encoding->gradients(),
+			encoding->n_params() * sizeof(float),
+			cudaMemcpyDeviceToHost,
+			stream
+		));
+		pitched_upstream_gradient.download(stream);
+		pitched_second_input_gradient.download(stream);
+		pitched_input.download(stream);
+		pitched_second_seed.download(stream);
+		CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
+		pitched_upstream_gradient.require_matches(contiguous_upstream_gradient.to_cpu_vector());
+		pitched_second_input_gradient.require_matches(contiguous_second_input_gradient.to_cpu_vector());
+		pitched_input.require_matches(input_host);
+		pitched_second_seed.require_matches(second_seed_host);
+		bool found_second_parameter_gradient = false;
+		if (layout == AoS) {
+			vector_match_rae(pitched_second_parameter_gradient, contiguous_second_parameter_gradient, 1.2e-2, 0.999, true);
+		} else {
+			for (size_t i = 0; i < pitched_second_parameter_gradient.size(); ++i) {
+				REQUIRE(
+					pitched_second_parameter_gradient[i] ==
+					Approx(contiguous_second_parameter_gradient[i]).margin(1e-5f).epsilon(1e-4f)
+				);
+			}
+		}
+		for (float value : pitched_second_parameter_gradient) {
+			found_second_parameter_gradient |= value != 0.0f;
+		}
+		REQUIRE(found_second_parameter_gradient);
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			REQUIRE(pitched_second_input_gradient.get(input_width - 1, element) == 0.0f);
+		}
+	}
+}
+
+TEST_CASE("Multilevel LoD accepts generic bases and canonicalizes modes", "[encoding][permuto][grid][lod]") {
+	using T = network_precision_t;
+	for (const auto& [input_mode, canonical_mode] : std::array<std::pair<const char*, const char*>, 4>{
+		{{"Hard", "Hard"}, {"discontinuous", "Hard"}, {"Soft", "Soft"}, {"continuous", "Soft"}}
+	}) {
+		CAPTURE(input_mode);
+		json config = hard_lod_config(2, 3);
+		config["lod_type"] = input_mode;
+		std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(6, config, 8)};
+		auto multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(encoding);
+		REQUIRE(multilevel != nullptr);
+		REQUIRE(multilevel->n_pos_dims() == 5);
+		REQUIRE(multilevel->n_levels() == 2);
+		REQUIRE(multilevel->n_features_per_level() == 2);
+		REQUIRE(encoding->hyperparams().at("lod_type") == canonical_mode);
+		std::shared_ptr<Encoding<T>> restored{create_encoding<T>(encoding->input_width(), encoding->hyperparams(), 8)};
+		REQUIRE(restored->hyperparams() == encoding->hyperparams());
+		REQUIRE(restored->n_params() == encoding->n_params());
+	}
+
+	json invalid_mode = hard_lod_config(2, 3);
+	invalid_mode["lod_type"] = "Smooth";
+	REQUIRE_THROWS_WITH(
+		create_encoding<T>(6, invalid_mode, 8),
+		"MultiLevelEncodingLoD: lod_type must be Hard, Discontinuous, Soft, or Continuous."
+	);
+
+	json non_multilevel = hard_lod_config(2, 3);
+	non_multilevel["base"] = {{"otype", "Identity"}};
+	REQUIRE_THROWS_WITH(
+		create_encoding<T>(6, non_multilevel, 8), "MultiLevelEncodingLoD requires a multi-level base encoding."
+	);
+
+	json nested = hard_lod_config(2, 3);
+	nested["base"] = hard_lod_config(2, 3);
+	REQUIRE_THROWS_WITH(
+		create_encoding<T>(7, nested, 8), "MultiLevelEncodingLoD cannot wrap another MultiLevelEncodingLoD."
+	);
+
+	std::shared_ptr<Encoding<T>> grid{create_encoding<T>(2, grid_config(), 8)};
+	std::shared_ptr<Encoding<T>> wrapped_grid{create_encoding<T>(3, grid_lod_config("Hard"), 8)};
+	auto grid_multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(grid);
+	auto wrapped_multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(wrapped_grid);
+	REQUIRE(grid_multilevel != nullptr);
+	REQUIRE(wrapped_multilevel != nullptr);
+	REQUIRE(wrapped_grid->input_width() == grid->input_width() + 1);
+	REQUIRE(wrapped_grid->output_width() == grid->output_width());
+	REQUIRE(wrapped_grid->required_output_alignment() == grid->required_output_alignment());
+	REQUIRE(wrapped_grid->preferred_output_layout() == grid->preferred_output_layout());
+	REQUIRE(wrapped_grid->n_params() == grid->n_params());
+	REQUIRE(wrapped_multilevel->n_pos_dims() == grid_multilevel->n_pos_dims());
+	REQUIRE(wrapped_multilevel->n_levels() == grid_multilevel->n_levels());
+	REQUIRE(wrapped_multilevel->n_features_per_level() == grid_multilevel->n_features_per_level());
+	REQUIRE(wrapped_multilevel->params_offset_table().size == grid_multilevel->params_offset_table().size);
+	for (uint32_t level = 0; level < grid_multilevel->n_levels(); ++level) {
+		REQUIRE(wrapped_multilevel->level_n_params(level) == grid_multilevel->level_n_params(level));
+		REQUIRE(wrapped_multilevel->level_params_offset(level) == grid_multilevel->level_params_offset(level));
+	}
+	for (uint32_t i = 0; i < grid_multilevel->params_offset_table().size; ++i) {
+		REQUIRE(wrapped_multilevel->params_offset_table().data[i] == grid_multilevel->params_offset_table().data[i]);
+	}
+}
+
+TEST_CASE("Multilevel interface derives a backward-compatible level count", "[encoding][permuto][grid][lod]") {
+	LegacyMultiLevelEncoding empty{0};
+	LegacyMultiLevelEncoding three_offsets{3};
+
+	REQUIRE_FALSE(std::is_abstract<LegacyMultiLevelEncoding>::value);
+	REQUIRE(empty.n_levels() == 0);
+	REQUIRE(three_offsets.n_levels() == 2);
+}
+
+TEST_CASE("Multilevel LoD composes inherited scalar and GPU level controls", "[encoding][permuto][grid][lod][double-backward]") {
+	tcnn_test_setup();
+
+	using T = float;
+	constexpr uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	for (const std::string base : {"Grid", "Permuto"}) {
+		for (const char* lod_type : {"Hard", "Soft"}) {
+			for (const bool use_gpu_control : {false, true}) {
+				CAPTURE(base, lod_type, use_gpu_control);
+				json config = base == "Grid" ? grid_lod_config(lod_type) : hard_lod_config(2, 3);
+				config["lod_type"] = lod_type;
+				const uint32_t input_width = base == "Grid" ? 3 : 6;
+
+				std::shared_ptr<Encoding<T>> controlled{create_encoding<T>(input_width, config, 4)};
+				std::shared_ptr<Encoding<T>> reference{create_encoding<T>(input_width, config, 4)};
+				auto controlled_multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(controlled);
+				REQUIRE(controlled_multilevel != nullptr);
+				controlled->set_jit_fusion(false);
+				reference->set_jit_fusion(false);
+
+				auto controlled_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+				auto reference_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+				auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+				auto controlled_trainer = std::make_shared<Trainer<float, T, T>>(controlled, controlled_optimizer, loss);
+				auto reference_trainer = std::make_shared<Trainer<float, T, T>>(reference, reference_optimizer, loss);
+
+				std::vector<T> params(controlled->n_params());
+				for (size_t i = 0; i < params.size(); ++i) {
+					params[i] = (T)(static_cast<int>((i * 23) % 41) - 20) / 128.0f;
+				}
+				CUDA_CHECK_THROW(cudaMemcpy(controlled->params(), params.data(), controlled->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+				CUDA_CHECK_THROW(cudaMemcpy(reference->params(), params.data(), reference->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+
+				std::vector<float> controlled_input_host(input_width * batch_size);
+				std::vector<float> reference_input_host(input_width * batch_size);
+				std::vector<float> gpu_controls(batch_size);
+				for (uint32_t element = 0; element < batch_size; ++element) {
+					for (uint32_t dim = 0; dim + 1 < input_width; ++dim) {
+						const float value = 0.05f + (float)((element * 7 + dim * 11) % 89) / 100.0f;
+						controlled_input_host[element * input_width + dim] = value;
+						reference_input_host[element * input_width + dim] = value;
+					}
+					gpu_controls[element] = element % 2 == 0 ? 0.25f : 0.75f;
+					controlled_input_host[element * input_width + input_width - 1] = 1.0f;
+					reference_input_host[element * input_width + input_width - 1] =
+						use_gpu_control ? gpu_controls[element] : 0.25f;
+				}
+
+				GPUMatrix<float> gpu_control{1, batch_size};
+				if (use_gpu_control) {
+					CUDA_CHECK_THROW(cudaMemcpy(gpu_control.data(), gpu_controls.data(), gpu_control.n_bytes(), cudaMemcpyHostToDevice));
+					controlled_multilevel->set_max_level_gpu(gpu_control.data());
+				} else {
+					controlled_multilevel->set_max_level(0.25f);
+				}
+
+				GPUMatrix<float> controlled_input{input_width, batch_size};
+				GPUMatrix<float> reference_input{input_width, batch_size};
+				GPUMatrix<T> controlled_output{controlled->padded_output_width(), batch_size};
+				GPUMatrix<T> reference_output{reference->padded_output_width(), batch_size};
+				GPUMatrix<T> dL_doutput{controlled->padded_output_width(), batch_size};
+				GPUMatrix<float> dL_ddLdinput{input_width, batch_size};
+				GPUMatrix<float> controlled_dL_dinput{input_width, batch_size};
+				GPUMatrix<float> reference_dL_dinput{input_width, batch_size};
+				GPUMatrix<T> controlled_dL_ddLdoutput{controlled->padded_output_width(), batch_size};
+				GPUMatrix<T> reference_dL_ddLdoutput{reference->padded_output_width(), batch_size};
+				GPUMatrix<float> controlled_second_dL_dinput{input_width, batch_size};
+				GPUMatrix<float> reference_second_dL_dinput{input_width, batch_size};
+				CUDA_CHECK_THROW(cudaMemcpy(
+					controlled_input.data(), controlled_input_host.data(), controlled_input.n_bytes(), cudaMemcpyHostToDevice
+				));
+				CUDA_CHECK_THROW(cudaMemcpy(
+					reference_input.data(), reference_input_host.data(), reference_input.n_bytes(), cudaMemcpyHostToDevice
+				));
+				pcg32 rng{0xdeadbeef};
+				dL_doutput.initialize_uniform(rng, -0.5f, 0.5f);
+				dL_ddLdinput.initialize_uniform(rng, -0.5f, 0.5f);
+
+				auto controlled_context = controlled->forward(controlled_input, &controlled_output, false, true);
+				auto reference_context = reference->forward(reference_input, &reference_output, false, true);
+				vector_match_rae(controlled_output.to_cpu_vector(), reference_output.to_cpu_vector(), 1e-5);
+
+				controlled->backward(
+					*controlled_context, controlled_input, controlled_output, dL_doutput, &controlled_dL_dinput, false, GradientMode::Overwrite
+				);
+				reference->backward(
+					*reference_context, reference_input, reference_output, dL_doutput, &reference_dL_dinput, false, GradientMode::Overwrite
+				);
+				vector_match_rae(controlled_dL_dinput.to_cpu_vector(), reference_dL_dinput.to_cpu_vector(), 1e-5);
+				std::vector<T> controlled_parameter_gradient(controlled->n_params());
+				std::vector<T> reference_parameter_gradient(reference->n_params());
+				CUDA_CHECK_THROW(cudaMemcpy(
+					controlled_parameter_gradient.data(), controlled->gradients(), controlled->n_params() * sizeof(T), cudaMemcpyDeviceToHost
+				));
+				CUDA_CHECK_THROW(cudaMemcpy(
+					reference_parameter_gradient.data(), reference->gradients(), reference->n_params() * sizeof(T), cudaMemcpyDeviceToHost
+				));
+				vector_match_rae(controlled_parameter_gradient, reference_parameter_gradient, 1.2e-2, 0.999, true);
+
+				controlled->backward_backward_input(
+					*controlled_context,
+					controlled_input,
+					dL_ddLdinput,
+					dL_doutput,
+					&controlled_dL_ddLdoutput,
+					&controlled_second_dL_dinput,
+					false,
+					GradientMode::Overwrite
+				);
+				reference->backward_backward_input(
+					*reference_context,
+					reference_input,
+					dL_ddLdinput,
+					dL_doutput,
+					&reference_dL_ddLdoutput,
+					&reference_second_dL_dinput,
+					false,
+					GradientMode::Overwrite
+				);
+				vector_match_rae(controlled_dL_ddLdoutput.to_cpu_vector(), reference_dL_ddLdoutput.to_cpu_vector(), 1e-5);
+				vector_match_rae(controlled_second_dL_dinput.to_cpu_vector(), reference_second_dL_dinput.to_cpu_vector(), 1e-5);
+				CUDA_CHECK_THROW(cudaMemcpy(
+					controlled_parameter_gradient.data(), controlled->gradients(), controlled->n_params() * sizeof(T), cudaMemcpyDeviceToHost
+				));
+				CUDA_CHECK_THROW(cudaMemcpy(
+					reference_parameter_gradient.data(), reference->gradients(), reference->n_params() * sizeof(T), cudaMemcpyDeviceToHost
+				));
+				vector_match_rae(controlled_parameter_gradient, reference_parameter_gradient, 1.2e-2, 0.999, true);
+			}
+		}
+	}
+}
+
+TEST_CASE("Soft LoD weights native Permuto forward and backward", "[encoding][permuto][lod]") {
+	tcnn_test_setup();
+
+	using T = float;
+	constexpr uint32_t n_levels = 2;
+	constexpr uint32_t n_features_per_level = 2;
+	constexpr uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	std::shared_ptr<Encoding<T>> base{create_encoding<T>(5, permuto_config(n_levels, 3, n_features_per_level), 8)};
+	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(6, soft_lod_config(n_levels, 3, n_features_per_level), 8)};
+	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss);
+	auto base_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto base_loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto base_trainer = std::make_shared<Trainer<float, T, T>>(base, base_optimizer, base_loss);
+
+	REQUIRE(encoding->n_params() == base->n_params());
+	std::vector<T> params(encoding->n_params());
+	for (size_t i = 0; i < params.size(); ++i) {
+		params[i] = (T)(static_cast<int>((i * 17) % 31) - 15) / 128.0f;
+	}
+	CUDA_CHECK_THROW(cudaMemcpy(encoding->params(), params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(cudaMemcpy(base->params(), params.data(), base->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+
+	const float boundary_ratio = (1.0f - 1e-3f) / n_levels;
+	const std::vector<float> ratios = {
+		-std::numeric_limits<float>::max(), -0.25f, 0.0f, boundary_ratio, 0.5f, 0.75f, 1.0f, 1.25f,
+		std::numeric_limits<float>::max(),
+	};
+	const auto input_host = hard_lod_input(batch_size, ratios);
+	std::vector<float> base_input_host(5 * batch_size);
+	for (uint32_t element = 0; element < batch_size; ++element) {
+		std::copy_n(input_host.data() + element * 6, 5, base_input_host.data() + element * 5);
+	}
+
+	GPUMatrix<float> input{6, batch_size};
+	GPUMatrix<float> base_input{5, batch_size};
+	GPUMatrix<T> output{encoding->padded_output_width(), batch_size};
+	GPUMatrix<T> base_output{base->padded_output_width(), batch_size};
+	CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(cudaMemcpy(base_input.data(), base_input_host.data(), base_input.n_bytes(), cudaMemcpyHostToDevice));
+
+	auto context = encoding->forward(input, &output, false, true);
+	auto base_context = base->forward(base_input, &base_output, false, true);
+	const auto output_host = output.to_cpu_vector();
+	const auto base_output_host = base_output.to_cpu_vector();
+	for (uint32_t element = 0; element < batch_size; ++element) {
+		const float ratio = ratios[element % ratios.size()];
+		for (uint32_t feature = 0; feature < encoding->padded_output_width(); ++feature) {
+			const float weight = feature < n_levels * n_features_per_level
+				? soft_lod_weight(ratio, n_levels, feature / n_features_per_level)
+				: 1.0f;
+			const float expected = weight * base_output_host[element * base->padded_output_width() + feature];
+			REQUIRE(output_host[element * encoding->padded_output_width() + feature] == Approx(expected).margin(1e-6f));
+		}
+	}
+
+	GPUMatrix<T> dL_doutput{encoding->padded_output_width(), batch_size};
+	GPUMatrix<T> base_dL_doutput{base->padded_output_width(), batch_size};
+	std::vector<T> dL_doutput_host(dL_doutput.n_elements());
+	std::vector<T> base_dL_doutput_host(base_dL_doutput.n_elements());
+	for (uint32_t element = 0; element < batch_size; ++element) {
+		const float ratio = ratios[element % ratios.size()];
+		for (uint32_t feature = 0; feature < encoding->padded_output_width(); ++feature) {
+			const size_t index = element * encoding->padded_output_width() + feature;
+			dL_doutput_host[index] = (T)(static_cast<int>((index * 13) % 23) - 11) / 32.0f;
+			const float weight = feature < n_levels * n_features_per_level
+				? soft_lod_weight(ratio, n_levels, feature / n_features_per_level)
+				: 1.0f;
+			base_dL_doutput_host[index] = weight * dL_doutput_host[index];
+		}
+	}
+	CUDA_CHECK_THROW(cudaMemcpy(dL_doutput.data(), dL_doutput_host.data(), dL_doutput.n_bytes(), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(
+		cudaMemcpy(base_dL_doutput.data(), base_dL_doutput_host.data(), base_dL_doutput.n_bytes(), cudaMemcpyHostToDevice)
+	);
+
+	GPUMatrix<float> dL_dinput{6, batch_size};
+	GPUMatrix<float> base_dL_dinput{5, batch_size};
+	encoding->backward(*context, input, output, dL_doutput, &dL_dinput, false, GradientMode::Overwrite);
+	base->backward(*base_context, base_input, base_output, base_dL_doutput, &base_dL_dinput, false, GradientMode::Overwrite);
+	const auto dL_dinput_host = dL_dinput.to_cpu_vector();
+	const auto base_dL_dinput_host = base_dL_dinput.to_cpu_vector();
+	for (uint32_t element = 0; element < batch_size; ++element) {
+		for (uint32_t dim = 0; dim < 5; ++dim) {
+			const float expected = base_dL_dinput_host[element * 5 + dim];
+			REQUIRE(dL_dinput_host[element * 6 + dim] == Approx(expected).margin(1e-5f).epsilon(1e-4f));
+		}
+		REQUIRE(dL_dinput_host[element * 6 + 5] == 0.0f);
+	}
+
+	std::vector<T> parameter_gradient(encoding->n_params());
+	std::vector<T> base_parameter_gradient(base->n_params());
+	CUDA_CHECK_THROW(
+		cudaMemcpy(parameter_gradient.data(), encoding->gradients(), encoding->n_params() * sizeof(T), cudaMemcpyDeviceToHost)
+	);
+	CUDA_CHECK_THROW(
+		cudaMemcpy(base_parameter_gradient.data(), base->gradients(), base->n_params() * sizeof(T), cudaMemcpyDeviceToHost)
+	);
+	bool found_parameter_gradient = false;
+	for (size_t i = 0; i < parameter_gradient.size(); ++i) {
+		REQUIRE(parameter_gradient[i] == Approx(base_parameter_gradient[i]).margin(1e-5f).epsilon(1e-4f));
+		found_parameter_gradient |= parameter_gradient[i] != 0.0f;
+	}
+	REQUIRE(found_parameter_gradient);
+
+	encoding->backward(*context, input, output, dL_doutput, nullptr, false, GradientMode::Accumulate);
+	std::vector<T> accumulated(encoding->n_params());
+	CUDA_CHECK_THROW(
+		cudaMemcpy(accumulated.data(), encoding->gradients(), encoding->n_params() * sizeof(T), cudaMemcpyDeviceToHost)
+	);
+	for (size_t i = 0; i < parameter_gradient.size(); ++i) {
+		REQUIRE(accumulated[i] == Approx(2.0f * parameter_gradient[i]).margin(1e-5f).epsilon(1e-4f));
+	}
+	encoding->backward(*context, input, output, dL_doutput, nullptr, false, GradientMode::Ignore);
+	std::vector<T> ignored(encoding->n_params());
+	CUDA_CHECK_THROW(cudaMemcpy(ignored.data(), encoding->gradients(), encoding->n_params() * sizeof(T), cudaMemcpyDeviceToHost));
+	REQUIRE(ignored == accumulated);
+
+	auto context_only = encoding->forward(input, nullptr, false, true);
+	GPUMatrix<float> context_only_dL_dinput{6, batch_size};
+	encoding->backward(
+		*context_only, input, output, dL_doutput, &context_only_dL_dinput, false, GradientMode::Ignore
+	);
+	const auto context_only_gradient = context_only_dL_dinput.to_cpu_vector();
+	for (size_t i = 0; i < context_only_gradient.size(); ++i) {
+		REQUIRE(context_only_gradient[i] == Approx(dL_dinput_host[i]).margin(1e-5f).epsilon(1e-4f));
+	}
+
+	const auto scalar_loss = [&](const std::vector<float>& candidate_input) {
+		CUDA_CHECK_THROW(cudaMemcpy(input.data(), candidate_input.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+		encoding->forward(input, &output);
+		const auto candidate_output = output.to_cpu_vector();
+		float result = 0.0f;
+		for (size_t i = 0; i < candidate_output.size(); ++i) {
+			result += candidate_output[i] * dL_doutput_host[i];
+		}
+		return result;
+	};
+	constexpr float input_epsilon = 1e-4f;
+	constexpr uint32_t finite_difference_element = 5;
+	constexpr uint32_t finite_difference_index = finite_difference_element * 6;
+	auto lower_input = input_host;
+	auto upper_input = input_host;
+	lower_input[finite_difference_index] -= input_epsilon;
+	upper_input[finite_difference_index] += input_epsilon;
+	const float finite_difference = (scalar_loss(upper_input) - scalar_loss(lower_input)) / (2.0f * input_epsilon);
+	REQUIRE(dL_dinput_host[finite_difference_index] != 0.0f);
+	REQUIRE(finite_difference != 0.0f);
+	REQUIRE(dL_dinput_host[finite_difference_index] == Approx(finite_difference).margin(1e-2f).epsilon(2e-2f));
+
+	const auto parameter_it = std::find_if(
+		parameter_gradient.begin(), parameter_gradient.end(), [](T value) { return std::abs(value) > 1e-5f; }
+	);
+	REQUIRE(parameter_it != parameter_gradient.end());
+	const size_t parameter_index = parameter_it - parameter_gradient.begin();
+	constexpr float parameter_epsilon = 1.0f / 256.0f;
+	auto lower_params = params;
+	auto upper_params = params;
+	lower_params[parameter_index] -= parameter_epsilon;
+	upper_params[parameter_index] += parameter_epsilon;
+	CUDA_CHECK_THROW(
+		cudaMemcpy(encoding->params(), upper_params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice)
+	);
+	const float upper_loss = scalar_loss(input_host);
+	CUDA_CHECK_THROW(
+		cudaMemcpy(encoding->params(), lower_params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice)
+	);
+	const float lower_loss = scalar_loss(input_host);
+	CUDA_CHECK_THROW(cudaMemcpy(encoding->params(), params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+	const float parameter_finite_difference = (upper_loss - lower_loss) / (2.0f * parameter_epsilon);
+	REQUIRE(parameter_gradient[parameter_index] == Approx(parameter_finite_difference).margin(1e-2f).epsilon(2e-2f));
 }
 
 TEST_CASE("Hard LoD isolates rows and retains its forward context", "[encoding][permuto][lod]") {
@@ -1240,30 +2132,283 @@ TEST_CASE("Hard LoD excludes the epsilon boundary from forward and backward", "[
 	REQUIRE(std::all_of(parameter_gradient_host.begin(), parameter_gradient_host.end(), [](T value) { return (float)value == 0.0f; }));
 }
 
-TEST_CASE("Hard LoD training supports CUDA graph capture", "[encoding][permuto][lod]") {
+TEST_CASE("Grid-backed hard LoD uses one exact boundary at both derivative orders", "[encoding][grid][lod][double-backward]") {
 	tcnn_test_setup();
 
-	using T = network_precision_t;
-	json config = hard_lod_config();
-	config["base"]["log2_hashmap_size"] = 4;
-	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(6, config, 16)};
+	using T = float;
+	constexpr uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(3, grid_lod_config("Hard"), 4)};
+	auto multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(encoding);
 	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
 	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
 	auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss);
+	REQUIRE(multilevel != nullptr);
+	REQUIRE(multilevel->n_levels() == 2);
 
-	const uint32_t batch_size = BATCH_SIZE_GRANULARITY;
-	GPUMatrix<float> input{6, batch_size};
-	GPUMatrix<float> input_gradient{6, batch_size};
-	GPUMatrix<float> target{32, batch_size};
-	const auto input_host = hard_lod_input(batch_size, {0.0f, 10.0f / 16.0f, 1.0f});
+	std::vector<T> params(encoding->n_params());
+	for (size_t i = 0; i < params.size(); ++i) {
+		params[i] = (T)(static_cast<int>((i * 19) % 37) - 18) / 64.0f;
+	}
+	CUDA_CHECK_THROW(cudaMemcpy(encoding->params(), params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+	const size_t level_one_offset = multilevel->level_params_offset(1) * multilevel->n_features_per_level();
+
+	const float boundary_ratio = (1.0f - 1e-3f) / 2.0f;
+	for (const auto& [ratio, level_one_enabled] : std::array<std::pair<float, bool>, 2>{{
+		{boundary_ratio, false}, {0.5f, true}
+	}}) {
+		CAPTURE(ratio, level_one_enabled);
+		std::vector<float> input_host(3 * batch_size);
+		std::vector<T> dL_doutput_host(encoding->padded_output_width() * batch_size, 0.0f);
+		std::vector<float> dL_ddLdinput_host(3 * batch_size);
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			input_host[element * 3] = 0.137f;
+			input_host[element * 3 + 1] = 0.619f;
+			input_host[element * 3 + 2] = ratio;
+			dL_doutput_host[element * encoding->padded_output_width() + 2] = 0.75f;
+			dL_doutput_host[element * encoding->padded_output_width() + 3] = -0.5f;
+			dL_ddLdinput_host[element * 3] = 1.0f;
+			dL_ddLdinput_host[element * 3 + 1] = -0.25f;
+			dL_ddLdinput_host[element * 3 + 2] = 100.0f;
+		}
+
+		GPUMatrix<float> input{3, batch_size};
+		GPUMatrix<T> output{encoding->padded_output_width(), batch_size};
+		GPUMatrix<T> dL_doutput{encoding->padded_output_width(), batch_size};
+		GPUMatrix<float> dL_dinput{3, batch_size};
+		GPUMatrix<float> dL_ddLdinput{3, batch_size};
+		GPUMatrix<T> dL_ddLdoutput{encoding->padded_output_width(), batch_size};
+		GPUMatrix<float> second_dL_dinput{3, batch_size};
+		CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(cudaMemcpy(dL_doutput.data(), dL_doutput_host.data(), dL_doutput.n_bytes(), cudaMemcpyHostToDevice));
+		CUDA_CHECK_THROW(
+			cudaMemcpy(dL_ddLdinput.data(), dL_ddLdinput_host.data(), dL_ddLdinput.n_bytes(), cudaMemcpyHostToDevice)
+		);
+
+		auto context = encoding->forward(input, &output, false, true);
+		const auto output_host = output.to_cpu_vector();
+		bool has_level_one_output = false;
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			for (uint32_t feature = 2; feature < 4; ++feature) {
+				has_level_one_output |= output_host[element * encoding->padded_output_width() + feature] != 0.0f;
+			}
+		}
+		REQUIRE(has_level_one_output == level_one_enabled);
+
+		encoding->backward(*context, input, output, dL_doutput, &dL_dinput, false, GradientMode::Overwrite);
+		const auto first_input_gradient = dL_dinput.to_cpu_vector();
+		std::vector<T> first_parameter_gradient(encoding->n_params());
+		CUDA_CHECK_THROW(cudaMemcpy(
+			first_parameter_gradient.data(),
+			encoding->gradients(),
+			encoding->n_params() * sizeof(T),
+			cudaMemcpyDeviceToHost
+		));
+		const bool has_first_input_gradient = std::any_of(
+			first_input_gradient.begin(), first_input_gradient.end(), [](float value) { return value != 0.0f; }
+		);
+		const bool has_first_parameter_gradient = std::any_of(
+			first_parameter_gradient.begin() + level_one_offset,
+			first_parameter_gradient.end(),
+			[](T value) { return value != 0.0f; }
+		);
+		REQUIRE(has_first_input_gradient == level_one_enabled);
+		REQUIRE(has_first_parameter_gradient == level_one_enabled);
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			REQUIRE(first_input_gradient[element * 3 + 2] == 0.0f);
+		}
+
+		encoding->backward_backward_input(
+			*context,
+			input,
+			dL_ddLdinput,
+			dL_doutput,
+			&dL_ddLdoutput,
+			&second_dL_dinput,
+			false,
+			GradientMode::Overwrite
+		);
+		const auto upstream_gradient = dL_ddLdoutput.to_cpu_vector();
+		const auto second_input_gradient = second_dL_dinput.to_cpu_vector();
+		std::vector<T> second_parameter_gradient(encoding->n_params());
+		CUDA_CHECK_THROW(cudaMemcpy(
+			second_parameter_gradient.data(),
+			encoding->gradients(),
+			encoding->n_params() * sizeof(T),
+			cudaMemcpyDeviceToHost
+		));
+		bool has_level_one_upstream_gradient = false;
+		for (uint32_t element = 0; element < batch_size; ++element) {
+			for (uint32_t feature = 2; feature < 4; ++feature) {
+				has_level_one_upstream_gradient |= upstream_gradient[element * encoding->padded_output_width() + feature] != 0.0f;
+			}
+			REQUIRE(second_input_gradient[element * 3 + 2] == 0.0f);
+		}
+		const bool has_second_input_gradient = std::any_of(
+			second_input_gradient.begin(), second_input_gradient.end(), [](float value) { return value != 0.0f; }
+		);
+		const bool has_second_parameter_gradient = std::any_of(
+			second_parameter_gradient.begin() + level_one_offset,
+			second_parameter_gradient.end(),
+			[](T value) { return value != 0.0f; }
+		);
+		REQUIRE(has_level_one_upstream_gradient == level_one_enabled);
+		REQUIRE(has_second_input_gradient == level_one_enabled);
+		REQUIRE(has_second_parameter_gradient == level_one_enabled);
+	}
+}
+
+TEST_CASE("Grid-backed soft LoD weights native double backward", "[encoding][grid][lod][double-backward]") {
+	tcnn_test_setup();
+
+	using T = float;
+	constexpr uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	constexpr float ratio = 0.75f;
+	std::shared_ptr<Encoding<T>> base{create_encoding<T>(2, grid_config(), 4)};
+	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(3, grid_lod_config("Soft"), 4)};
+	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss);
+	auto base_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto base_loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto base_trainer = std::make_shared<Trainer<float, T, T>>(base, base_optimizer, base_loss);
+
+	std::vector<T> params(encoding->n_params());
+	for (size_t i = 0; i < params.size(); ++i) {
+		params[i] = (T)((static_cast<int>((i * 23) % 41) - 20) / 128.0f);
+	}
+	CUDA_CHECK_THROW(cudaMemcpy(encoding->params(), params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(cudaMemcpy(base->params(), params.data(), base->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+
+	std::vector<float> input_host(3 * batch_size);
+	std::vector<float> base_input_host(2 * batch_size);
+	std::vector<float> dL_ddLdinput_host(3 * batch_size);
+	std::vector<float> base_dL_ddLdinput_host(2 * batch_size);
+	std::vector<T> dL_doutput_host(encoding->padded_output_width() * batch_size);
+	std::vector<T> base_dL_doutput_host(base->padded_output_width() * batch_size);
+	for (uint32_t element = 0; element < batch_size; ++element) {
+		input_host[element * 3] = base_input_host[element * 2] = 0.173f;
+		input_host[element * 3 + 1] = base_input_host[element * 2 + 1] = 0.587f;
+		input_host[element * 3 + 2] = ratio;
+		dL_ddLdinput_host[element * 3] = base_dL_ddLdinput_host[element * 2] = 0.75f;
+		dL_ddLdinput_host[element * 3 + 1] = base_dL_ddLdinput_host[element * 2 + 1] = -0.5f;
+		dL_ddLdinput_host[element * 3 + 2] = 100.0f;
+		for (uint32_t feature = 0; feature < encoding->padded_output_width(); ++feature) {
+			const size_t index = element * encoding->padded_output_width() + feature;
+			dL_doutput_host[index] = (T)(static_cast<int>((index * 11) % 29) - 14) / 32.0f;
+			const float weight = feature < 4 ? soft_lod_weight(ratio, 2, feature / 2) : 1.0f;
+			base_dL_doutput_host[index] = weight * dL_doutput_host[index];
+		}
+	}
+
+	GPUMatrix<float> input{3, batch_size};
+	GPUMatrix<float> base_input{2, batch_size};
+	GPUMatrix<T> output{encoding->padded_output_width(), batch_size};
+	GPUMatrix<T> base_output{base->padded_output_width(), batch_size};
+	GPUMatrix<T> dL_doutput{encoding->padded_output_width(), batch_size};
+	GPUMatrix<T> base_dL_doutput{base->padded_output_width(), batch_size};
+	GPUMatrix<float> dL_ddLdinput{3, batch_size};
+	GPUMatrix<float> base_dL_ddLdinput{2, batch_size};
+	GPUMatrix<T> dL_ddLdoutput{encoding->padded_output_width(), batch_size};
+	GPUMatrix<T> base_dL_ddLdoutput{base->padded_output_width(), batch_size};
+	GPUMatrix<float> dL_dinput{3, batch_size};
+	GPUMatrix<float> base_dL_dinput{2, batch_size};
 	CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(cudaMemcpy(base_input.data(), base_input_host.data(), base_input.n_bytes(), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(cudaMemcpy(dL_doutput.data(), dL_doutput_host.data(), dL_doutput.n_bytes(), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(
+		cudaMemcpy(base_dL_doutput.data(), base_dL_doutput_host.data(), base_dL_doutput.n_bytes(), cudaMemcpyHostToDevice)
+	);
+	CUDA_CHECK_THROW(
+		cudaMemcpy(dL_ddLdinput.data(), dL_ddLdinput_host.data(), dL_ddLdinput.n_bytes(), cudaMemcpyHostToDevice)
+	);
+	CUDA_CHECK_THROW(cudaMemcpy(
+		base_dL_ddLdinput.data(), base_dL_ddLdinput_host.data(), base_dL_ddLdinput.n_bytes(), cudaMemcpyHostToDevice
+	));
 
-	pcg32 rng{0xdeadbeef};
-	target.initialize_uniform(rng, -1.0f, 1.0f);
-	StreamAndEvent training_stream;
-	auto context = trainer->training_step(training_stream.get(), input, target, nullptr, false, &input_gradient);
-	REQUIRE(context != nullptr);
-	CUDA_CHECK_THROW(cudaStreamSynchronize(training_stream.get()));
+	auto context = encoding->forward(input, &output, false, true);
+	auto base_context = base->forward(base_input, &base_output, false, true);
+	encoding->backward_backward_input(
+		*context, input, dL_ddLdinput, dL_doutput, &dL_ddLdoutput, &dL_dinput, false, GradientMode::Overwrite
+	);
+	base->backward_backward_input(
+		*base_context,
+		base_input,
+		base_dL_ddLdinput,
+		base_dL_doutput,
+		&base_dL_ddLdoutput,
+		&base_dL_dinput,
+		false,
+		GradientMode::Overwrite
+	);
+
+	const auto upstream_gradient = dL_ddLdoutput.to_cpu_vector();
+	const auto base_upstream_gradient = base_dL_ddLdoutput.to_cpu_vector();
+	const auto input_gradient = dL_dinput.to_cpu_vector();
+	const auto base_input_gradient = base_dL_dinput.to_cpu_vector();
+	bool found_upstream_gradient = false;
+	bool found_input_gradient = false;
+	for (uint32_t element = 0; element < batch_size; ++element) {
+		for (uint32_t feature = 0; feature < encoding->padded_output_width(); ++feature) {
+			const size_t index = element * encoding->padded_output_width() + feature;
+			const float weight = feature < 4 ? soft_lod_weight(ratio, 2, feature / 2) : 1.0f;
+			const float expected = weight * base_upstream_gradient[index];
+			REQUIRE(upstream_gradient[index] == Approx(expected).margin(1e-5f).epsilon(1e-4f));
+			found_upstream_gradient |= upstream_gradient[index] != 0.0f;
+		}
+		for (uint32_t dim = 0; dim < 2; ++dim) {
+			const float expected = base_input_gradient[element * 2 + dim];
+			REQUIRE(input_gradient[element * 3 + dim] == Approx(expected).margin(1e-5f).epsilon(1e-4f));
+			found_input_gradient |= input_gradient[element * 3 + dim] != 0.0f;
+		}
+		REQUIRE(input_gradient[element * 3 + 2] == 0.0f);
+	}
+	REQUIRE(found_upstream_gradient);
+	REQUIRE(found_input_gradient);
+
+	std::vector<T> parameter_gradient(encoding->n_params());
+	std::vector<T> base_parameter_gradient(base->n_params());
+	CUDA_CHECK_THROW(
+		cudaMemcpy(parameter_gradient.data(), encoding->gradients(), encoding->n_params() * sizeof(T), cudaMemcpyDeviceToHost)
+	);
+	CUDA_CHECK_THROW(
+		cudaMemcpy(base_parameter_gradient.data(), base->gradients(), base->n_params() * sizeof(T), cudaMemcpyDeviceToHost)
+	);
+	bool found_parameter_gradient = false;
+	for (size_t i = 0; i < parameter_gradient.size(); ++i) {
+		REQUIRE(parameter_gradient[i] == Approx(base_parameter_gradient[i]).margin(1e-5f).epsilon(1e-4f));
+		found_parameter_gradient |= parameter_gradient[i] != 0.0f;
+	}
+	REQUIRE(found_parameter_gradient);
+}
+
+TEST_CASE("Multilevel LoD training supports CUDA graph capture", "[encoding][permuto][lod]") {
+	tcnn_test_setup();
+
+	using T = network_precision_t;
+	for (const char* lod_type : {"Hard", "Soft"}) {
+		CAPTURE(lod_type);
+		json config = hard_lod_config();
+		config["lod_type"] = lod_type;
+		config["base"]["log2_hashmap_size"] = 4;
+		std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(6, config, 16)};
+		auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+		auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+		auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss);
+
+		const uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+		GPUMatrix<float> input{6, batch_size};
+		GPUMatrix<float> input_gradient{6, batch_size};
+		GPUMatrix<float> target{32, batch_size};
+		const auto input_host = hard_lod_input(batch_size, {0.0f, 10.0f / 16.0f, 1.0f});
+		CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+
+		pcg32 rng{0xdeadbeef};
+		target.initialize_uniform(rng, -1.0f, 1.0f);
+		StreamAndEvent training_stream;
+		auto context = trainer->training_step(training_stream.get(), input, target, nullptr, false, &input_gradient);
+		REQUIRE(context != nullptr);
+		CUDA_CHECK_THROW(cudaStreamSynchronize(training_stream.get()));
+	}
 }
 
 TEST_CASE("Generalized Permuto supports native double backward", "[encoding][permuto][double-backward]") {

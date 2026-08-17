@@ -277,7 +277,7 @@ Following is a summary of the components of this framework. [The JSON documentat
 | Frequency | `include/tiny-cuda-nn/encodings/frequency.h` | NeRF's [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf) positional encoding applied equally to all dimensions.
 | Grid | `include/tiny-cuda-nn/encodings/grid.h` | Encoding based on trainable multiresolution grids. Used for [Instant Neural Graphics Primitives [Müller et al. 2022]](https://nvlabs.github.io/instant-ngp/). The grids can be backed by hashtables, dense storage, or tiled storage.
 | Identity | `include/tiny-cuda-nn/encodings/identity.h` | Leaves values untouched.
-| MultiLevelEncodingLoD | `include/tiny-cuda-nn/encodings/multi_level_lod.h` | Adds hard per-element level control to Permuto.
+| MultiLevelEncodingLoD | `include/tiny-cuda-nn/encodings/multi_level_lod.h` | Hard or soft per-element LoD for Grid and Permuto.
 | Oneblob | `include/tiny-cuda-nn/encodings/oneblob.h` | From Neural Importance Sampling [[Müller et al. 2019]](https://tom94.net/data/publications/mueller18neural/mueller18neural-v4.pdf) and Neural Control Variates [[Müller et al. 2020]](https://tom94.net/data/publications/mueller20neural/mueller20neural.pdf).
 | Permuto | `include/tiny-cuda-nn/encodings/internal/permuto.h` | Trainable lattice for selected input and per-level feature widths.
 | SphericalHarmonics | `include/tiny-cuda-nn/encodings/spherical_harmonics.h` | A frequency-space encoding that is more suitable to direction vectors than component-wise ones.

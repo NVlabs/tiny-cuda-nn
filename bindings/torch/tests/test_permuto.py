@@ -72,6 +72,95 @@ class TestPermuto(unittest.TestCase):
 				self.assertEqual(module.n_output_dims, 2 * n_features_per_level)
 				self.assertEqual(module.params.numel(), 2 * 4 * n_features_per_level)
 
+	def test_soft_lod_native_forward_and_backward(self) -> None:
+		base_config = {
+			"otype": "Permuto",
+			"n_levels": 2,
+			"n_features_per_level": 2,
+			"log2_hashmap_size": 4,
+			"base_scale": 4.0,
+			"per_level_scale": 1.5,
+			"max_input_grad_dims": 3,
+		}
+		soft_config = {
+			"otype": "MultiLevelEncodingLoD",
+			"lod_type": "Soft",
+			"base": base_config,
+		}
+		base = tcnn.Encoding(5, base_config, seed=17, dtype=torch.float32)
+		module = tcnn.Encoding(6, soft_config, seed=19, dtype=torch.float32)
+		base.jit_fusion = False
+		module.jit_fusion = False
+		with torch.no_grad():
+			base.params.copy_(module.params)
+
+		torch.manual_seed(23)
+		positions = torch.rand((128, 5), device="cuda", dtype=torch.float32)
+		boundary = (1.0 - 1e-3) / 2
+		max_finite = torch.finfo(torch.float32).max
+		ratios = torch.tensor(
+			[-max_finite, -0.25, 0.0, boundary, 0.5, 0.75, 1.0, 1.25, max_finite],
+			device=positions.device,
+			dtype=torch.float32,
+		).repeat(15)[:128, None]
+		inputs = torch.cat((positions, ratios), dim=1).requires_grad_()
+		base_output = base(positions)
+		output = module(inputs)
+
+		level_f = ratios * 2 + 1e-3
+		level_indices = torch.arange(2, device=positions.device, dtype=torch.float32)[None, :]
+		weights = torch.clamp(level_f - level_indices, min=0.0, max=1.0).repeat_interleave(2, dim=1)
+		expected = base_output.clone()
+		expected[:, :4] *= weights
+		torch.testing.assert_close(output, expected, atol=1e-6, rtol=1e-5)
+
+		probe = torch.randn_like(output)
+		input_gradient, parameter_gradient = torch.autograd.grad(
+			(output * probe).sum(), (inputs, module.params)
+		)
+		self.assertTrue(torch.isfinite(input_gradient).all().item())
+		self.assertTrue(torch.isfinite(parameter_gradient).all().item())
+		self.assertGreater(torch.count_nonzero(input_gradient[:, :3]).item(), 0)
+		self.assertEqual(torch.count_nonzero(input_gradient[:, 3:]).item(), 0)
+		self.assertGreater(torch.count_nonzero(parameter_gradient).item(), 0)
+
+	def test_grid_lod_native_construction_and_backward(self) -> None:
+		base_config = {
+			"otype": "HashGrid",
+			"n_levels": 17,
+			"n_features_per_level": 8,
+			"log2_hashmap_size": 4,
+			"base_resolution": 4,
+			"per_level_scale": 2.0,
+			"interpolation": "Linear",
+		}
+		for lod_type in ("Hard", "Soft"):
+			with self.subTest(lod_type=lod_type):
+				module = tcnn.Encoding(
+					3,
+					{
+						"otype": "MultiLevelEncodingLoD",
+						"lod_type": lod_type,
+						"base": base_config,
+					},
+					seed=29,
+					dtype=torch.float32,
+				)
+				module.jit_fusion = False
+				torch.manual_seed(31)
+				inputs = torch.rand((128, 3), device="cuda", dtype=torch.float32)
+				inputs[:, -1] = 0.75
+				inputs.requires_grad_()
+				output = module(inputs)
+				output.square().sum().backward()
+
+				self.assertTrue(torch.isfinite(output).all().item())
+				self.assertIsNotNone(inputs.grad)
+				self.assertGreater(torch.count_nonzero(inputs.grad[:, :2]).item(), 0)
+				self.assertEqual(torch.count_nonzero(inputs.grad[:, -1]).item(), 0)
+				self.assertIsNotNone(module.params.grad)
+				self.assertGreater(torch.count_nonzero(module.params.grad).item(), 0)
+
 	def test_first_order_construction_backward_and_optimizer(self) -> None:
 		self.assertTrue(torch.cuda.is_available())
 

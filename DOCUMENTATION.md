@@ -213,29 +213,30 @@ derivative orders.
 
 ### MultiLevelEncodingLoD
 
-`MultiLevelEncodingLoD` adds hard per-element level control to `Permuto`. The
-wrapper accepts one more input dimension than its `Permuto` base. The base can
-use any input width and feature width supported by `Permuto`. The first N
-values are the `Permuto` input. The final value is a level ratio in `[0, 1]`.
-Callers must enforce the ratio range.
+`MultiLevelEncodingLoD` adds per-element level control to a multilevel
+encoding. The public Grid and Permuto encodings are supported bases. The
+wrapper accepts one more input dimension than its base. The first N values are
+the base input. The final value is a level ratio. Callers normally provide a
+finite ratio in `[0, 1]`. NaN and infinite ratios are outside the public
+contract.
 
 ```text
 [x0, ..., xN-1, level_ratio]
           |             |
           v             v
-    Permuto input   active-level mask
+       base input      LoD weights
           \_____________/
                  |
                  v
-        hard-masked features
+          weighted features
 ```
 
 ```json5
 {
 	"otype": "MultiLevelEncodingLoD",
-	"lod_type": "Hard",           // Optional. "Hard" is the only mode.
+	"lod_type": "Soft",           // Optional. Defaults to "Hard".
 	"base": {
-		"otype": "Permuto",        // Permuto is the only supported base.
+		"otype": "Permuto",        // Can also be a Grid encoding.
 		"n_levels": 16,
 		"n_features_per_level": 2,
 		"log2_hashmap_size": 19,
@@ -248,23 +249,58 @@ Callers must enforce the ratio range.
 }
 ```
 
-For a zero-based level index `level`, the exact active-level predicate is:
+`lod_type` accepts `Hard`, `Discontinuous`, `Soft`, and `Continuous`,
+case-insensitively. `Discontinuous` is an alias for `Hard`. `Continuous` is an
+alias for `Soft`. `hyperparams()` serializes the canonical value `Hard` or
+`Soft` and preserves the base configuration as nested JSON.
+
+Both modes calculate the per-element level coordinate as follows:
 
 ```text
-level < level_ratio * n_levels + 1e-3
+level_f = level_ratio * n_levels + 1e-3
+level_i = floor(level_f)
 ```
 
+Hard mode enables a complete zero-based level when the following predicate is
+true:
+
+```text
+level < level_f
+```
+
+Soft mode assigns weight `1` to levels below `level_i`. Soft mode assigns
+weight `level_f - level_i` to level `level_i`. Soft mode assigns weight `0` to
+finer levels. A ratio below the first boundary can disable all levels. A ratio
+at or above the final boundary preserves all levels. The implementation does
+not clamp the ratio.
+
 An inactive level produces zero output features and contributes no parameter
-or position-input gradient. Ratio `0` enables level `0`. Ratio `1` enables all
-levels. The gradient of the level-ratio input is always zero. The wrapper
-otherwise preserves the base encoding's output order, padding, flat parameter
-layout, gradient modes, and serialized hyperparameters.
+or position-input gradient. A partially active soft level applies the same
+weight to its output and upstream gradient. The wrapper retains the unweighted
+base output because native backward can require that value. Native double
+backward applies the same soft weights to the upstream-gradient result. The
+level-ratio input is scheduler state. Its input gradient is exactly zero in
+both modes.
+
+The wrapper forwards the base level count, position dimensions, features per
+level, parameter offsets, output alignment, layout, and padding. The wrapper
+also preserves the base logical output order, flat parameter layout, inference
+parameters, and `Overwrite`, `Accumulate`, and `Ignore` gradient modes. The
+wrapper passes each gradient mode unchanged to the base at both derivative
+orders. The base encoding therefore defines the final gradient-mode behavior
+and any base-specific limitations. In particular, a half-precision Grid with
+`n_features_per_level=1` uses a temporary floating-point parameter-gradient
+accumulator. Its `Accumulate` path does not initialize that scratch buffer from
+the existing half-precision gradients. A Grid-backed wrapper inherits this
+pre-existing limitation. A nested `MultiLevelEncodingLoD` base is rejected
+because nested wrappers cannot safely share the native mutable level-selection
+state.
 
 A nonempty context-only forward is supported when the output pointer is null.
-The wrapper retains the per-element levels and nested base context for a later
-backward call. A zero-element batch is also valid. Empty-batch backward clears
-parameter gradients in `Overwrite` mode and preserves them in `Accumulate` and
-`Ignore` modes.
+Soft mode also retains the unweighted base output for a later backward call. A
+zero-element batch is valid for forward, backward, and double backward.
+Empty-batch derivative calls clear parameter gradients in `Overwrite` mode and
+preserve them in `Accumulate` and `Ignore` modes.
 
 #### Thread Safety
 
@@ -273,7 +309,8 @@ instance. Do not start a call whose device work can overlap earlier work on
 that instance. Use one CUDA stream, or insert and wait for an event dependency
 before another stream accesses the same parameters, gradients, or per-call
 state. Host-call serialization without a device dependency is insufficient.
-This port does not establish a broader host-thread-safety contract for TCNN.
+These encodings do not establish a broader host-thread-safety contract for
+TCNN.
 
 #### Build and JIT Support
 
@@ -289,10 +326,10 @@ device-function generation is unsupported. The no-forward-and-backward build
 cannot use this fallback because the encoding types are not registered.
 
 The non-JIT `NetworkWithInputEncoding` double-backward path currently supports
-the GSplat network shape: one `FullyFusedMLP` hidden layer, `ReLU`, and no output
-activation. That path computes parameter and upstream gradients. It does not
-compute a network input Hessian. Other network shapes report an explicit
-runtime error instead of returning an incomplete second-order result.
+one specific network shape: a `FullyFusedMLP` with one hidden layer, `ReLU`, and
+no output activation. That path computes parameter and upstream gradients. It
+does not compute a network input Hessian. Other network shapes report an
+explicit runtime error instead of returning an incomplete second-order result.
 
 ### Identity
 
