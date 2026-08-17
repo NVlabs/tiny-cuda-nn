@@ -949,6 +949,8 @@ public:
 
 	uint32_t n_pos_dims() const override { return N_POS_DIMS; }
 
+	uint32_t n_levels() const override { return m_n_levels; }
+
 	uint32_t n_features_per_level() const override { return N_FEATURES_PER_LEVEL; }
 
 	json hyperparams() const override {
