@@ -51,6 +51,19 @@ NETWORK_CONFIG = {
 
 
 class TestPermuto(unittest.TestCase):
+	def _assert_generated_inference_matches(self, module: torch.nn.Module, inputs: torch.Tensor) -> None:
+		module.params.requires_grad_(False)
+		self.assertFalse(inputs.requires_grad)
+
+		module.jit_fusion = False
+		expected = module(inputs).detach()
+		module.jit_fusion = True
+		actual = module(inputs).detach()
+		torch.cuda.synchronize()
+
+		self.assertTrue(module.jit_fusion)
+		torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-2)
+
 	def test_generalized_permuto_construction(self) -> None:
 		self.assertTrue(torch.cuda.is_available())
 
@@ -71,6 +84,130 @@ class TestPermuto(unittest.TestCase):
 				module.jit_fusion = False
 				self.assertEqual(module.n_output_dims, 2 * n_features_per_level)
 				self.assertEqual(module.params.numel(), 2 * 4 * n_features_per_level)
+
+	def test_generated_encoding_inference(self) -> None:
+		if not tcnn.supports_jit_fusion():
+			self.skipTest("GPU target does not support JIT.")
+
+		permuto_config = {
+			"otype": "Permuto",
+			"n_levels": 2,
+			"n_features_per_level": 2,
+			"log2_hashmap_size": 4,
+			"base_scale": 4.0,
+			"per_level_scale": 1.5,
+			"max_input_grad_dims": 3,
+			"seed": 17,
+		}
+		grid_config = {
+			"otype": "HashGrid",
+			"n_levels": 2,
+			"n_features_per_level": 2,
+			"log2_hashmap_size": 4,
+			"base_resolution": 4,
+			"per_level_scale": 2.0,
+			"interpolation": "Linear",
+		}
+		cases = (
+			(5, permuto_config),
+			(6, {"otype": "MultiLevelEncodingLoD", "lod_type": "Soft", "base": permuto_config}),
+			(3, {"otype": "MultiLevelEncodingLoD", "lod_type": "Hard", "base": grid_config}),
+		)
+
+		torch.manual_seed(37)
+		for n_input_dims, encoding_config in cases:
+			with self.subTest(n_input_dims=n_input_dims, otype=encoding_config["otype"]):
+				module = tcnn.Encoding(n_input_dims, encoding_config, seed=41, dtype=torch.float32)
+				inputs = torch.rand((256, n_input_dims), device="cuda", dtype=torch.float32)
+				if encoding_config["otype"] == "MultiLevelEncodingLoD":
+					ratios = torch.tensor(
+						[-0.25, 0.0, (1.0 - 1e-3) / 2, 0.5, 1.0, 1.25],
+						device=inputs.device,
+						dtype=inputs.dtype,
+					)
+					inputs[:, -1] = ratios.repeat(43)[:256]
+				self._assert_generated_inference_matches(module, inputs)
+
+	def test_generated_combined_network_inference(self) -> None:
+		if not tcnn.supports_jit_fusion():
+			self.skipTest("GPU target does not support JIT.")
+
+		encoding_config = {
+			**ENCODING_CONFIG,
+			"base": {
+				**ENCODING_CONFIG["base"],
+				"log2_hashmap_size": 8,
+				"base_scale": 4.0,
+				"per_level_scale": 1.2,
+			},
+		}
+		module = tcnn.NetworkWithInputEncoding(
+			n_input_dims=6,
+			n_output_dims=16,
+			encoding_config=encoding_config,
+			network_config=NETWORK_CONFIG,
+			seed=43,
+		)
+		torch.manual_seed(47)
+		inputs = torch.rand((256, 6), device="cuda", dtype=torch.float32)
+		inputs[:, -1] = torch.tensor(
+			[0.0, 10 / 16, 12 / 16, 15 / 16, 1.0], device=inputs.device, dtype=inputs.dtype
+		).repeat(52)[:256]
+		self._assert_generated_inference_matches(module, inputs)
+
+	def test_jit_inference_data_parallel(self) -> None:
+		if not tcnn.supports_jit_fusion():
+			self.skipTest("GPU target does not support JIT.")
+		if torch.cuda.device_count() < 2:
+			self.skipTest("DataParallel regression requires two CUDA devices.")
+
+		permuto_config = {
+			"otype": "Permuto",
+			"n_levels": 2,
+			"n_features_per_level": 2,
+			"log2_hashmap_size": 4,
+			"base_scale": 4.0,
+			"per_level_scale": 1.5,
+			"max_input_grad_dims": 3,
+			"seed": 17,
+		}
+		cases = (
+			("Permuto", 5, permuto_config, None),
+			("HardLoD", 6, {"otype": "MultiLevelEncodingLoD", "lod_type": "Hard", "base": permuto_config}, None),
+			("SoftLoD", 6, {"otype": "MultiLevelEncodingLoD", "lod_type": "Soft", "base": permuto_config}, None),
+			("NetworkWithInputEncoding", 6, {"otype": "MultiLevelEncodingLoD", "lod_type": "Hard", "base": permuto_config}, {
+				"otype": "FullyFusedMLP",
+				"activation": "ReLU",
+				"output_activation": "None",
+				"n_neurons": 16,
+				"n_hidden_layers": 1,
+			}),
+		)
+
+		torch.manual_seed(53)
+		for name, n_input_dims, encoding_config, network_config in cases:
+			with self.subTest(name=name):
+				if network_config is None:
+					module = tcnn.Encoding(n_input_dims, encoding_config, seed=59, dtype=torch.float32)
+				else:
+					module = tcnn.NetworkWithInputEncoding(
+						n_input_dims, 16, encoding_config, network_config, seed=59
+					)
+				module.params.requires_grad_(False)
+				inputs = torch.rand((512, n_input_dims), device="cuda:0", dtype=torch.float32)
+				if encoding_config["otype"] == "MultiLevelEncodingLoD":
+					inputs[:, -1] = torch.tensor(
+						[0.0, 0.5, 1.0], device=inputs.device, dtype=inputs.dtype
+					).repeat(171)[:512]
+
+				module.jit_fusion = False
+				expected = module(inputs).detach()
+				module.jit_fusion = True
+				actual = torch.nn.DataParallel(module, device_ids=[0, 1])(inputs).detach()
+				torch.cuda.synchronize()
+
+				self.assertTrue(module.jit_fusion)
+				torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-2)
 
 	def test_soft_lod_native_forward_and_backward(self) -> None:
 		base_config = {

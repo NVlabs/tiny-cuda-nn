@@ -262,6 +262,10 @@ public:
 		return m_encoding;
 	}
 
+	bool jit_fusion_state_valid() const override {
+		return m_network->jit_fusion_state_valid() && m_encoding->jit_fusion_state_valid();
+	}
+
 	json hyperparams() const override {
 		return {
 			{"otype", "NetworkWithInputEncoding"},

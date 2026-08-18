@@ -318,12 +318,24 @@ TCNN.
 the offline forward and backward implementations. A build configured with
 `TCNN_BUILD_NO_FWD_BWD=ON` does not register either encoding type.
 
-These encodings do not provide runtime-compiled CUDA device functions. When
-automatic just-in-time (JIT) fusion attempts to compile a model that contains
-either encoding, tiny-cuda-nn reports the unsupported device function,
-disables JIT fusion, and falls back to the offline implementation. Manual JIT
-device-function generation is unsupported. The no-forward-and-backward build
-cannot use this fallback because the encoding types are not registered.
+Both encodings provide generated CUDA device functions for inference. The
+generated `Permuto` function reproduces the native lattice lookup. The
+generated `MultiLevelEncodingLoD` function calls its generated base function
+and applies the hard or soft weights to the returned vector. The built-in
+`Permuto` and Grid bases implement generated forward, so automatic JIT
+inference remains enabled for those wrapper combinations. A custom multilevel
+base must also implement generated forward, or the normal JIT fallback applies.
+Direct `generate_device_function()` calls use the standard three-argument
+device-function interface.
+
+Generated training is not supported. The generated functions do not allocate
+or populate a forward context. Their forward-context size remains unsupported.
+An automatic JIT training `forward()` therefore reports the unsupported context
+size, disables JIT fusion, and falls back before it allocates a generated
+context. Native backward then consumes the native forward context. Generated
+backward and generated double backward are also unsupported. The
+no-forward-and-backward build cannot use the native fallback because the
+encoding types are not registered.
 
 The non-JIT `NetworkWithInputEncoding` double-backward path currently supports
 one specific network shape: a `FullyFusedMLP` with one hidden layer, `ReLU`, and

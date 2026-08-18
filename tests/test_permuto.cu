@@ -32,9 +32,11 @@
 #include <tiny-cuda-nn/encodings/multi_level_interface.h>
 #include <tiny-cuda-nn/gpu_memory.h>
 #include <tiny-cuda-nn/multi_stream.h>
+#include <tiny-cuda-nn/network_with_input_encoding.h>
 
 #include <array>
 #include <limits>
+#include <type_traits>
 
 using namespace tcnn;
 
@@ -131,6 +133,152 @@ public:
 private:
 	ParamsOffsetTable m_offsets;
 };
+
+std::vector<float> generated_test_input(uint32_t input_width, const std::vector<float>& ratios = {}) {
+	const uint32_t n_pos_dims = ratios.empty() ? input_width : input_width - 1;
+	std::vector<float> result(input_width * BATCH_SIZE_GRANULARITY);
+	for (uint32_t element = 0; element < BATCH_SIZE_GRANULARITY; ++element) {
+		for (uint32_t dim = 0; dim < n_pos_dims; ++dim) {
+			result[element * input_width + dim] = 0.01f + (float)((element * 7 + dim * 13) % 97) / 100.0f;
+		}
+		if (!ratios.empty()) {
+			result[element * input_width + n_pos_dims] = ratios[element % ratios.size()];
+		}
+	}
+	return result;
+}
+
+template <typename T>
+void require_generated_forward_matches(
+	const std::shared_ptr<DifferentiableObject<float, T, T>>& model,
+	const std::vector<float>& input_host,
+	const std::string& kernel_name,
+	bool exercise_automatic_jit = false,
+	uint32_t logical_output_width = 0
+) {
+	REQUIRE(input_host.size() == model->input_width() * BATCH_SIZE_GRANULARITY);
+	if (logical_output_width == 0) {
+		logical_output_width = model->output_width();
+	}
+	REQUIRE(logical_output_width <= model->padded_output_width());
+
+	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(model, optimizer, loss, 42);
+	(void)trainer;
+
+	GPUMatrix<float> input{model->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> native_output{model->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> generated_output{model->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+
+	model->set_jit_fusion(false);
+	model->inference_mixed_precision(input, native_output, false);
+	const auto native_host = native_output.to_cpu_vector();
+
+	auto kernel = generate_kernel(
+		kernel_name,
+		model->generate_device_function("eval_model"),
+		type_to_string<float>(),
+		type_to_string<T>(),
+		type_to_string<T>(),
+		model->input_width()
+	);
+	model->set_jit_fusion(true);
+	{
+		auto jit_guard = model->jit_guard(nullptr, false);
+		REQUIRE(model->jit_fusion());
+		kernel->launch(
+			n_blocks_linear(BATCH_SIZE_GRANULARITY),
+			N_THREADS_LINEAR,
+			0,
+			nullptr,
+			BATCH_SIZE_GRANULARITY,
+			input.view(),
+			generated_output.view(),
+			model->params()
+		);
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+	}
+	model->set_jit_fusion(false);
+	const auto generated_host = generated_output.to_cpu_vector();
+	vector_match_rae(native_host, generated_host, 1e-2, 0.99);
+
+	for (uint32_t element = 0; element < BATCH_SIZE_GRANULARITY; ++element) {
+		for (uint32_t feature = logical_output_width; feature < model->padded_output_width(); ++feature) {
+			REQUIRE((float)generated_host[element * model->padded_output_width() + feature] == 0.0f);
+		}
+	}
+
+	if (exercise_automatic_jit) {
+		model->set_jit_fusion(true);
+		model->inference_mixed_precision(input, generated_output, false);
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+		REQUIRE(model->jit_fusion());
+		vector_match_rae(native_host, generated_output.to_cpu_vector(), 1e-2, 0.99);
+	}
+}
+
+template <typename T>
+void require_cached_parent_falls_back_for_child_state(
+	const std::shared_ptr<DifferentiableObject<float, T, T>>& model,
+	const std::shared_ptr<MultiLevelEncoding<T>>& child,
+	const std::vector<float>& input_host
+) {
+	REQUIRE(child != nullptr);
+	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(model, optimizer, loss, 42);
+	(void)trainer;
+
+	std::vector<T> params(model->n_params());
+	for (size_t i = 0; i < params.size(); ++i) {
+		params[i] = (T)((static_cast<int>((i * 23) % 41) - 20) / 128.0f);
+	}
+	CUDA_CHECK_THROW(cudaMemcpy(model->params(), params.data(), model->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+
+	GPUMatrix<float> input{model->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> output{model->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+
+	auto inference = [&] {
+		model->inference_mixed_precision(input, output, false);
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+		return output.to_cpu_vector();
+	};
+
+	model->set_jit_fusion(true);
+	const auto cached_output = inference();
+	REQUIRE(model->jit_fusion());
+
+	child->set_max_level(0.25f);
+	REQUIRE_FALSE(model->jit_fusion());
+	const auto scalar_output = inference();
+	REQUIRE(cached_output != scalar_output);
+
+	child->set_max_level(1000.0f);
+	model->set_jit_fusion(true);
+	REQUIRE(inference() == cached_output);
+	REQUIRE(model->jit_fusion());
+	GPUMemory<float> max_levels{BATCH_SIZE_GRANULARITY};
+	std::vector<float> max_levels_host(BATCH_SIZE_GRANULARITY, 0.25f);
+	max_levels.copy_from_host(max_levels_host);
+	child->set_max_level_gpu(max_levels.data());
+	REQUIRE_FALSE(model->jit_fusion());
+	const auto gpu_limited_output = inference();
+	REQUIRE(cached_output != gpu_limited_output);
+
+	std::fill(max_levels_host.begin(), max_levels_host.end(), 1.0f);
+	max_levels.copy_from_host(max_levels_host);
+	const auto gpu_full_output = inference();
+	REQUIRE(gpu_limited_output != gpu_full_output);
+
+	child->set_max_level_gpu(nullptr);
+	model->set_jit_fusion(false);
+	model->set_jit_fusion(true);
+	REQUIRE(inference() == cached_output);
+	REQUIRE(model->jit_fusion());
+}
 
 float soft_lod_weight(float ratio, uint32_t n_levels, uint32_t level) {
 	const float level_f = ratio * n_levels + 1e-3f;
@@ -2691,4 +2839,472 @@ TEST_CASE("Hard LoD delegates native double backward", "[encoding][permuto][lod]
 	REQUIRE(std::all_of(ratio_dL_ddLdoutput.begin(), ratio_dL_ddLdoutput.end(), [](float value) { return value == 0.0f; }));
 	const auto ratio_dL_dinput = dL_dinput.to_cpu_vector();
 	REQUIRE(std::all_of(ratio_dL_dinput.begin(), ratio_dL_dinput.end(), [](float value) { return value == 0.0f; }));
+}
+
+TEMPLATE_TEST_CASE("Generated Permuto forward matches native", "[encoding][permuto][jit]", network_precision_t, float) {
+	using T = TestType;
+
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	for (const auto& dims_and_features : std::array<std::pair<uint32_t, uint32_t>, 4>{{{1, 1}, {3, 4}, {5, 2}, {24, 8}}}) {
+		const uint32_t n_dims = dims_and_features.first;
+		const uint32_t n_features_per_level = dims_and_features.second;
+		DYNAMIC_SECTION(n_dims << "D with " << n_features_per_level << " features per level") {
+			json config = permuto_config(2, 2, n_features_per_level);
+			config["base_scale"] = 4.0f;
+			config["per_level_scale"] = 1.5f;
+			config["max_input_grad_dims"] = n_dims;
+			config["seed"] = 17;
+			std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(n_dims, config)};
+			const std::string precision = std::is_same<T, float>::value ? "float" : "network";
+			require_generated_forward_matches<T>(
+				encoding,
+				generated_test_input(n_dims),
+				fmt::format("generated_permuto_{}_{}_{}", n_dims, n_features_per_level, precision),
+				n_dims == 5 && n_features_per_level == 2,
+				2 * n_features_per_level
+			);
+		}
+	}
+}
+
+TEMPLATE_TEST_CASE("Permuto mutable level controls force a cache-safe native fallback", "[encoding][permuto][jit]", network_precision_t, float) {
+	using T = TestType;
+
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	json config = permuto_config(2, 3, 2);
+	config["base_scale"] = 4.0f;
+	config["per_level_scale"] = 1.5f;
+	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(3, config)};
+	std::shared_ptr<Encoding<T>> reference{create_encoding<T>(3, config)};
+	auto multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(encoding);
+	auto reference_multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(reference);
+	REQUIRE(multilevel != nullptr);
+	REQUIRE(reference_multilevel != nullptr);
+
+	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto reference_optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss, 42);
+	auto reference_trainer = std::make_shared<Trainer<float, T, T>>(reference, reference_optimizer, loss, 42);
+	(void)trainer;
+	(void)reference_trainer;
+	std::vector<T> params(encoding->n_params());
+	for (size_t i = 0; i < params.size(); ++i) {
+		params[i] = (T)((static_cast<int>((i * 23) % 41) - 20) / 128.0f);
+	}
+	CUDA_CHECK_THROW(cudaMemcpy(encoding->params(), params.data(), encoding->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+	CUDA_CHECK_THROW(cudaMemcpy(reference->params(), params.data(), reference->n_params() * sizeof(T), cudaMemcpyHostToDevice));
+
+	GPUMatrix<float> input{encoding->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> output{encoding->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> reference_output{reference->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	const auto input_host = generated_test_input(encoding->input_width());
+	CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+	reference->set_jit_fusion(false);
+
+	auto require_parity = [&] {
+		reference->inference_mixed_precision(input, reference_output, false);
+		encoding->inference_mixed_precision(input, output, false);
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+		vector_match_rae(reference_output.to_cpu_vector(), output.to_cpu_vector(), 1e-2, 0.99);
+	};
+
+	multilevel->set_max_level(0.25f);
+	reference_multilevel->set_max_level(0.25f);
+	require_parity();
+	REQUIRE_FALSE(encoding->jit_fusion());
+
+	multilevel->set_max_level(1000.0f);
+	reference_multilevel->set_max_level(1000.0f);
+	encoding->set_jit_fusion(true);
+	require_parity();
+	REQUIRE(encoding->jit_fusion());
+
+	multilevel->set_max_level(0.25f);
+	reference_multilevel->set_max_level(0.25f);
+	require_parity();
+	REQUIRE_FALSE(encoding->jit_fusion());
+	encoding->set_jit_fusion(true);
+	require_parity();
+	REQUIRE_FALSE(encoding->jit_fusion());
+
+	GPUMemory<float> max_levels{BATCH_SIZE_GRANULARITY};
+	std::vector<float> max_levels_host(BATCH_SIZE_GRANULARITY, 0.25f);
+	max_levels.copy_from_host(max_levels_host);
+	multilevel->set_max_level_gpu(max_levels.data());
+	reference_multilevel->set_max_level_gpu(max_levels.data());
+	require_parity();
+	REQUIRE_FALSE(encoding->jit_fusion());
+	std::fill(max_levels_host.begin(), max_levels_host.end(), 1.0f);
+	max_levels.copy_from_host(max_levels_host);
+	require_parity();
+
+	multilevel->set_max_level_gpu(nullptr);
+	reference_multilevel->set_max_level_gpu(nullptr);
+	multilevel->set_max_level(1000.0f);
+	reference_multilevel->set_max_level(1000.0f);
+	encoding->set_jit_fusion(true);
+	require_parity();
+	REQUIRE(encoding->jit_fusion());
+}
+
+TEST_CASE("LoD mutable level controls reject generated inference", "[encoding][permuto][lod][jit]") {
+	tcnn_test_setup();
+	GPUMemory<float> max_levels{BATCH_SIZE_GRANULARITY};
+
+	for (const json& config : {hard_lod_config(2, 3), soft_lod_config(2, 3)}) {
+		std::shared_ptr<Encoding<float>> encoding{create_encoding<float>(6, config)};
+		auto multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<float>>(encoding);
+		REQUIRE(multilevel != nullptr);
+
+		encoding->set_jit_fusion(true);
+		multilevel->set_max_level(0.25f);
+		REQUIRE_FALSE(encoding->jit_fusion());
+		REQUIRE_THROWS_WITH(
+			encoding->generate_device_function("eval_lod"),
+			Catch::Matchers::Contains("generated forward does not support nondefault max-level state")
+		);
+
+		multilevel->set_max_level(1000.0f);
+		encoding->set_jit_fusion(true);
+		multilevel->set_max_level_gpu(max_levels.data());
+		REQUIRE_FALSE(encoding->jit_fusion());
+		REQUIRE_THROWS_WITH(
+			encoding->generate_device_function("eval_lod"),
+			Catch::Matchers::Contains("generated forward does not support nondefault max-level state")
+		);
+	}
+}
+
+TEST_CASE("Backward follows the forward context execution mode", "[encoding][grid][jit][double-backward]") {
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	using T = float;
+	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(2, grid_config(), 4)};
+	auto multilevel = std::dynamic_pointer_cast<MultiLevelEncoding<T>>(encoding);
+	REQUIRE(multilevel != nullptr);
+	auto optimizer = std::shared_ptr<Optimizer<T>>{create_optimizer<T>(json::object())};
+	auto loss = std::shared_ptr<Loss<T>>{create_loss<T>(json::object())};
+	auto trainer = std::make_shared<Trainer<float, T, T>>(encoding, optimizer, loss, 42);
+	(void)trainer;
+
+	GPUMatrix<float> input{encoding->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> output{encoding->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> dL_doutput{encoding->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<float> dL_dinput{encoding->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<float> dL_ddLdinput{encoding->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<T> dL_ddLdoutput{encoding->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	pcg32 rng{37};
+	input.initialize_uniform(rng, 0.01f, 0.99f);
+	dL_doutput.initialize_uniform(rng, -0.5f, 0.5f);
+	dL_ddLdinput.initialize_uniform(rng, -0.5f, 0.5f);
+
+	encoding->set_jit_fusion(true);
+	auto jit_context = encoding->forward(input, &output, false, true);
+	REQUIRE(encoding->jit_fusion());
+	multilevel->set_max_level(0.25f);
+	encoding->inference_mixed_precision(input, output, false);
+	REQUIRE_FALSE(encoding->jit_fusion());
+	REQUIRE_NOTHROW(encoding->backward(*jit_context, input, output, dL_doutput, &dL_dinput));
+	REQUIRE_NOTHROW(encoding->backward_backward_input(
+		*jit_context, input, dL_ddLdinput, dL_doutput, &dL_ddLdoutput, &dL_dinput
+	));
+
+	encoding->set_jit_fusion(true);
+	auto native_context = encoding->forward(input, &output, false, true);
+	REQUIRE_FALSE(encoding->jit_fusion());
+	multilevel->set_max_level(1000.0f);
+	encoding->set_jit_fusion(true);
+	REQUIRE(encoding->jit_fusion());
+	REQUIRE_NOTHROW(encoding->backward(*native_context, input, output, dL_doutput, &dL_dinput));
+	CUDA_CHECK_THROW(cudaDeviceSynchronize());
+}
+
+TEMPLATE_TEST_CASE("Generated LoD forward matches native", "[encoding][permuto][lod][jit]", network_precision_t, float) {
+	using T = TestType;
+
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	const float epsilon_boundary = (1.0f - 1e-3f) / 2.0f;
+	const std::vector<float> ratios = {
+		-std::numeric_limits<float>::max(), -0.25f, 0.0f, epsilon_boundary, 0.5f, 1.0f, 1.25f,
+		std::numeric_limits<float>::max(), std::numeric_limits<float>::quiet_NaN()
+	};
+	const std::string precision = std::is_same<T, float>::value ? "float" : "network";
+
+	for (const std::string base : {"Permuto", "Grid"}) {
+		for (const std::string lod_type : {"Hard", "Soft"}) {
+			DYNAMIC_SECTION(base << " base with " << lod_type << " LoD") {
+				json config;
+				uint32_t input_width;
+				if (base == "Permuto") {
+					config = lod_type == "Hard" ? hard_lod_config(2, 3) : soft_lod_config(2, 3);
+					config["base"]["base_scale"] = 4.0f;
+					config["base"]["per_level_scale"] = 1.5f;
+					config["base"]["seed"] = 23;
+					input_width = 6;
+				} else {
+					config = grid_lod_config(lod_type.c_str());
+					input_width = 3;
+				}
+
+				std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(input_width, config)};
+					require_generated_forward_matches<T>(
+						encoding,
+						generated_test_input(input_width, ratios),
+						fmt::format("generated_{}_lod_{}_{}", to_snake_case(base), to_snake_case(lod_type), precision),
+						lod_type == "Hard",
+						4
+					);
+			}
+		}
+	}
+}
+
+TEMPLATE_TEST_CASE("Generated Composite forward supports context-free multilevel children", "[encoding][permuto][lod][jit]", network_precision_t, float) {
+	using T = TestType;
+
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	for (const std::string child_type : {"Permuto", "HardLoD", "SoftLoD"}) {
+		DYNAMIC_SECTION(child_type) {
+			const bool is_lod = child_type != "Permuto";
+			json child = is_lod ? (child_type == "HardLoD" ? hard_lod_config(2, 3) : soft_lod_config(2, 3)) : permuto_config(2, 3);
+			if (is_lod) {
+				child["base"]["base_scale"] = 4.0f;
+				child["base"]["per_level_scale"] = 1.5f;
+			} else {
+				child["base_scale"] = 4.0f;
+				child["per_level_scale"] = 1.5f;
+			}
+
+			const uint32_t input_width = is_lod ? 6 : 5;
+			json config = {{"otype", "Composite"}, {"nested", json::array({child})}};
+			std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(input_width, config)};
+			require_generated_forward_matches<T>(
+				encoding,
+				is_lod ? generated_test_input(input_width, {0.0f, 0.5f, 1.0f}) : generated_test_input(input_width),
+				fmt::format("generated_composite_{}_{}", to_snake_case(child_type), std::is_same<T, float>::value ? "float" : "network"),
+				true
+			);
+		}
+	}
+
+	for (const std::string reduction : {"Sum", "Product"}) {
+		DYNAMIC_SECTION(reduction) {
+			json config = {
+				{"otype", "Composite"},
+				{"reduction", reduction},
+				{"nested", json::array({
+					{{"otype", "Identity"}, {"n_dims_to_encode", 1}},
+					{{"otype", "Identity"}, {"n_dims_to_encode", 1}},
+					{{"otype", "Identity"}, {"n_dims_to_encode", 1}},
+				})},
+			};
+			const uint32_t input_width = 3;
+			std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(input_width, config)};
+			std::vector<float> input(input_width * BATCH_SIZE_GRANULARITY);
+			for (uint32_t element = 0; element < BATCH_SIZE_GRANULARITY; ++element) {
+				input[element * input_width] = reduction == "Sum" ? 2048.0f : 65504.0f;
+				input[element * input_width + 1] = reduction == "Sum" ? 1.0f : 2.0f;
+				input[element * input_width + 2] = reduction == "Sum" ? -2048.0f : 0.5f;
+			}
+			require_generated_forward_matches<T>(
+				encoding,
+				input,
+				fmt::format("generated_composite_{}_{}", to_snake_case(reduction), std::is_same<T, float>::value ? "float" : "network"),
+				true
+			);
+		}
+	}
+}
+
+TEST_CASE("Cached Composite inference observes nested multilevel state", "[encoding][permuto][lod][jit]") {
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	using T = float;
+
+	std::shared_ptr<Encoding<T>> permuto{
+		create_encoding<T>(3, {{"otype", "Composite"}, {"nested", json::array({permuto_config(2, 3)})}})
+	};
+	require_cached_parent_falls_back_for_child_state<T>(
+		permuto,
+		std::dynamic_pointer_cast<MultiLevelEncoding<T>>(permuto->nested()),
+		generated_test_input(3)
+	);
+
+	std::shared_ptr<Encoding<T>> hard_lod{
+		create_encoding<T>(4, {{"otype", "Composite"}, {"nested", json::array({hard_lod_config(2, 3)})}})
+	};
+	require_cached_parent_falls_back_for_child_state<T>(
+		hard_lod,
+		std::dynamic_pointer_cast<MultiLevelEncoding<T>>(hard_lod->nested()),
+		generated_test_input(4, {1.0f})
+	);
+
+	std::shared_ptr<Encoding<T>> soft_lod{
+		create_encoding<T>(4, {{"otype", "Composite"}, {"nested", json::array({soft_lod_config(2, 3)})}})
+	};
+	require_cached_parent_falls_back_for_child_state<T>(
+		soft_lod,
+		std::dynamic_pointer_cast<MultiLevelEncoding<T>>(soft_lod->nested()),
+		generated_test_input(4, {1.0f})
+	);
+}
+
+TEST_CASE("Cached NetworkWithInputEncoding inference observes encoding state", "[network][encoding][permuto][lod][jit]") {
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	using T = network_precision_t;
+	json network_config = {
+		{"otype", "FullyFusedMLP"},
+		{"activation", "ReLU"},
+		{"output_activation", "None"},
+		{"n_neurons", 64},
+		{"n_hidden_layers", 1},
+	};
+
+	auto permuto = std::make_shared<NetworkWithInputEncoding<T>>(3, 16, permuto_config(2, 3), network_config);
+	require_cached_parent_falls_back_for_child_state<T>(
+		permuto,
+		std::dynamic_pointer_cast<MultiLevelEncoding<T>>(permuto->encoding()),
+		generated_test_input(3)
+	);
+
+	auto hard_lod = std::make_shared<NetworkWithInputEncoding<T>>(4, 16, hard_lod_config(2, 3), network_config);
+	require_cached_parent_falls_back_for_child_state<T>(
+		hard_lod,
+		std::dynamic_pointer_cast<MultiLevelEncoding<T>>(hard_lod->encoding()),
+		generated_test_input(4, {1.0f})
+	);
+
+	auto soft_lod = std::make_shared<NetworkWithInputEncoding<T>>(4, 16, soft_lod_config(2, 3), network_config);
+	require_cached_parent_falls_back_for_child_state<T>(
+		soft_lod,
+		std::dynamic_pointer_cast<MultiLevelEncoding<T>>(soft_lod->encoding()),
+		generated_test_input(4, {1.0f})
+	);
+}
+
+TEST_CASE("Generated forward leaves training contexts unsupported", "[encoding][permuto][lod][jit]") {
+	tcnn_test_setup();
+
+	std::shared_ptr<Encoding<float>> permuto{create_encoding<float>(5, permuto_config(2, 3))};
+	std::shared_ptr<Encoding<float>> lod{create_encoding<float>(6, soft_lod_config(2, 3))};
+	for (const auto& encoding : {permuto, lod}) {
+		REQUIRE_NOTHROW(encoding->generate_device_function("eval_generated"));
+		REQUIRE_FALSE(encoding->device_function_fwd_ctx_aligned_per_element());
+		REQUIRE_THROWS_WITH(
+			encoding->device_function_fwd_ctx_bytes(), Catch::Matchers::Contains("forward device code context size is not implemented")
+		);
+		REQUIRE_THROWS_WITH(
+			encoding->generate_backward_device_function("eval_generated_backward", N_THREADS_LINEAR),
+			Catch::Matchers::Contains("backward device code generation is not supported")
+		);
+	}
+
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support the JIT fallback probe.");
+		return;
+	}
+
+	auto optimizer = std::shared_ptr<Optimizer<float>>{create_optimizer<float>(json::object())};
+	auto loss = std::shared_ptr<Loss<float>>{create_loss<float>(json::object())};
+	json composite_config = {{"otype", "Composite"}, {"nested", json::array({soft_lod_config(2, 3)})}};
+	std::shared_ptr<Encoding<float>> composite{create_encoding<float>(6, composite_config)};
+	auto trainer = std::make_shared<Trainer<float, float, float>>(composite, optimizer, loss, 42);
+	(void)trainer;
+
+	pcg32 rng{31};
+	GPUMatrix<float> input{composite->input_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<float> output{composite->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<float> output_gradient{composite->padded_output_width(), BATCH_SIZE_GRANULARITY};
+	GPUMatrix<float> input_gradient{composite->input_width(), BATCH_SIZE_GRANULARITY};
+	input.initialize_uniform(rng, 0.01f, 0.99f);
+	output_gradient.initialize_uniform(rng, -1.0f, 1.0f);
+
+	std::string expected_warning;
+	const auto previous_log_callback = log_callback();
+	{
+		ScopeGuard restore_log_callback{[previous_log_callback] { set_log_callback(previous_log_callback); }};
+		set_log_callback([&](LogSeverity severity, const std::string& msg) {
+			if (
+				severity == LogSeverity::Warning && msg.find("forward device code context size is not implemented") != std::string::npos &&
+				msg.find("Failed to JIT-compile `forward_") != std::string::npos
+			) {
+				expected_warning = msg;
+				return;
+			}
+			previous_log_callback(severity, msg);
+		});
+
+		composite->set_jit_fusion(true);
+		auto context = composite->forward(input, &output, false, true);
+		REQUIRE_FALSE(composite->jit_fusion());
+		REQUIRE_FALSE(expected_warning.empty());
+		REQUIRE_NOTHROW(composite->backward(*context, input, output, output_gradient, &input_gradient));
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+	}
+
+	const auto input_gradient_host = input_gradient.to_cpu_vector();
+	REQUIRE(std::all_of(input_gradient_host.begin(), input_gradient_host.end(), [](float value) { return std::isfinite(value); }));
+}
+
+TEST_CASE("Generated combined Permuto LoD network matches native", "[network][encoding][permuto][lod][jit]") {
+	if (!supports_jit_fusion()) {
+		SUCCEED("GPU target does not support JIT.");
+		return;
+	}
+
+	tcnn_test_setup();
+	using T = network_precision_t;
+	json encoding_config = hard_lod_config(16, 8);
+	encoding_config["base"]["base_scale"] = 4.0f;
+	encoding_config["base"]["per_level_scale"] = 1.2f;
+	json network_config = {
+		{"otype", "FullyFusedMLP"},
+		{"activation", "ReLU"},
+		{"output_activation", "None"},
+		{"n_neurons", 64},
+		{"n_hidden_layers", 1},
+	};
+	std::shared_ptr<DifferentiableObject<float, T, T>> model =
+		std::make_shared<NetworkWithInputEncoding<T>>(6, 16, encoding_config, network_config);
+
+	require_generated_forward_matches<T>(
+		model,
+		generated_test_input(6, {0.0f, 10.0f / 16.0f, 12.0f / 16.0f, 15.0f / 16.0f, 1.0f}),
+		"generated_permuto_lod_network",
+		true
+	);
 }
