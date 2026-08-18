@@ -41,6 +41,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -983,6 +984,164 @@ public:
 			{"shifts_table",         shifts_table         }
 		};
 	}
+
+	std::string generate_lookup_device_function(const std::string& name) const {
+		const std::string vec_out = fmt::format(
+			"tvec<{}, {}, {}>",
+			type_to_string<T>(),
+			N_FEATURES_PER_LEVEL,
+			PARAMS_ALIGNED ? sizeof(T) * N_FEATURES_PER_LEVEL : sizeof(T)
+		);
+
+		return dfmt(0, R"(
+				__device__ auto {NAME}(
+					const vec<{N_POS_DIMS}>& pos,
+					const vec<{N_POS_DIMS}>& scales_per_dim,
+					const vec<{N_POS_DIMS}>& shifts_per_dim,
+					const {T}* __restrict__ grid,
+					const uint32_t hashmap_size
+				) -> {VEC_OUT} {{
+					float elevated[{N_POS_DIMS} + 1];
+					float sum = 0.0f;
+					TCNN_PRAGMA_UNROLL
+					for (int dim = {N_POS_DIMS}; dim > 0; --dim) {{
+						const float cf = (pos[dim - 1] + shifts_per_dim[dim - 1]) * scales_per_dim[dim - 1];
+						elevated[dim] = sum - (float)dim * cf;
+						sum += cf;
+					}}
+					elevated[0] = sum;
+
+					int rem0[{N_POS_DIMS} + 1];
+					int rem0_sum = 0;
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t dim = 0; dim <= {N_POS_DIMS}; ++dim) {{
+						const float v = elevated[dim] * (1.0f / ({N_POS_DIMS} + 1));
+						const float up = ceil(v) * ({N_POS_DIMS} + 1);
+						const float down = floor(v) * ({N_POS_DIMS} + 1);
+						rem0[dim] = up - elevated[dim] < elevated[dim] - down ? (int)up : (int)down;
+						rem0_sum += rem0[dim];
+					}}
+					rem0_sum /= (int)({N_POS_DIMS} + 1);
+
+					int rank[{N_POS_DIMS} + 1] = {{0}};
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t dim = 0; dim < {N_POS_DIMS}; ++dim) {{
+						const float di = elevated[dim] - rem0[dim];
+						for (uint32_t other_dim = dim + 1; other_dim <= {N_POS_DIMS}; ++other_dim) {{
+							if (di < elevated[other_dim] - rem0[other_dim]) {{
+								++rank[dim];
+							}} else {{
+								++rank[other_dim];
+							}}
+						}}
+					}}
+
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t dim = 0; dim <= {N_POS_DIMS}; ++dim) {{
+						rank[dim] += rem0_sum;
+						if (rank[dim] < 0) {{
+							rank[dim] += (int)({N_POS_DIMS} + 1);
+							rem0[dim] += (int)({N_POS_DIMS} + 1);
+						}} else if (rank[dim] > (int){N_POS_DIMS}) {{
+							rank[dim] -= (int)({N_POS_DIMS} + 1);
+							rem0[dim] -= (int)({N_POS_DIMS} + 1);
+						}}
+					}}
+
+					float barycentric[{N_POS_DIMS} + 2] = {{0.0f}};
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t dim = 0; dim <= {N_POS_DIMS}; ++dim) {{
+						const float delta = (elevated[dim] - rem0[dim]) * (1.0f / ({N_POS_DIMS} + 1));
+						barycentric[(int){N_POS_DIMS} - rank[dim]] += delta;
+						barycentric[(int)({N_POS_DIMS} + 1) - rank[dim]] -= delta;
+					}}
+					barycentric[0] += 1.0f + barycentric[{N_POS_DIMS} + 1];
+
+					{VEC_OUT} result(({T})0.0f);
+					uvec<{N_POS_DIMS}> key;
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t k = 0; k <= {N_POS_DIMS}; ++k) {{
+						TCNN_PRAGMA_UNROLL
+						for (uint32_t dim = 0; dim < {N_POS_DIMS}; ++dim) {{
+							key[dim] = rem0[dim] + (int)k;
+							if (rank[dim] > (int)({N_POS_DIMS} - k)) {{
+								key[dim] -= (int)({N_POS_DIMS} + 1);
+							}}
+						}}
+
+						const uint32_t index = (base_convert_hash<{N_POS_DIMS}>(key) % hashmap_size) * {N_FEATURES_PER_LEVEL};
+						const auto value = *({VEC_OUT}*)&grid[index];
+						result = fma(({T})barycentric[k], value, result);
+					}}
+
+					return result;
+				}}
+			)",
+			"NAME"_a = name,
+			"N_POS_DIMS"_a = N_POS_DIMS,
+			"N_FEATURES_PER_LEVEL"_a = N_FEATURES_PER_LEVEL,
+			"T"_a = type_to_string<T>(),
+			"VEC_OUT"_a = vec_out
+		);
+	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		if (this->m_max_level != 1000.0f || this->m_max_level_gpu) {
+			throw std::runtime_error{"Permuto: generated forward does not support nondefault max-level state."};
+		}
+
+		const std::string lookup_fun_name = fmt::format("{}_lookup", name);
+		const json lattice = hyperparams();
+		const auto scales_table = lattice.at("scales_table").get<std::vector<float>>();
+		const auto shifts_table = lattice.at("shifts_table").get<std::vector<float>>();
+
+		auto vector_literal = [](const std::vector<float>& table, uint32_t offset) {
+			std::ostringstream literal;
+			literal << "vec<" << N_POS_DIMS << ">{";
+			for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+				if (dim != 0) {
+					literal << ", ";
+				}
+				literal << fmt::format("{:.8e}f", table[offset + dim]);
+			}
+			literal << "}";
+			return literal.str();
+		};
+
+		std::ostringstream body;
+		body << fmt::format("\t{} result;\n", this->generate_vec_out());
+		for (uint32_t level = 0; level < m_n_levels; ++level) {
+			body << fmt::format(
+				"\tresult.slice<{FEATURES_OFFSET}, {N_FEATURES_PER_LEVEL}>() = "
+				"{LOOKUP}(input, {SCALES}, {SHIFTS}, params + {PARAMS_OFFSET}, {HASHMAP_SIZE});\n",
+				"FEATURES_OFFSET"_a = level * N_FEATURES_PER_LEVEL,
+				"N_FEATURES_PER_LEVEL"_a = N_FEATURES_PER_LEVEL,
+				"LOOKUP"_a = lookup_fun_name,
+				"SCALES"_a = vector_literal(scales_table, level * N_POS_DIMS),
+				"SHIFTS"_a = vector_literal(shifts_table, level * N_POS_DIMS),
+				"PARAMS_OFFSET"_a = m_offset_table.data[level] * N_FEATURES_PER_LEVEL,
+				"HASHMAP_SIZE"_a = m_offset_table.data[level + 1] - m_offset_table.data[level]
+			);
+		}
+
+		body << dfmt(1, R"(
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t i = {N_OUT}; i < {N_PADDED_OUT}; ++i) {{
+					result[i] = ({T})0.0f;
+				}}
+				return result;
+			)",
+			"N_OUT"_a = m_n_features,
+			"N_PADDED_OUT"_a = padded_output_width(),
+			"T"_a = type_to_string<T>()
+		);
+
+		return fmt::format(
+			"{}\n\n{}", generate_lookup_device_function(lookup_fun_name), this->generate_device_function_from_body(name, body.str())
+		);
+	}
+
+	bool device_function_fwd_ctx_aligned_per_element() const override { return false; }
 
 private:
 	dim3 transpose_threads() const {

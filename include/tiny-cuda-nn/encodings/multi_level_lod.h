@@ -35,6 +35,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -356,6 +357,74 @@ public:
 			{"base",     m_base->hyperparams()  },
 		};
 	}
+
+	std::string generate_device_function(const std::string& name) const override {
+		if (this->m_max_level != 1000.0f || this->m_max_level_gpu) {
+			throw std::runtime_error{"MultiLevelEncodingLoD: generated forward does not support nondefault max-level state."};
+		}
+
+		const std::string base_name = fmt::format("{}_base", name);
+		const uint32_t base_input_width = m_base->input_width();
+		std::ostringstream body;
+		body << fmt::format(
+			"\tauto result = {BASE}(input.slice<0, {BASE_INPUT_WIDTH}>(), params, nullptr);\n"
+			"\tconst float level_f = input[{BASE_INPUT_WIDTH}] * {N_LEVELS} + 1e-3f;\n",
+			"BASE"_a = base_name,
+			"BASE_INPUT_WIDTH"_a = base_input_width,
+			"N_LEVELS"_a = n_levels()
+		);
+
+		if (m_is_soft) {
+			body << dfmt(1, R"(
+				if (level_f < 0.0f) {{
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t output_idx = 0; output_idx < {N_LEVELS} * {N_FEATURES_PER_LEVEL}; ++output_idx) {{
+						result[output_idx] = ({T})0.0f;
+					}}
+				}} else if (level_f < (float){N_LEVELS}) {{
+					const int32_t level_i = (int32_t)floor(level_f);
+					const float weight = level_f - level_i;
+					TCNN_PRAGMA_UNROLL
+					for (uint32_t level = 0; level < {N_LEVELS}; ++level) {{
+						TCNN_PRAGMA_UNROLL
+						for (uint32_t feature = 0; feature < {N_FEATURES_PER_LEVEL}; ++feature) {{
+							const uint32_t output_idx = level * {N_FEATURES_PER_LEVEL} + feature;
+							if ((int32_t)level > level_i || ((int32_t)level == level_i && weight == 0.0f)) {{
+								result[output_idx] = ({T})0.0f;
+							}} else if ((int32_t)level == level_i && weight != 1.0f) {{
+								result[output_idx] *= ({T})weight;
+							}}
+						}}
+					}}
+				}}
+			)",
+				"N_LEVELS"_a = n_levels(),
+				"N_FEATURES_PER_LEVEL"_a = n_features_per_level(),
+				"T"_a = type_to_string<T>()
+			);
+		} else {
+			body << dfmt(1, R"(
+				TCNN_PRAGMA_UNROLL
+				for (uint32_t level = 0; level < {N_LEVELS}; ++level) {{
+					if ((float)level >= level_f) {{
+						TCNN_PRAGMA_UNROLL
+						for (uint32_t feature = 0; feature < {N_FEATURES_PER_LEVEL}; ++feature) {{
+							result[level * {N_FEATURES_PER_LEVEL} + feature] = ({T})0.0f;
+						}}
+					}}
+				}}
+			)",
+				"N_LEVELS"_a = n_levels(),
+				"N_FEATURES_PER_LEVEL"_a = n_features_per_level(),
+				"T"_a = type_to_string<T>()
+			);
+		}
+
+		body << "\treturn result;";
+		return fmt::format("{}\n\n{}", m_base->generate_device_function(base_name), this->generate_device_function_from_body(name, body.str()));
+	}
+
+	bool device_function_fwd_ctx_aligned_per_element() const override { return false; }
 
 private:
 	void copy_with_lod_weights(

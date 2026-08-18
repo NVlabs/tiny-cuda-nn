@@ -118,6 +118,10 @@ public:
 		m_max_level_gpu = value;
 	}
 
+	bool jit_fusion_state_valid() const override {
+		return m_max_level == 1000.f && !m_max_level_gpu;
+	}
+
 protected:
 	// Disables lookups of finer levels than this.
 	// The default value of 1000 effectively disables the feature
