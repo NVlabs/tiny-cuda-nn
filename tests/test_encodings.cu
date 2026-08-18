@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -33,7 +33,27 @@
 
 #include <tiny-cuda-nn/encoding.h>
 
+#include <algorithm>
+
 using namespace tcnn;
+
+#if defined(TCNN_NO_FWD_BWD)
+TEST_CASE("Offline-only encodings are absent without forward and backward", "[encoding][no-fwd-bwd]") {
+	const auto encodings = builtin_encodings();
+	const auto contains = [&encodings](const char* name) { return std::find(encodings.begin(), encodings.end(), name) != encodings.end(); };
+
+	REQUIRE_FALSE(contains("Permuto"));
+	REQUIRE_FALSE(contains("MultiLevelEncodingLoD"));
+	const json permuto_config = {
+		{"otype", "Permuto"}
+	};
+	const json lod_config = {
+		{"otype", "MultiLevelEncodingLoD"}
+	};
+	REQUIRE_THROWS_AS(create_encoding<float>(5, permuto_config, 16), std::runtime_error);
+	REQUIRE_THROWS_AS(create_encoding<float>(6, lod_config, 16), std::runtime_error);
+}
+#endif
 
 TEMPLATE_TEST_CASE("Various invariance checks for input encodings", "[encoding][jit]", network_precision_t, float) {
 	using T = TestType;
@@ -41,6 +61,10 @@ TEMPLATE_TEST_CASE("Various invariance checks for input encodings", "[encoding][
 	tcnn_test_setup();
 
 	for (const auto& encoding_name : builtin_encodings()) {
+		if (equals_case_insensitive(encoding_name, "Permuto") || equals_case_insensitive(encoding_name, "MultiLevelEncodingLoD")) {
+			continue;
+		}
+
 		SECTION(fmt::format("Testing {}", encoding_name)) {
 			// Typical number of input dims is 3D (e.g. 3D space), but we need to special-case for some encodings that require more.
 			const uint32_t n_dims = equals_case_insensitive(encoding_name, "NRC") || equals_case_insensitive(encoding_name, "OneBlobFrequency") ? 8 : 3;

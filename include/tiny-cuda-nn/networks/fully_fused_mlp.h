@@ -59,6 +59,18 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override;
+
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<T>& input,
+		const GPUMatrixDynamic<T>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<T>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		GradientMode param_gradients_mode = GradientMode::Overwrite
+	) override;
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 	void set_params_impl(T* params, T* inference_params, T* gradients) override;
@@ -198,28 +210,28 @@ public:
 	}
 
 	void convert_params_to_jit_layout(cudaStream_t stream, bool use_inference_params) override {
-		if (!m_convert_params_to_jit_layout_kernel) {
-			m_convert_params_to_jit_layout_kernel = generate_mlp_convert_params_to_jit_layout_kernel<T>(
+		auto* kernel = m_convert_params_to_jit_layout_kernel.get([this]() {
+			return generate_mlp_convert_params_to_jit_layout_kernel<T>(
 				m_input_width, m_network_width, m_padded_output_width, m_n_hidden_layers
 			);
-		}
+		});
 
-		m_convert_params_to_jit_layout_kernel->launch(m_n_hidden_layers + 1, WARP_SIZE, 0, stream, use_inference_params ? this->inference_params() : this->params());
+		kernel->launch(m_n_hidden_layers + 1, WARP_SIZE, 0, stream, use_inference_params ? this->inference_params() : this->params());
 	}
 
 	void convert_params_from_jit_layout(cudaStream_t stream, bool use_inference_params) override {
-		if (!m_convert_params_from_jit_layout_kernel) {
-			m_convert_params_from_jit_layout_kernel = generate_mlp_convert_params_from_jit_layout_kernel<T>(
+		auto* kernel = m_convert_params_from_jit_layout_kernel.get([this]() {
+			return generate_mlp_convert_params_from_jit_layout_kernel<T>(
 				m_input_width, m_network_width, m_padded_output_width, m_n_hidden_layers
 			);
-		}
+		});
 
-		m_convert_params_from_jit_layout_kernel->launch(m_n_hidden_layers + 1, WARP_SIZE, 0, stream, use_inference_params ? this->inference_params() : this->params());
+		kernel->launch(m_n_hidden_layers + 1, WARP_SIZE, 0, stream, use_inference_params ? this->inference_params() : this->params());
 	}
 
 private:
-	std::unique_ptr<CudaRtcKernel> m_convert_params_to_jit_layout_kernel;
-	std::unique_ptr<CudaRtcKernel> m_convert_params_from_jit_layout_kernel;
+	CudaRtcKernelCache m_convert_params_to_jit_layout_kernel;
+	CudaRtcKernelCache m_convert_params_from_jit_layout_kernel;
 
 	struct ForwardContext : public Context {
 		std::vector<GPUMatrix<T>> hidden;

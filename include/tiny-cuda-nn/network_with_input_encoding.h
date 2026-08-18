@@ -58,6 +58,10 @@ public:
 	virtual ~NetworkWithInputEncoding() { }
 
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override {
+		if (input.n() == 0) {
+			return;
+		}
+
 		GPUMatrixDynamic<T> network_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		m_encoding->inference_mixed_precision(stream, input, network_input, use_inference_params);
 		m_network->inference_mixed_precision(stream, network_input, output, use_inference_params);
@@ -72,10 +76,25 @@ public:
 		uint32_t batch_size = input.n();
 
 		auto forward = std::make_unique<ForwardContext>();
+		if (batch_size == 0) {
+			return forward;
+		}
 
 		forward->network_input = GPUMatrixDynamic<T>{m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
 		forward->encoding_ctx = m_encoding->forward(stream, input, &forward->network_input, use_inference_params, prepare_input_gradients);
 		forward->network_ctx = m_network->forward(stream, forward->network_input, output, use_inference_params, true);
+		if (output && prepare_input_gradients) {
+			forward->network_output = GPUMatrixDynamic<T>{output->m(), output->n(), stream, output->layout()};
+			if (output->layout() == AoS) {
+				parallel_for_gpu_aos(stream, output->n(), output->m(), [src = output->view(), dst = forward->network_output.view()] __device__(size_t i, size_t j) {
+					dst((uint32_t)i, (uint32_t)j) = src((uint32_t)i, (uint32_t)j);
+				});
+			} else {
+				parallel_for_gpu(stream, output->n() * output->m(), [src = output->data(), dst = forward->network_output.data()] __device__(size_t i) {
+					dst[i] = src[i];
+				});
+			}
+		}
 
 		return forward;
 	}
@@ -90,6 +109,13 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override {
+		if (input.n() == 0) {
+			if (param_gradients_mode == GradientMode::Overwrite && n_params() > 0) {
+				CUDA_CHECK_THROW(cudaMemsetAsync(this->gradients(), 0, n_params() * sizeof(T), stream));
+			}
+			return;
+		}
+
 		GPUMatrixDynamic<T> dL_dnetwork_input;
 		if (m_encoding->n_params() > 0 || dL_dinput) {
 			dL_dnetwork_input = {m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()};
@@ -110,6 +136,72 @@ public:
 				param_gradients_mode
 			);
 		}
+	}
+
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<float>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		GradientMode param_gradients_mode = GradientMode::Overwrite
+	) override {
+		if (input.n() == 0) {
+			if (param_gradients_mode == GradientMode::Overwrite && n_params() > 0) {
+				CUDA_CHECK_THROW(cudaMemsetAsync(this->gradients(), 0, n_params() * sizeof(T), stream));
+			}
+			return;
+		}
+
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+		if (!forward.network_output.data()) {
+			throw std::runtime_error{"NetworkWithInputEncoding double backward requires forward(..., prepare_input_gradients=true)."};
+		}
+
+		GPUMatrixDynamic<T> dL_dnetwork_input = {
+			m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()
+		};
+		GPUMatrixDynamic<T> dL_ddLdnetwork_input = {
+			m_encoding->padded_output_width(), input.n(), stream, m_encoding->preferred_output_layout()
+		};
+
+		m_network->backward(
+			stream,
+			*forward.network_ctx,
+			forward.network_input,
+			forward.network_output,
+			dL_doutput,
+			&dL_dnetwork_input,
+			use_inference_params,
+			GradientMode::Ignore
+		);
+
+		m_encoding->backward_backward_input(
+			stream,
+			*forward.encoding_ctx,
+			input,
+			dL_ddLdinput,
+			dL_dnetwork_input,
+			&dL_ddLdnetwork_input,
+			dL_dinput,
+			use_inference_params,
+			param_gradients_mode
+		);
+
+		m_network->backward_backward_input(
+			stream,
+			*forward.network_ctx,
+			forward.network_input,
+			dL_ddLdnetwork_input,
+			dL_doutput,
+			dL_ddLdoutput,
+			nullptr,
+			use_inference_params,
+			param_gradients_mode
+		);
 	}
 
 	void set_params_impl(T* params, T* inference_params, T* gradients) override {
@@ -168,6 +260,10 @@ public:
 
 	const std::shared_ptr<Encoding<T>>& encoding() const {
 		return m_encoding;
+	}
+
+	bool jit_fusion_state_valid() const override {
+		return m_network->jit_fusion_state_valid() && m_encoding->jit_fusion_state_valid();
 	}
 
 	json hyperparams() const override {
@@ -257,6 +353,7 @@ private:
 
 	struct ForwardContext : public Context {
 		GPUMatrixDynamic<T> network_input;
+		GPUMatrixDynamic<T> network_output;
 		std::unique_ptr<Context> encoding_ctx;
 		std::unique_ptr<Context> network_ctx;
 	};

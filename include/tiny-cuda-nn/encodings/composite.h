@@ -413,6 +413,15 @@ public:
 		return m_nested[idx];
 	}
 
+	bool jit_fusion_state_valid() const override {
+		for (const auto& nested : m_nested) {
+			if (!nested->jit_fusion_state_valid()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	void set_params_impl(T* params, T* inference_params, T* gradients) override {
 		size_t offset = 0;
 		for (auto& nested : m_nested) {
@@ -459,50 +468,65 @@ public:
 		}
 
 		std::ostringstream body;
-		body << fmt::format("	{} result;\n", this->generate_vec_out());
+		if (m_reduction_type == ReductionType::Concatenation) {
+			body << fmt::format("	{} result;\n", this->generate_vec_out());
+		} else {
+			body << fmt::format("	tvec<float, {}> result((float){}.0f);\n", output_width(), m_reduction_type == ReductionType::Sum ? 0 : 1);
+		}
 
 		size_t output_offset = 0;
 		size_t params_offset = 0;
 		size_t fwd_ctx_offset = 0;
+		std::vector<uint32_t> fwd_ctx_bytes(m_nested.size());
+		for (size_t i = 0; i < m_nested.size(); ++i) {
+			try {
+				fwd_ctx_bytes[i] = m_nested[i]->device_function_fwd_ctx_bytes();
+			} catch (const std::runtime_error&) {
+				if (m_nested[i]->device_function_fwd_ctx_aligned_per_element()) {
+					throw;
+				}
+			}
+		}
 
 		switch (m_reduction_type) {
 			case ReductionType::Concatenation:
 				for (size_t i = 0; i < m_nested.size(); ++i) {
 					body << fmt::format(
-						"	result.slice<{OUTPUT_OFFSET}, {OUTPUT_WIDTH}>() = {NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, fwd_ctx ? fwd_ctx + WARP_SIZE * {FWD_CTX_OFFSET} : nullptr);\n",
+						"	result.slice<{OUTPUT_OFFSET}, {OUTPUT_WIDTH}>() = {NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, {FWD_CTX});\n",
 						"OUTPUT_WIDTH"_a = m_nested[i]->output_width(),
 						"OUTPUT_OFFSET"_a = output_offset,
 						"NESTED"_a = generate_nested_name(name, i),
 						"INPUT_WIDTH"_a = m_nested[i]->input_width(),
 						"INPUT_OFFSET"_a = m_dims_to_encode_begin[i],
 						"PARAMS_OFFSET"_a = params_offset,
-						"FWD_CTX_OFFSET"_a = fwd_ctx_offset
+						"FWD_CTX"_a = fwd_ctx_bytes[i] ? fmt::format("fwd_ctx ? fwd_ctx + WARP_SIZE * {} : nullptr", fwd_ctx_offset) : "nullptr"
 					);
 
 					output_offset += m_nested[i]->output_width();
 					params_offset += m_nested[i]->n_params();
-					fwd_ctx_offset += m_nested[i]->device_function_fwd_ctx_bytes();
+					fwd_ctx_offset += fwd_ctx_bytes[i];
 				}
 				break;
 			default:
 				for (size_t i = 0; i < m_nested.size(); ++i) {
 					body << fmt::format(
-						"	result {OP}= {NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, fwd_ctx ? fwd_ctx + WARP_SIZE * {FWD_CTX_OFFSET} : nullptr);\n",
+						"	result {OP}= tvec<float, {OUTPUT_WIDTH}>({NESTED}(input.slice<{INPUT_OFFSET}, {INPUT_WIDTH}>(), params + {PARAMS_OFFSET}, {FWD_CTX}));\n",
 						"OP"_a = (m_reduction_type == ReductionType::Sum ? "+" : "*"),
+						"OUTPUT_WIDTH"_a = output_width(),
 						"NESTED"_a = generate_nested_name(name, i),
 						"INPUT_WIDTH"_a = m_nested[i]->input_width(),
 						"INPUT_OFFSET"_a = m_dims_to_encode_begin[i],
 						"PARAMS_OFFSET"_a = params_offset,
-						"FWD_CTX_OFFSET"_a = fwd_ctx_offset
+						"FWD_CTX"_a = fwd_ctx_bytes[i] ? fmt::format("fwd_ctx ? fwd_ctx + WARP_SIZE * {} : nullptr", fwd_ctx_offset) : "nullptr"
 					);
 
 					params_offset += m_nested[i]->n_params();
-					fwd_ctx_offset += m_nested[i]->device_function_fwd_ctx_bytes();
+					fwd_ctx_offset += fwd_ctx_bytes[i];
 				}
 				break;
 		}
 
-		body << "	return result;";
+		body << (m_reduction_type == ReductionType::Concatenation ? "	return result;" : fmt::format("	return {}(result);", this->generate_vec_out()));
 
 		return fmt::format("{}{}", preamble.str(), this->generate_device_function_from_body(name, body.str()));
 	}

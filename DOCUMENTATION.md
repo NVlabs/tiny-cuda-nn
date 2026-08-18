@@ -135,6 +135,214 @@ The number of encoded dimensions is `n_levels * n_features_per_level`.
 }
 ```
 
+### Permuto
+
+`Permuto` is a trainable N-dimensional permutohedral lattice encoding. The
+factory accepts input widths `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`,
+`10`, `12`, `16`, and `24`. The input width passed to the factory is
+authoritative. Callers must normalize each input value to `[0, 1]`. The
+encoding does not scan device inputs to enforce this range.
+
+Each level produces `n_features_per_level` adjacent output features. The
+supported feature widths are `1`, `2`, `4`, and `8`. Level `l` uses the scale
+`base_scale * per_level_scale^l`. The unpadded output width is
+`n_levels * n_features_per_level`. An alignment request can add zero-valued
+padding after these features. The required output alignment is
+`n_features_per_level`. The encoded features have no fixed value range because
+the lattice entries are trainable parameters.
+
+```text
+[x0, ..., xN-1]
+       |
+       v
+levels 0 ... n_levels - 1
+       |
+       v
+[level 0 feature 0, ..., level L feature F-1]
+```
+
+```json5
+{
+	"otype": "Permuto",            // Component type.
+	"n_levels": 16,                // Number of levels. Must be in [1, 32].
+	"n_features_per_level": 2,     // Must be 1, 2, 4, or 8.
+	"log2_hashmap_size": 19,       // Base-2 logarithm of the entries per level.
+	"base_scale": 16.0,            // Finite scale of level 0.
+	"per_level_scale": 2.0,        // Positive finite scale multiplier.
+	"interpolation": "Linear",      // Case-insensitive. Must be "Linear".
+	"max_input_grad_dims": 5,      // Leading input dimensions with gradients.
+	"seed": 1337                   // Unsigned seed for per-level lattice shifts.
+}
+```
+
+`interpolation` accepts only `Linear`, case-insensitively.
+`log2_hashmap_size` must be a nonnegative integer smaller than 32. The
+parameter count must also fit in an unsigned 32-bit integer. Every derived
+level scale must be finite and safe for the kernel's integer lattice
+coordinates. `max_input_grad_dims` defaults to the input width and must not
+exceed that width.
+`seed` must be an integer in `[0, 2^32 - 1]`.
+
+The flat parameter array contains
+`n_levels * 2^log2_hashmap_size * n_features_per_level` values. The layout
+order is level, hashed entry, then feature. The features for one entry are
+adjacent. Construction, `hyperparams()`, and reload preserve this layout.
+`hyperparams()` includes the configured `seed`. Reloading the emitted
+hyperparameters and the same flat parameter array therefore preserves the
+lattice shifts and learned values.
+`scales_table` and `shifts_table` are diagnostics derived from `seed`,
+`base_scale`, and `per_level_scale`. They do not independently configure the
+lattice. The factory accepts the tables only when they match those behavioral
+fields. Each table contains `n_levels * input_width` values.
+
+`n_features` and `n_grid_features` are aliases for the total unpadded output
+width. Either alias can replace `n_levels`. The aliases are mutually exclusive
+with each other and with `n_levels`. An alias value must be a positive integer
+that is divisible by `n_features_per_level`. `hyperparams()` always emits the
+canonical `n_levels` and `n_features_per_level` fields. It does not emit either
+alias. The factory ignores unrelated compatibility keys, including
+`base_resolution`, `max_resolution`, and a JSON `n_dims_to_encode` field.
+
+The encoding supports first-order parameter and input gradients. It also
+supports non-JIT double backward for parameter gradients and upstream
+gradients. The input Hessian is zero inside each linear lattice simplex.
+`max_input_grad_dims` applies at both derivative orders. It enables gradients
+only for the leading input dimensions. The remaining input gradients are zero.
+Parameter gradients honor `Overwrite`, `Accumulate`, and `Ignore` at both
+derivative orders.
+
+### MultiLevelEncodingLoD
+
+`MultiLevelEncodingLoD` adds per-element level control to a multilevel
+encoding. The public Grid and Permuto encodings are supported bases. The
+wrapper accepts one more input dimension than its base. The first N values are
+the base input. The final value is a level ratio. Callers normally provide a
+finite ratio in `[0, 1]`. NaN and infinite ratios are outside the public
+contract.
+
+```text
+[x0, ..., xN-1, level_ratio]
+          |             |
+          v             v
+       base input      LoD weights
+          \_____________/
+                 |
+                 v
+          weighted features
+```
+
+```json5
+{
+	"otype": "MultiLevelEncodingLoD",
+	"lod_type": "Soft",           // Optional. Defaults to "Hard".
+	"base": {
+		"otype": "Permuto",        // Can also be a Grid encoding.
+		"n_levels": 16,
+		"n_features_per_level": 2,
+		"log2_hashmap_size": 19,
+		"base_scale": 16.0,
+		"per_level_scale": 2.0,
+		"interpolation": "Linear",
+		"max_input_grad_dims": 5,
+		"seed": 1337
+	}
+}
+```
+
+`lod_type` accepts `Hard`, `Discontinuous`, `Soft`, and `Continuous`,
+case-insensitively. `Discontinuous` is an alias for `Hard`. `Continuous` is an
+alias for `Soft`. `hyperparams()` serializes the canonical value `Hard` or
+`Soft` and preserves the base configuration as nested JSON.
+
+Both modes calculate the per-element level coordinate as follows:
+
+```text
+level_f = level_ratio * n_levels + 1e-3
+level_i = floor(level_f)
+```
+
+Hard mode enables a complete zero-based level when the following predicate is
+true:
+
+```text
+level < level_f
+```
+
+Soft mode assigns weight `1` to levels below `level_i`. Soft mode assigns
+weight `level_f - level_i` to level `level_i`. Soft mode assigns weight `0` to
+finer levels. A ratio below the first boundary can disable all levels. A ratio
+at or above the final boundary preserves all levels. The implementation does
+not clamp the ratio.
+
+An inactive level produces zero output features and contributes no parameter
+or position-input gradient. A partially active soft level applies the same
+weight to its output and upstream gradient. The wrapper retains the unweighted
+base output because native backward can require that value. Native double
+backward applies the same soft weights to the upstream-gradient result. The
+level-ratio input is scheduler state. Its input gradient is exactly zero in
+both modes.
+
+The wrapper forwards the base level count, position dimensions, features per
+level, parameter offsets, output alignment, layout, and padding. The wrapper
+also preserves the base logical output order, flat parameter layout, inference
+parameters, and `Overwrite`, `Accumulate`, and `Ignore` gradient modes. The
+wrapper passes each gradient mode unchanged to the base at both derivative
+orders. The base encoding therefore defines the final gradient-mode behavior
+and any base-specific limitations. In particular, a half-precision Grid with
+`n_features_per_level=1` uses a temporary floating-point parameter-gradient
+accumulator. Its `Accumulate` path does not initialize that scratch buffer from
+the existing half-precision gradients. A Grid-backed wrapper inherits this
+pre-existing limitation. A nested `MultiLevelEncodingLoD` base is rejected
+because nested wrappers cannot safely share the native mutable level-selection
+state.
+
+A nonempty context-only forward is supported when the output pointer is null.
+Soft mode also retains the unweighted base output for a later backward call. A
+zero-element batch is valid for forward, backward, and double backward.
+Empty-batch derivative calls clear parameter gradients in `Overwrite` mode and
+preserve them in `Accumulate` and `Ignore` modes.
+
+#### Thread Safety
+
+`MultiLevelEncodingLoD` does not support concurrent host calls on one
+instance. Do not start a call whose device work can overlap earlier work on
+that instance. Use one CUDA stream, or insert and wait for an event dependency
+before another stream accesses the same parameters, gradients, or per-call
+state. Host-call serialization without a device dependency is insufficient.
+These encodings do not establish a broader host-thread-safety contract for
+TCNN.
+
+#### Build and JIT Support
+
+`Permuto` and `MultiLevelEncodingLoD` are available only in builds that contain
+the offline forward and backward implementations. A build configured with
+`TCNN_BUILD_NO_FWD_BWD=ON` does not register either encoding type.
+
+Both encodings provide generated CUDA device functions for inference. The
+generated `Permuto` function reproduces the native lattice lookup. The
+generated `MultiLevelEncodingLoD` function calls its generated base function
+and applies the hard or soft weights to the returned vector. The built-in
+`Permuto` and Grid bases implement generated forward, so automatic JIT
+inference remains enabled for those wrapper combinations. A custom multilevel
+base must also implement generated forward, or the normal JIT fallback applies.
+Direct `generate_device_function()` calls use the standard three-argument
+device-function interface.
+
+Generated training is not supported. The generated functions do not allocate
+or populate a forward context. Their forward-context size remains unsupported.
+An automatic JIT training `forward()` therefore reports the unsupported context
+size, disables JIT fusion, and falls back before it allocates a generated
+context. Native backward then consumes the native forward context. Generated
+backward and generated double backward are also unsupported. The
+no-forward-and-backward build cannot use the native fallback because the
+encoding types are not registered.
+
+The non-JIT `NetworkWithInputEncoding` double-backward path currently supports
+one specific network shape: a `FullyFusedMLP` with one hidden layer, `ReLU`, and
+no output activation. That path computes parameter and upstream gradients. It
+does not compute a network input Hessian. Other network shapes report an
+explicit runtime error instead of returning an incomplete second-order result.
+
 ### Identity
 
 Leaves values untouched. Optionally, multiplies each dimension by a scalar and adds an offset.

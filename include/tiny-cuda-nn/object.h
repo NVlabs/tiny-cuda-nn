@@ -177,7 +177,7 @@ public:
 			}
 		}
 
-		CudaRtcKernel* jit_kernel = !m_jit_fusion ? nullptr : m_jit_fused_inference_mp_kernel.get([this]() {
+		CudaRtcKernel* jit_kernel = !use_jit_fusion() ? nullptr : m_jit_fused_inference_mp_kernel.get([this]() {
 			auto name = fmt::format("inference_mp_{}", to_snake_case(this->name()));
 			try {
 				return generate_kernel(
@@ -194,7 +194,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			auto g = jit_guard(stream, use_inference_params);
@@ -225,7 +225,7 @@ public:
 			}
 		}
 
-		CudaRtcKernel* jit_kernel = !m_jit_fusion ? nullptr : m_jit_fused_inference_kernel.get([this]() {
+		CudaRtcKernel* jit_kernel = !use_jit_fusion() ? nullptr : m_jit_fused_inference_kernel.get([this]() {
 			auto name = fmt::format("inference_{}", to_snake_case(this->name()));
 			try {
 				return generate_kernel(
@@ -242,7 +242,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			auto g = jit_guard(stream, use_inference_params);
@@ -305,7 +305,7 @@ public:
 			}
 		}
 
-		CudaRtcKernel* jit_kernel = !m_jit_fusion ? nullptr : m_jit_fused_forward_kernel.get([this]() {
+		CudaRtcKernel* jit_kernel = !use_jit_fusion() ? nullptr : m_jit_fused_forward_kernel.get([this]() {
 			auto name = fmt::format("forward_{}", to_snake_case(this->name()));
 			try {
 				return generate_kernel(
@@ -322,7 +322,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			auto forward = std::make_unique<JitForwardContext>();
@@ -406,7 +406,8 @@ public:
 			shmem_bytes = backward_device_function_shmem_bytes(n_threads, param_gradients_mode);
 		} while (n_threads > 32 && shmem_bytes > cuda_max_shmem());
 
-		CudaRtcKernel* jit_kernel = !m_jit_fusion ? nullptr : m_jit_fused_backward_kernel.get([this, n_threads, shmem_bytes]() {
+		const auto* jit_forward = dynamic_cast<const JitForwardContext*>(&ctx);
+		CudaRtcKernel* jit_kernel = !jit_forward ? nullptr : m_jit_fused_backward_kernel.get([this, n_threads, shmem_bytes]() {
 			auto name = fmt::format("backward_{}", to_snake_case(this->name()));
 			try {
 				if (shmem_bytes > cuda_max_shmem()) {
@@ -428,23 +429,25 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
+
+		if (jit_forward && !jit_kernel) {
+			throw std::runtime_error{"Cannot use native backward with a JIT forward context."};
+		}
 
 		if (jit_kernel) {
-			const auto& forward = dynamic_cast<const JitForwardContext&>(ctx);
-
 			if (param_gradients_mode == GradientMode::Overwrite) {
 				CUDA_CHECK_THROW(cudaMemsetAsync(this->gradients(), 0, sizeof(PARAMS_T) * this->n_params(), stream));
 			}
 
-			auto g = jit_guard(stream, use_inference_params);
+			auto g = jit_guard(stream, use_inference_params, true);
 			jit_kernel->launch(
 				div_round_up(input.n(), n_threads), n_threads, shmem_bytes, stream,
 				input.n(),
 				dL_doutput.view(),
 				dL_dinput ? dL_dinput->view() : MatrixView<T>{},
 				use_inference_params ? this->inference_params() : this->params(),
-				forward.data.data(),
+				jit_forward->data.data(),
 				param_gradients_mode == GradientMode::Ignore ? nullptr : this->gradients()
 			);
 
@@ -527,7 +530,8 @@ public:
 			shmem_bytes = backward_device_function_shmem_bytes(n_threads, param_gradients_mode);
 		} while (n_threads > 32 && shmem_bytes > cuda_max_shmem());
 
-		CudaRtcKernel* jit_kernel = !m_jit_fusion ? nullptr : m_jit_fused_backward_backward_input_kernel.get([this, n_threads, shmem_bytes]() {
+		const auto* jit_forward = dynamic_cast<const JitForwardContext*>(&ctx);
+		CudaRtcKernel* jit_kernel = !jit_forward ? nullptr : m_jit_fused_backward_backward_input_kernel.get([this, n_threads, shmem_bytes]() {
 			auto name = fmt::format("backward_backward_input_{}", to_snake_case(this->name()));
 			try {
 				if (shmem_bytes > cuda_max_shmem()) {
@@ -549,16 +553,18 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
+
+		if (jit_forward && !jit_kernel) {
+			throw std::runtime_error{"Cannot use native double backward with a JIT forward context."};
+		}
 
 		if (jit_kernel) {
-			const auto& forward = dynamic_cast<const JitForwardContext&>(ctx);
-
 			if (param_gradients_mode == GradientMode::Overwrite) {
 				CUDA_CHECK_THROW(cudaMemsetAsync(this->gradients(), 0, sizeof(PARAMS_T) * this->n_params(), stream));
 			}
 
-			auto g = jit_guard(stream, use_inference_params);
+			auto g = jit_guard(stream, use_inference_params, true);
 			jit_kernel->launch(
 				div_round_up(input.n(), n_threads), n_threads, shmem_bytes, stream,
 				input.n(),
@@ -567,7 +573,7 @@ public:
 				dL_dinput ? dL_dinput->view() : MatrixView<T>{},
 				dL_ddLdoutput ? dL_ddLdoutput->view() : MatrixView<COMPUTE_T>{},
 				use_inference_params ? this->inference_params() : this->params(),
-				forward.data.data(),
+				jit_forward->data.data(),
 				param_gradients_mode == GradientMode::Ignore ? nullptr : this->gradients()
 			);
 
@@ -711,18 +717,30 @@ public:
 	}
 
 	bool jit_fusion() const {
+		return m_jit_fusion && jit_fusion_state_valid();
+	}
+
+	virtual bool jit_fusion_state_valid() const { return true; }
+
+	bool use_jit_fusion() {
+		if (!jit_fusion()) {
+			m_jit_fusion = false;
+		}
 		return m_jit_fusion;
 	}
 
 	void set_jit_fusion(bool val) {
+		if (val && !m_jit_fusion) {
+			clear_jit_kernels();
+		}
 		m_jit_fusion = val;
 	}
 
 	virtual void convert_params_to_jit_layout(cudaStream_t stream, bool use_inference_params) {}
 	virtual void convert_params_from_jit_layout(cudaStream_t stream, bool use_inference_params) {}
 
-	ScopeGuard jit_guard(cudaStream_t stream, bool use_inference_params) {
-		if (!m_jit_fusion || m_in_jit_guard) {
+	ScopeGuard jit_guard(cudaStream_t stream, bool use_inference_params, bool force = false) {
+		if ((!m_jit_fusion && !force) || m_in_jit_guard) {
 			// Permits nesting of jit guards to avoid too frequent
 			// back-and-forth conversions.
 			return {};
@@ -732,6 +750,9 @@ public:
 			convert_params_to_jit_layout(stream, use_inference_params);
 		} catch (const std::runtime_error& e) {
 			m_jit_fusion = false;
+			if (force) {
+				throw;
+			}
 			log_warning("{}\nFailed to JIT-compile parameter conversion. Disabling JIT.", e.what());
 			return {};
 		}
@@ -748,15 +769,23 @@ public:
 	}
 
 private:
+	void clear_jit_kernels() {
+		m_jit_fused_inference_mp_kernel.clear();
+		m_jit_fused_inference_kernel.clear();
+		m_jit_fused_forward_kernel.clear();
+		m_jit_fused_backward_kernel.clear();
+		m_jit_fused_backward_backward_input_kernel.clear();
+	}
+
 	struct JitForwardContext : public Context {
 		GPUMemoryArena::Allocation data;
 	};
 
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_inference_mp_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_inference_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_forward_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_backward_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_backward_backward_input_kernel;
+	CudaRtcKernelCache m_jit_fused_inference_mp_kernel;
+	CudaRtcKernelCache m_jit_fused_inference_kernel;
+	CudaRtcKernelCache m_jit_fused_forward_kernel;
+	CudaRtcKernelCache m_jit_fused_backward_kernel;
+	CudaRtcKernelCache m_jit_fused_backward_backward_input_kernel;
 
 	bool m_jit_fusion = false;
 	bool m_in_jit_guard = false;

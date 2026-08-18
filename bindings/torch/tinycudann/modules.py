@@ -187,7 +187,7 @@ class _module_function_backward(torch.autograd.Function):
 				ctx.ctx_fwd.native_ctx,
 				input,
 				params,
-				dinput_grad,
+				dinput_grad.contiguous(),
 				doutput
 			)
 			# NOTE: be cautious when multiplying and dividing loss_scale
@@ -258,6 +258,18 @@ class Module(torch.nn.Module):
 	@jit_fusion.deleter
 	def jit_fusion(self):
 		raise AttributeError("`jit_fusion` can not be deleted")
+
+	@property
+	def backward_backward_input_no_input_grad(self):
+		return self.native_tcnn_module.backward_backward_input_no_input_grad
+
+	@backward_backward_input_no_input_grad.setter
+	def backward_backward_input_no_input_grad(self, val):
+		self.native_tcnn_module.backward_backward_input_no_input_grad = val
+
+	@backward_backward_input_no_input_grad.deleter
+	def backward_backward_input_no_input_grad(self):
+		raise AttributeError("`backward_backward_input_no_input_grad` can not be deleted")
 
 class NetworkWithInputEncoding(Module):
 	"""

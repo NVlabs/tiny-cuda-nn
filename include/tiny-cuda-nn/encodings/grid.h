@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -239,7 +239,7 @@ __global__ void kernel_grid_backward(
 		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
 	}
 
-	if (level > max_level + 1e-3f) {
+	if (level >= max_level + 1e-3f) {
 		return;
 	}
 
@@ -379,7 +379,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
 	}
 
-	if (level > max_level + 1e-3f) {
+	if (level >= max_level + 1e-3f) {
 		return;
 	}
 
@@ -485,7 +485,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
 	}
 
-	if (level > max_level + 1e-3f) {
+	if (level >= max_level + 1e-3f) {
 		return;
 	}
 
@@ -1106,6 +1106,10 @@ public:
 
 	uint32_t n_pos_dims() const override {
 		return N_POS_DIMS;
+	}
+
+	uint32_t n_levels() const override {
+		return m_n_levels;
 	}
 
 	uint32_t n_features_per_level() const override {

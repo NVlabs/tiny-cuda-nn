@@ -303,6 +303,7 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 		}
 	}
 
+	CU_CHECK_THROW(cuCtxGetCurrent(&m_context));
 	CU_CHECK_THROW(cuModuleLoadDataEx(&m_module, ptx.data(), 0, nullptr, nullptr));
 	CU_CHECK_THROW(cuModuleGetFunction(&m_kernel, m_module, lowered_kernel_name.c_str()));
 
@@ -320,8 +321,19 @@ CudaRtcKernel::~CudaRtcKernel() {
 
 void CudaRtcKernel::clear() {
 	if (m_module) {
+		CUcontext previous_context = {};
+		bool restore_context = false;
+		if (m_context && cuCtxGetCurrent(&previous_context) == CUDA_SUCCESS && previous_context != m_context) {
+			restore_context = cuCtxPushCurrent(m_context) == CUDA_SUCCESS;
+		}
 		cuModuleUnload(m_module);
+		if (restore_context) {
+			CUcontext popped_context;
+			cuCtxPopCurrent(&popped_context);
+		}
+		m_context = {};
 		m_module = {};
+		m_kernel = {};
 	}
 }
 

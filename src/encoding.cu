@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -34,10 +34,13 @@
 #include <tiny-cuda-nn/encodings/frequency.h>
 #include <tiny-cuda-nn/encodings/grid.h>
 #include <tiny-cuda-nn/encodings/identity.h>
+#if !defined(TCNN_NO_FWD_BWD)
+#	include <tiny-cuda-nn/encodings/internal/permuto.h>
+#	include <tiny-cuda-nn/encodings/multi_level_lod.h>
+#endif
 #include <tiny-cuda-nn/encodings/oneblob.h>
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
-
 
 namespace tcnn {
 
@@ -73,6 +76,16 @@ auto register_builtin_encodings() {
 	register_encoding<T>(factories, "HashGrid", grid_factory);
 	register_encoding<T>(factories, "TiledGrid", grid_factory);
 	register_encoding<T>(factories, "DenseGrid", grid_factory);
+
+#if !defined(TCNN_NO_FWD_BWD)
+	register_encoding<T>(factories, "Permuto", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return create_permuto_encoding<T>(n_dims_to_encode, encoding);
+	});
+
+	register_encoding<T>(factories, "MultiLevelEncodingLoD", [](uint32_t n_dims_to_encode, const json& encoding) {
+		return new MultiLevelEncodingLoD<T>{n_dims_to_encode, encoding};
+	});
+#endif
 
 	register_encoding<T>(factories, "Identity", [](uint32_t n_dims_to_encode, const json& encoding) {
 		return new IdentityEncoding<T>{n_dims_to_encode, encoding.value("scale", 1.0f), encoding.value("offset", 0.0f)};
