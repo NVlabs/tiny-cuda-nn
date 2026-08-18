@@ -194,7 +194,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			auto g = jit_guard(stream, use_inference_params);
@@ -242,7 +242,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			auto g = jit_guard(stream, use_inference_params);
@@ -322,7 +322,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			auto forward = std::make_unique<JitForwardContext>();
@@ -428,7 +428,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			const auto& forward = dynamic_cast<const JitForwardContext&>(ctx);
@@ -549,7 +549,7 @@ public:
 				log_warning("{}\nFailed to JIT-compile `{}`. Disabling JIT.", e.what(), name);
 				return std::unique_ptr<CudaRtcKernel>{};
 			}
-		}).get();
+		});
 
 		if (jit_kernel) {
 			const auto& forward = dynamic_cast<const JitForwardContext&>(ctx);
@@ -752,11 +752,11 @@ private:
 		GPUMemoryArena::Allocation data;
 	};
 
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_inference_mp_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_inference_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_forward_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_backward_kernel;
-	Lazy<std::unique_ptr<CudaRtcKernel>> m_jit_fused_backward_backward_input_kernel;
+	CudaRtcKernelCache m_jit_fused_inference_mp_kernel;
+	CudaRtcKernelCache m_jit_fused_inference_kernel;
+	CudaRtcKernelCache m_jit_fused_forward_kernel;
+	CudaRtcKernelCache m_jit_fused_backward_kernel;
+	CudaRtcKernelCache m_jit_fused_backward_backward_input_kernel;
 
 	bool m_jit_fusion = false;
 	bool m_in_jit_guard = false;

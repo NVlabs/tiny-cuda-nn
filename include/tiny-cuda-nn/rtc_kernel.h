@@ -32,6 +32,9 @@
 
 #include <cuda.h>
 
+#include <mutex>
+#include <unordered_map>
+
 #ifdef TCNN_CMRC
 namespace cmrc { class embedded_filesystem; }
 namespace tcnn { std::vector<std::pair<std::string, const char*>> all_files(const cmrc::embedded_filesystem& fs, const std::string& dir = ""); }
@@ -81,8 +84,34 @@ public:
 	}
 
 private:
+	CUcontext m_context = {};
 	CUmodule m_module = {};
 	CUfunction m_kernel = {};
+};
+
+class CudaRtcKernelCache {
+public:
+	template <typename F>
+	CudaRtcKernel* get(F&& generator) {
+		std::lock_guard<std::mutex> lock{m_mutex};
+		CUcontext context = {};
+		CU_CHECK_THROW(cuCtxGetCurrent(&context));
+		CHECK_THROW(context);
+		auto& kernel = m_kernels[context];
+		if (!kernel) {
+			kernel = generator();
+		}
+		return kernel.get();
+	}
+
+	void clear() {
+		std::lock_guard<std::mutex> lock{m_mutex};
+		m_kernels.clear();
+	}
+
+private:
+	std::unordered_map<CUcontext, std::unique_ptr<CudaRtcKernel>> m_kernels;
+	std::mutex m_mutex;
 };
 
 }
