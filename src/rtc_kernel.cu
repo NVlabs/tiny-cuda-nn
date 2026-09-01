@@ -73,6 +73,9 @@ CudaRtcKernel::CudaRtcKernel(const std::string& name, const std::string& kernel_
 
 CudaRtcKernel::~CudaRtcKernel() {}
 void CudaRtcKernel::clear() {}
+void CudaRtcKernel::set(CUfunction_attribute, int) {
+	throw std::runtime_error{"tiny-cuda-nn was not compiled with runtime compilation (RTC) support."};
+}
 
 }
 #else
