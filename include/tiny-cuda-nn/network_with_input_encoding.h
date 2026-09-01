@@ -67,6 +67,7 @@ public:
 		return m_encoding->padded_output_width();
 	}
 
+#if !defined(TCNN_INFERENCE_ONLY)
 	std::unique_ptr<Context> forward_impl(cudaStream_t stream, const GPUMatrixDynamic<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override {
 		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
@@ -111,6 +112,7 @@ public:
 			);
 		}
 	}
+#endif // !defined(TCNN_INFERENCE_ONLY)
 
 	void set_params_impl(T* params, T* inference_params, T* gradients) override {
 		size_t offset = 0;
