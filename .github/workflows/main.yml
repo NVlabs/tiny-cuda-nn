@@ -76,10 +76,14 @@ jobs:
       matrix:
         include:
           - os: windows-2025
+            visual_studio: "Visual Studio 18 2026"
+            cuda: "13.2.0"
+            arch: 120
+          - os: windows-2022
             visual_studio: "Visual Studio 17 2022"
             cuda: "13.0.0"
             arch: 120
-          - os: windows-2025
+          - os: windows-2022
             visual_studio: "Visual Studio 17 2022"
             cuda: "12.9.1"
             arch: 89
