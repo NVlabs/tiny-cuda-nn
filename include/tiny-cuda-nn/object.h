@@ -280,7 +280,9 @@ public:
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	)
-#if defined(TCNN_NO_FWD_BWD)
+#if defined(TCNN_INFERENCE_ONLY)
+	{ throw std::runtime_error{"tiny-cuda-nn was compiled with offline inference support only. Enable JIT fusion or rebuild without TCNN_BUILD_INFERENCE_ONLY to use forward / backward."}; }
+#elif defined(TCNN_NO_FWD_BWD)
 	{ throw std::runtime_error{"tiny-cuda-nn was compiled without forward / backward support. You must call `set_jit_fusion(true)` on each model before using it."}; }
 #else
 	= 0;
@@ -358,7 +360,9 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	)
-#if defined(TCNN_NO_FWD_BWD)
+#if defined(TCNN_INFERENCE_ONLY)
+	{ throw std::runtime_error{"tiny-cuda-nn was compiled with offline inference support only. Enable JIT fusion or rebuild without TCNN_BUILD_INFERENCE_ONLY to use forward / backward."}; }
+#elif defined(TCNN_NO_FWD_BWD)
 	{ throw std::runtime_error{"tiny-cuda-nn was compiled without forward / backward support. You must call `set_jit_fusion(true)` on each model before using it."}; }
 #else
 	= 0;
@@ -476,7 +480,9 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	)
-#if defined(TCNN_NO_FWD_BWD)
+#if defined(TCNN_INFERENCE_ONLY)
+	{ throw std::runtime_error{"tiny-cuda-nn was compiled with offline inference support only. Enable JIT fusion or rebuild without TCNN_BUILD_INFERENCE_ONLY to use forward / backward."}; }
+#elif defined(TCNN_NO_FWD_BWD)
 	{ throw std::runtime_error{"tiny-cuda-nn was compiled without forward / backward support."}; }
 #else
 	{ throw std::runtime_error{fmt::format("{} does not support double backward.", this->name())}; }

@@ -197,6 +197,8 @@ tiny-cuda-nn$ cmake . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 tiny-cuda-nn$ cmake --build build --config RelWithDebInfo -j
 ```
 
+For static deployments that only need inference, pass `-DTCNN_BUILD_INFERENCE_ONLY=ON` to CMake. This excludes training-only forward and backward implementations while keeping network inference and encoding evaluation available.
+
 If compilation fails inexplicably or takes longer than an hour, you might be running out of memory. Try running the above command without `-j` in that case.
 
 

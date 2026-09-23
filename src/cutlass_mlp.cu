@@ -159,6 +159,7 @@ void CutlassMLP<T>::inference_mixed_precision_impl(cudaStream_t stream, const GP
 	}
 }
 
+#if !defined(TCNN_INFERENCE_ONLY)
 template <typename T>
 std::unique_ptr<Context> CutlassMLP<T>::forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
 	// If there are no hidden layers, the network is just a simple matmul. No tmp buffers required
@@ -314,6 +315,7 @@ void CutlassMLP<T>::backward_impl(
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
+#endif // !defined(TCNN_INFERENCE_ONLY)
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 template <typename T>

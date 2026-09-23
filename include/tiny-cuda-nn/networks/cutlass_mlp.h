@@ -54,6 +54,7 @@ public:
 #if !defined(TCNN_NO_FWD_BWD)
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
+#if !defined(TCNN_INFERENCE_ONLY)
 	std::unique_ptr<Context> forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_params = false, bool prepare_input_gradients = false) override;
 
 	void backward_impl(
@@ -66,6 +67,7 @@ public:
 		bool use_inference_params = false,
 		GradientMode param_gradients_mode = GradientMode::Overwrite
 	) override;
+#endif // !defined(TCNN_INFERENCE_ONLY)
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 	void set_params_impl(T* params, T* inference_params, T* gradients) override;

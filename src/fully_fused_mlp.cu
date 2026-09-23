@@ -705,6 +705,7 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream
 	}
 }
 
+#if !defined(TCNN_INFERENCE_ONLY)
 template <typename T, uint32_t WIDTH>
 std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>* output, bool use_inference_params, bool prepare_input_gradients) {
 	// Make sure our temporary buffers have the correct size for the given batch size
@@ -835,6 +836,7 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
+#endif // !defined(TCNN_INFERENCE_ONLY)
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 template <typename T, uint32_t WIDTH>

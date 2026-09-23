@@ -146,6 +146,7 @@ public:
 		return forward;
 	}
 
+#if !defined(TCNN_INFERENCE_ONLY)
 	void backward_impl(
 		cudaStream_t stream,
 		const Context& ctx,
@@ -171,6 +172,7 @@ public:
 			dL_dinput->view()
 		);
 	}
+#endif // !defined(TCNN_INFERENCE_ONLY)
 #endif // !defined(TCNN_NO_FWD_BWD)
 
 	uint32_t input_width() const override {
