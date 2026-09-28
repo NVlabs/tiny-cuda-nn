@@ -1748,7 +1748,7 @@ create_grid_encoding_templated_2(uint32_t n_dims_to_encode, const json& encoding
 	n_features, \
 	log2_hashmap_size, \
 	base_resolution, \
-	encoding.value("per_level_scale", grid_type == GridType::Dense ? std::exp(std::log(256.0f / (float)base_resolution) / (n_levels-1)) : 2.0f), \
+	encoding.value("per_level_scale", grid_type == GridType::Dense && n_levels > 1 ? std::exp(std::log(256.0f / (float)base_resolution) / (n_levels-1)) : 2.0f), \
 	encoding.value("stochastic_interpolation", false), \
 	string_to_interpolation_type(encoding.value("interpolation", "Linear")), \
 	grid_type, \
@@ -1794,7 +1794,7 @@ create_grid_encoding_templated_2(uint32_t n_dims_to_encode, const json& encoding
 	n_features, \
 	log2_hashmap_size, \
 	base_resolution, \
-	encoding.value("per_level_scale", grid_type == GridType::Dense ? std::exp(std::log(256.0f / (float)base_resolution) / (n_levels-1)) : 2.0f), \
+	encoding.value("per_level_scale", grid_type == GridType::Dense && n_levels > 1 ? std::exp(std::log(256.0f / (float)base_resolution) / (n_levels-1)) : 2.0f), \
 	encoding.value("stochastic_interpolation", false), \
 	string_to_interpolation_type(encoding.value("interpolation", "Linear")), \
 	grid_type, \

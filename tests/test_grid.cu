@@ -90,3 +90,49 @@ TEST_CASE("GridEncoding sanity checks", "[encoding]") {
 	std::vector<float> result_host(output.n_elements());
 	CUDA_CHECK_THROW(cudaMemcpy(result_host.data(), output.data(), output.n_bytes(), cudaMemcpyDeviceToHost));
 }
+
+TEST_CASE("DenseGrid with a single level", "[encoding]") {
+	tcnn_test_setup();
+
+	// Without an explicit per_level_scale, dense grids derive one from n_levels. This must stay finite for n_levels=1.
+	const char* config = R"({
+		"otype": "DenseGrid",
+		"n_levels": 1,
+		"n_features_per_level": 2,
+		"base_resolution": 16
+	})";
+	nlohmann::json config_json = nlohmann::json::parse(config);
+	std::unique_ptr<MultiLevelEncoding<float>> g{dynamic_cast<MultiLevelEncoding<float>*>(create_encoding<float>(3, config_json))};
+
+	REQUIRE(g);
+	REQUIRE(g->level_n_params(0) == 16 * 16 * 16);
+	REQUIRE(g->n_params() == 16 * 16 * 16 * 2);
+
+	std::vector<float> params_host(g->n_params());
+	for (size_t i = 0; i < params_host.size(); ++i) {
+		params_host[i] = (float)(i % 7) * 0.25f - 0.5f;
+	}
+
+	GPUMemory<float> params(params_host.size());
+	params.copy_from_host(params_host);
+	g->set_params(params.data(), params.data(), nullptr);
+
+	const uint32_t batch_size = BATCH_SIZE_GRANULARITY;
+	std::vector<float> input_host(3 * batch_size);
+	for (size_t i = 0; i < input_host.size(); ++i) {
+		input_host[i] = (float)((i * 37) % 101) / 101.0f;
+	}
+
+	GPUMatrix<float> input(3, batch_size);
+	CUDA_CHECK_THROW(cudaMemcpy(input.data(), input_host.data(), input.n_bytes(), cudaMemcpyHostToDevice));
+	GPUMatrix<float> output(g->padded_output_width(), batch_size);
+	g->forward(input, &output);
+
+	std::vector<float> output_host(output.n_elements());
+	CUDA_CHECK_THROW(cudaMemcpy(output_host.data(), output.data(), output.n_bytes(), cudaMemcpyDeviceToHost));
+	size_t n_nonfinite = 0;
+	for (float v : output_host) {
+		n_nonfinite += !std::isfinite(v);
+	}
+	REQUIRE(n_nonfinite == 0);
+}
