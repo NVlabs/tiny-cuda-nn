@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -33,7 +33,27 @@
 
 #include <tiny-cuda-nn/encoding.h>
 
+#include <algorithm>
+
 using namespace tcnn;
+
+#if defined(TCNN_NO_FWD_BWD)
+TEST_CASE("Offline-only encodings are absent without forward and backward", "[encoding][no-fwd-bwd]") {
+	const auto encodings = builtin_encodings();
+	const auto contains = [&encodings](const char* name) { return std::find(encodings.begin(), encodings.end(), name) != encodings.end(); };
+
+	REQUIRE_FALSE(contains("Permuto"));
+	REQUIRE_FALSE(contains("MultiLevelEncodingLoD"));
+	const json permuto_config = {
+		{"otype", "Permuto"}
+	};
+	const json lod_config = {
+		{"otype", "MultiLevelEncodingLoD"}
+	};
+	REQUIRE_THROWS_AS(create_encoding<float>(5, permuto_config, 16), std::runtime_error);
+	REQUIRE_THROWS_AS(create_encoding<float>(6, lod_config, 16), std::runtime_error);
+}
+#endif
 
 TEMPLATE_TEST_CASE("Various invariance checks for input encodings", "[encoding][jit]", network_precision_t, float) {
 	using T = TestType;
@@ -41,6 +61,10 @@ TEMPLATE_TEST_CASE("Various invariance checks for input encodings", "[encoding][
 	tcnn_test_setup();
 
 	for (const auto& encoding_name : builtin_encodings()) {
+		if (equals_case_insensitive(encoding_name, "Permuto") || equals_case_insensitive(encoding_name, "MultiLevelEncodingLoD")) {
+			continue;
+		}
+
 		SECTION(fmt::format("Testing {}", encoding_name)) {
 			// Typical number of input dims is 3D (e.g. 3D space), but we need to special-case for some encodings that require more.
 			const uint32_t n_dims = equals_case_insensitive(encoding_name, "NRC") || equals_case_insensitive(encoding_name, "OneBlobFrequency") ? 8 : 3;
@@ -52,3 +76,56 @@ TEMPLATE_TEST_CASE("Various invariance checks for input encodings", "[encoding][
 		}
 	}
 }
+
+#if !defined(TCNN_NO_FWD_BWD)
+TEMPLATE_TEST_CASE("Identity double backward", "[encoding][double-backward]", network_precision_t, float) {
+	using T = TestType;
+
+	tcnn_test_setup();
+
+	const uint32_t n_dims = 3;
+	const uint32_t batch_size = 256;
+	const float scale = 2.0f;
+	const json config = {
+		{"otype", "Identity"},
+		{"scale", scale},
+		{"offset", 0.5f},
+	};
+	std::shared_ptr<Encoding<T>> encoding{create_encoding<T>(n_dims, config, 16)};
+	const uint32_t n_outputs = encoding->padded_output_width();
+	REQUIRE(n_outputs > n_dims);
+
+	for (const auto layout : {CM, RM}) {
+		CAPTURE(layout == CM);
+
+		pcg32 rng{1337};
+		GPUMatrix<float> input{n_dims, batch_size};
+		GPUMatrix<float> dL_ddLdinput{n_dims, batch_size};
+		GPUMatrixDynamic<T> dL_doutput{n_outputs, batch_size, layout};
+		GPUMatrixDynamic<T> dL_ddLdoutput{n_outputs, batch_size, layout};
+		GPUMatrix<float> dL_dinput{n_dims, batch_size};
+		input.initialize_uniform(rng, -1.0f, 1.0f);
+		dL_ddLdinput.initialize_uniform(rng, -1.0f, 1.0f);
+		dL_doutput.initialize_uniform(rng, -1.0f, 1.0f);
+		dL_ddLdoutput.initialize_uniform(rng, 1.0f, 2.0f);
+		dL_dinput.initialize_uniform(rng, 1.0f, 2.0f);
+
+		auto ctx = encoding->forward(input, nullptr, false, true);
+		encoding->backward_backward_input(*ctx, input, dL_ddLdinput, dL_doutput, &dL_ddLdoutput, &dL_dinput);
+
+		const auto second_order = dL_ddLdinput.to_cpu_vector();
+		const auto upstream = dL_ddLdoutput.to_cpu_vector();
+		for (uint32_t i = 0; i < batch_size; ++i) {
+			for (uint32_t j = 0; j < n_outputs; ++j) {
+				const float actual = (float)upstream[layout == CM ? i * n_outputs + j : j * batch_size + i];
+				const float expected = j < n_dims ? scale * second_order[i * n_dims + j] : 0.0f;
+				CAPTURE(i, j);
+				REQUIRE(actual == Approx(expected).epsilon(1e-2).margin(1e-3));
+			}
+		}
+
+		const auto input_gradient = dL_dinput.to_cpu_vector();
+		REQUIRE(std::all_of(input_gradient.begin(), input_gradient.end(), [](float value) { return value == 0.0f; }));
+	}
+}
+#endif
