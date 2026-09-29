@@ -489,7 +489,7 @@ inline void parallel_for_gpu_soa(uint32_t shmem_size, cudaStream_t stream, size_
 
 	const dim3 blocks = { n_blocks_linear(n_elements), n_dims, 1 };
 
-	parallel_for_soa_kernel<<<n_blocks_linear(n_elements), N_THREADS_LINEAR, shmem_size, stream>>>(
+	parallel_for_soa_kernel<<<blocks, N_THREADS_LINEAR, shmem_size, stream>>>(
 		n_elements, n_dims, fun
 	);
 }
