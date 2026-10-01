@@ -161,6 +161,7 @@ class _module_function(torch.autograd.Function):
 class _module_function_backward(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, ctx_fwd, doutput, input, params, output):
+		ctx.set_materialize_grads(False)
 		ctx.ctx_fwd = ctx_fwd
 		ctx.save_for_backward(input, params, doutput)
 		with torch.no_grad():
@@ -178,7 +179,8 @@ class _module_function_backward(torch.autograd.Function):
 		#       ✓   d(dL_dinput)_d(input)       input_grad
 		#       x   d(dL_dparam)_d(...)
 		input, params, doutput = ctx.saved_tensors
-		# assert dparams_grad is None, "currently do not support 2nd-order gradients from gradient of grid"
+		if dparams_grad is not None:
+			raise NotImplementedError("Second-order gradients through parameter gradients are not supported")
 		with torch.enable_grad():
 			# NOTE: preserves requires_grad info (this function is in no_grad() context by default when invoking loss.backward())
 			doutput = doutput * ctx.ctx_fwd.loss_scale
