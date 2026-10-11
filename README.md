@@ -10,6 +10,11 @@ _Fully fused networks vs. TensorFlow v2.5.0 w/ XLA. Measured on 64 (solid line) 
 
 ## Usage
 
+`FullyFusedMLP` supports `Sine` for inference and native first-order training.
+The default backward mode saves pre-activations; an opt-in approximate `SignRecon`
+mode is available for a restricted set of layouts and GPUs. See [Sine activation](docs/sine.md)
+for its numerical tradeoffs, compatibility limits, tests, and benchmarks.
+
 Tiny CUDA neural networks have a simple C++/CUDA API:
 
 ```cpp

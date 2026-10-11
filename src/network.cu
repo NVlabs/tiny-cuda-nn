@@ -55,6 +55,9 @@ std::string select_network(const json& network) {
 
 	// If the GPU architecture is insufficient for
 	if (MIN_GPU_ARCH <= 70 || std::is_same<network_precision_t, float>::value) {
+		if (want_fully_fused_mlp && !equals_case_insensitive(network.value("sine_backward_mode", std::string{"SavedZ"}), "SavedZ")) {
+			throw std::runtime_error{"SignRecon requires a native FP16 FullyFusedMLP; it cannot fall back to CutlassMLP."};
+		}
 		if (want_fully_fused_mlp && MIN_GPU_ARCH <= 70) {
 			log_warning(
 				"FullyFusedMLP is not supported for the selected architecture {}. Falling back to CutlassMLP. "
@@ -111,7 +114,8 @@ Network<T>* create_network(const json& network) {
 	network["n_output_dims"], \
 	network.value("n_hidden_layers", 5u), \
 	string_to_activation(network.value("activation", "ReLU")), \
-	string_to_activation(network.value("output_activation", "None")),
+	string_to_activation(network.value("output_activation", "None")), \
+	network.value("sine_backward_mode", std::string{"SavedZ"}),
 
 			uint32_t n_neurons = network.value("n_neurons", 128u);
 			switch (n_neurons) {
