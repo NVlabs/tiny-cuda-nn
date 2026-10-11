@@ -353,6 +353,13 @@ __host__ __device__ tvec<T, N, A> vec_activation_backward_in(Activation activati
 }
 
 template <typename T>
+__host__ __device__ inline T sine_cosine_from_output(T output, bool negative) {
+	const float h = (float)output;
+	const float magnitude = sqrtf(fmaxf(0.0f, 1.0f - h * h));
+	return (T)(negative ? -magnitude : magnitude);
+}
+
+template <typename T>
 __host__ __device__ T activation_backward_in(Activation activation, T val, T forward_val_in) {
 	return vec_activation_backward_in(activation, tvec<T, 1>{val}, tvec<T, 1>{forward_val_in})[0];
 }

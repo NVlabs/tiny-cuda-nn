@@ -42,7 +42,7 @@ namespace tcnn {
 template <typename T, uint32_t WIDTH>
 class FullyFusedMLP : public Network<T> {
 public:
-	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, Activation activation, Activation output_activation);
+	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, Activation activation, Activation output_activation, const std::string& sine_backward_mode = "SavedZ");
 
 #if !defined(TCNN_NO_FWD_BWD)
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
@@ -149,16 +149,23 @@ public:
 	}
 
 	json hyperparams() const override {
-		return {
+		json result = {
 			{"otype", "FullyFusedMLP"},
 			{"activation", to_string(m_activation)},
 			{"output_activation", to_string(m_output_activation)},
 			{"n_neurons", m_network_width},
 			{"n_hidden_layers", m_n_hidden_layers},
 		};
+		if (m_activation == Activation::Sine) {
+			result["sine_backward_mode"] = m_sine_sign_reconstruction ? "SignRecon" : "SavedZ";
+		}
+		return result;
 	}
 
 	std::string generate_device_function(const std::string& name) const override {
+		if (m_sine_sign_reconstruction) {
+			throw std::runtime_error{"SignRecon requires native FullyFusedMLP execution; disable JIT fusion."};
+		}
 		return this->generate_device_function_from_body(
 			name,
 			generate_mlp_device_code<T>(
@@ -174,6 +181,9 @@ public:
 	}
 
 	std::string generate_backward_device_function(const std::string& name, uint32_t n_threads) const override {
+		if (m_sine_sign_reconstruction) {
+			throw std::runtime_error{"SignRecon requires native FullyFusedMLP execution; disable JIT fusion."};
+		}
 		return this->generate_backward_device_function_from_body(
 			name,
 			generate_backward_mlp_device_code<T>(
@@ -236,6 +246,11 @@ private:
 	struct ForwardContext : public Context {
 		std::vector<GPUMatrix<T>> hidden;
 		GPUMemoryArena::Allocation alloc;
+		std::vector<GPUMatrix<T>> pre_activation;
+		GPUMemoryArena::Allocation pre_activation_alloc;
+		GPUMemoryArena::Allocation cosine_sign_alloc;
+		uint32_t* cosine_signs = nullptr;
+		GPUMatrixDynamic<T> output_pre_activation;
 	};
 
 	std::unique_ptr<ForwardContext> allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size);
@@ -249,6 +264,7 @@ private:
 
 	Activation m_activation;
 	Activation m_output_activation;
+	bool m_sine_sign_reconstruction = false;
 
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;

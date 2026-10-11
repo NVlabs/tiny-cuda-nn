@@ -187,6 +187,16 @@ int main(int argc, char* argv[]) {
 		// Fourth step: train the model by sampling the above image and optimizing relative squared error using Adam.
 		std::vector<uint32_t> batch_sizes = {1 << 21, 1 << 20, 1 << 19, 1 << 18, 1 << 17, 1 << 16, 1 << 15, 1 << 14};
 		std::vector<std::string> methods = {"fully_fused", "cutlass"};
+		if (argc > 3) {
+			if (argc != 5) { throw std::runtime_error{"Usage: image config [fully_fused|cutlass batch_size]"}; }
+			const std::string method = argv[3];
+			const uint32_t batch = (uint32_t)std::stoul(argv[4]);
+			if ((method != "fully_fused" && method != "cutlass") || batch < (1u << 14) || batch > (1u << 21) || (batch & (batch - 1u))) {
+				throw std::runtime_error{"Select an original method and power-of-two batch from 16384 to 2097152."};
+			}
+			methods = {method};
+			batch_sizes = {batch};
+		}
 		json bench_result;
 
 		for (std::string method : methods) {
@@ -336,6 +346,7 @@ int main(int argc, char* argv[]) {
 		out << json_string;
 	} catch (std::exception& e) {
 		std::cout << "Uncaught exception: " << e.what() << std::endl;
+		return EXIT_FAILURE;
 	}
 
 
