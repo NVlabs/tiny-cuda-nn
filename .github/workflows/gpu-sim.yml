@@ -1,0 +1,98 @@
+name: CUDA tests (simulated H100)
+
+# Optional, non-required check. The hosted runners have no GPU, so this builds
+# the tests and runs them on a simulated NVIDIA H100
+# (https://github.com/pantheongpu/pantheonsim). A simulator cannot reproduce
+# hardware-specific behavior or timing, so it complements real-GPU testing and
+# does not replace it.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "include/**"
+      - "src/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/gpu-sim.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-sim:
+    name: CUDA 13.0, simulated H100
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 1G
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up the simulated GPU and CUDA toolkit
+        uses: pantheongpu/setup-pantheonsim@ca87fe3143b29166822b923d6050945c5179408c # v0.1.5
+        with:
+          gpu: nvidia/h100
+          cuda-toolkit: "13.0"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ccache ninja-build
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-gpu-sim-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-gpu-sim-${{ github.ref_name }}-
+            ccache-gpu-sim-
+
+      # The simulator runs PTX only (90-virtual) and needs a shared CUDA
+      # runtime. Runtime compilation stays on (TCNN_BUILD_WITH_RTC=OFF does not
+      # link at the moment: CudaRtcKernel::set is undefined).
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.0/bin/nvcc \
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DTCNN_CUDA_ARCHITECTURES=90-virtual \
+            -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared \
+            -DTCNN_BUILD_TESTS=1 \
+            -DTCNN_BUILD_BENCHMARK=OFF \
+            -DTCNN_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        run: |
+          ccache --zero-stats
+          cmake --build build -j3
+          ccache --show-stats
+
+      # test_networks is split: its "Various invariance checks" and "FullyFusedMLP
+      # non-JIT double backward" cases fail on the simulator (they pass on a
+      # real GPU), so only the empty-batch case is run for now.
+      - name: Test
+        working-directory: build
+        run: |
+          vgpu run ctest --output-on-failure --timeout 3000 -E '^test_networks$'
+          vgpu run ./test_networks "NetworkWithInputEncoding empty-batch activations"
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-gpu-sim-${{ github.ref_name }}-${{ github.run_id }}
